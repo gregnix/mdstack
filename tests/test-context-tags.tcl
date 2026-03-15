@@ -40,10 +40,10 @@ set doc [mdmodel::new $ast]
 wm title . "Kontext-Tags Test"
 wm geometry . 700x500
 
-set v [mdviewer::create .v]
-pack $v -fill both -expand 1
+set ctx_v [mdviewer::create .ctx_v]
+pack $ctx_v -fill both -expand 1
 
-mdviewer::renderModel $v $doc
+mdviewer::renderModel $ctx_v $doc
 
 puts "Test window opened."
 puts "Please check:"

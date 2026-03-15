@@ -218,7 +218,7 @@ set r [mdvalidator::report $ast]
 assert "C1: report valid" {[string match "*valide*" $r]}
 
 set r [mdvalidator::report [dict create type paragraph]]
-assert "C2: report errors" {[string match "*Fehler*" $r]}
+assert "C2: report errors" {[string match "*error*" $r] || [string match "*Fehler*" $r]}
 
 # =========================================================================
 # D: Strict-Modus

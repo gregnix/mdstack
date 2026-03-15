@@ -1,8 +1,5 @@
 # pdf4tcllib-0.1.tm -- Extension library for pdf4tcl
 #
-# Copyright (c) 2026 Gregor Ebbing
-# MIT License -- see LICENSE file in project root
-#
 # Single file: all modules in one file.
 # No external dependencies except pdf4tcl itself.
 #

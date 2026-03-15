@@ -57,8 +57,6 @@ proc mdsearch::find {viewerPath pattern} {
 
     set matches {}
     # Text widget must briefly be normal for tag add
-    set wasDisabled [expr {[$t cget -state] eq "disabled"}]
-    if {$wasDisabled} { $t configure -state normal }
 
     set start 1.0
     while {1} {
@@ -69,7 +67,6 @@ proc mdsearch::find {viewerPath pattern} {
         set start "$pos + $len chars"
     }
 
-    if {$wasDisabled} { $t configure -state disabled }
 
     set state($viewerPath,matches) $matches
     set state($viewerPath,currentIdx) -1
@@ -116,8 +113,6 @@ proc mdsearch::_gotoIdx {viewerPath idx} {
 
     set t [mdviewer::widget $viewerPath]
     set matches $state($viewerPath,matches)
-    set wasDisabled [expr {[$t cget -state] eq "disabled"}]
-    if {$wasDisabled} { $t configure -state normal }
 
     # Remove old current tag
     $t tag remove searchcurrent 1.0 end
@@ -130,7 +125,6 @@ proc mdsearch::_gotoIdx {viewerPath idx} {
         $t tag add searchcurrent [lindex $range 0] [lindex $range 1]
     }
 
-    if {$wasDisabled} { $t configure -state disabled }
 
     $t see $pos
     set state($viewerPath,currentIdx) $idx
@@ -141,13 +135,10 @@ proc mdsearch::clearHighlight {viewerPath} {
     variable state
 
     set t [mdviewer::widget $viewerPath]
-    set wasDisabled [expr {[$t cget -state] eq "disabled"}]
-    if {$wasDisabled} { $t configure -state normal }
 
     $t tag remove searchmatch 1.0 end
     $t tag remove searchcurrent 1.0 end
 
-    if {$wasDisabled} { $t configure -state disabled }
 
     set state($viewerPath,matches) {}
     set state($viewerPath,currentIdx) -1

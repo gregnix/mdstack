@@ -11,18 +11,18 @@ tcl::tm::path add [file join $dir .. lib]
 
 package require mdparser 0.2
 
-set pass 0
-set fail 0
+set passed 0
+set failed 0
 set total 0
 set script [file tail [info script]]
 
 proc assert {label condition} {
-    upvar pass pass fail fail total total script script
+    upvar passed passed failed failed total total script script
     incr total
     if {[uplevel 1 [list expr $condition]]} {
-        incr pass
+        incr passed
     } else {
-        incr fail
+        incr failed
         puts "  FAIL: $label"
     }
 }
@@ -169,4 +169,4 @@ assert "table-mixed: has code" {[dict get [lindex $cell 2] type] eq "inline_code
 # Result
 # ============================================================
 
-puts "$script:\tTotal\t$total\tPassed\t$pass\tSkipped\t0\tFailed\t$fail"
+puts "$script:\tTotal\t$total\tPassed\t$passed\tSkipped\t0\tFailed\t$failed"

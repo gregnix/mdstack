@@ -6,12 +6,13 @@ source [file join $dir .. lib mdparser-0.2.tm]
 source [file join $dir .. lib docir-md-0.1.tm]
 
 # Minimales Test-Framework
-set _pass 0; set _fail 0
+set passed 0; set failed 0; set total 0
 proc test {name body} {
+    upvar 1 passed passed failed failed total total
     if {[catch {uplevel 1 $body} err]} {
-        puts "FAIL $name: $err"; incr ::_fail
+        puts "FAIL $name: $err"; incr failed; incr total
     } else {
-        puts "OK   $name"; incr ::_pass
+        puts "OK   $name"; incr passed; incr total
     }
 }
 proc assert {cond msg} { if {![uplevel 1 [list expr $cond]]} { error $msg } }
@@ -188,5 +189,5 @@ test "yaml.frontmatter_title" {
 
 # ============================================================
 puts ""
-puts "=== Ergebnis: $_pass OK, $_fail FAIL ==="
-if {$_fail > 0} { exit 1 }
+puts "=== Ergebnis: $passed OK, $failed FAIL ==="
+if {$failed > 0} { exit 1 }

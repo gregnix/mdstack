@@ -53,3 +53,49 @@ mdpdf::exportFile $mdFile $outEnc \
 puts "Written: $outEnc  (user password: demo)"
 puts ""
 puts "Done. PDFs in: $pdfDir"
+
+# --- 4. Theme-Export (hell / dunkel / solarized) ---
+package require mdtheme 0.1
+
+set md2 {# mdpdf Theme Demo
+
+Demonstrates **mdpdf** with different **mdtheme** themes.
+
+## Text Formatting
+
+**Bold**, *italic*, `code`, ~~strikethrough~~.
+
+A paragraph with a [clickable link](https://www.tcl.tk).
+
+## Blockquote
+
+> This is a blockquote with the current theme settings.
+
+## Code Block
+
+```tcl
+mdpdf::export $ast output.pdf -theme hell
+mdpdf::export $ast output.pdf -theme dunkel
+```
+
+## Table
+
+| Feature   | hell | dunkel | solarized |
+|-----------|:----:|:------:|:---------:|
+| fontsize  | 11pt | 11pt   | 11pt      |
+| colorLink | yes  | yes    | yes       |
+}
+
+set ast2 [mdparser::parse $md2]
+foreach theme [mdtheme::names] {
+    set outTheme [file join $pdfDir "mdpdf-theme-${theme}.pdf"]
+    mdpdf::export $ast2 $outTheme \
+        -title  "mdpdf -- Theme: $theme" \
+        -theme  $theme \
+        -toc    1 \
+        -header "Theme: $theme -- Page %p" \
+        -footer "- %p -"
+    puts "Written: $outTheme  (theme: $theme)"
+}
+puts ""
+puts "All done. PDFs in: $pdfDir"

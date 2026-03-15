@@ -511,32 +511,41 @@ proc mdparser::parseListBlock {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set n [llength $lines]
 
-    # Collect all contiguous list lines (any depth, same list type).
-    # A blank line only bridges to the next list item if the marker type
-    # (ordered vs unordered) matches the current list.
+    # Collect all contiguous list lines (any depth).
+    # Type-mismatch check (ordered vs unordered) applies only to markers at
+    # the same indent level as the first line -- nested markers (deeper indent)
+    # are always collected as sublist content.
     set listLines {}
 
-    # Determine type of first marker
+    # Determine type and base indent of first marker
     set firstLine [string trimright [lindex $lines $i]]
     set curOrdered [regexp {^[[:space:]]*[0-9]+\.[[:space:]]+} $firstLine]
+    regexp {^([[:space:]]*)} $firstLine -> _ws
+    set baseIndent [string length $_ws]
 
     while {$i < $n} {
         set cur [string trimright [lindex $lines $i]]
-        if {[regexp {^([[:space:]]*)(\*|-|[0-9]+\.)[[:space:]]+} $cur]} {
-            # Zeile mit List-Marker: nur aufnehmen wenn gleicher Typ
+        if {[regexp {^([[:space:]]*)(\*|-|[0-9]+\.)[[:space:]]+} $cur -> lineWs]} {
+            set lineIndent [string length $lineWs]
             set lineOrdered [regexp {^[[:space:]]*[0-9]+\.[[:space:]]+} $cur]
-            if {[llength $listLines] > 0 && $lineOrdered != $curOrdered} {
+            # Break on type mismatch only at top-level indent (sublist markers
+            # may freely differ from the outer list type)
+            if {[llength $listLines] > 0
+                    && $lineIndent <= $baseIndent
+                    && $lineOrdered != $curOrdered} {
                 break
             }
             lappend listLines $cur
             incr i
         } elseif {[string trim $cur] eq ""} {
-            # Leerzeile: nur behalten wenn danach noch List-Marker gleichen Typs folgt
+            # Blank line: continue only if next line is a top-level marker of
+            # the same type
             if {($i + 1) < $n} {
                 set next [string trimright [lindex $lines [expr {$i + 1}]]]
-                if {[regexp {^([[:space:]]*)(\*|-|[0-9]+\.)[[:space:]]+} $next]} {
+                if {[regexp {^([[:space:]]*)(\*|-|[0-9]+\.)[[:space:]]+} $next -> nextWs]} {
+                    set nextIndent [string length $nextWs]
                     set nextOrdered [regexp {^[[:space:]]*[0-9]+\.[[:space:]]+} $next]
-                    if {$nextOrdered != $curOrdered} {
+                    if {$nextIndent <= $baseIndent && $nextOrdered != $curOrdered} {
                         break
                     }
                     incr i

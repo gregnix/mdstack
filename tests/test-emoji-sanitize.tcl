@@ -49,11 +49,11 @@ proc utf8 {codepoint} {
 # Test-Framework
 # ============================================================
 
-set passed 0
-set failed 0
+set emoji_passed 0
+set emoji_failed 0
 
 proc test {name rawBytes expected} {
-    upvar passed passed failed failed
+    upvar emoji_passed emoji_passed emoji_failed emoji_failed
 
     # preprocessBytes auf rohe Bytes anwenden
     set processed [::pdf4tcllib::unicode::preprocessBytes $rawBytes]
@@ -61,10 +61,10 @@ proc test {name rawBytes expected} {
     set result [encoding convertfrom utf-8 $processed]
 
     if {$result eq $expected} {
-        incr passed
+        incr emoji_passed
         puts "  OK:   $name -> '$result'"
     } else {
-        incr failed
+        incr emoji_failed
         puts "  FAIL: $name"
         puts "        Erwartet: '$expected'"
         puts "        Erhalten: '$result'"
@@ -138,15 +138,15 @@ puts ""
 puts "=== sanitize BMP-Tests ==="
 
 proc testSanitize {name input expected} {
-    upvar passed passed failed failed
+    upvar emoji_passed emoji_passed emoji_failed emoji_failed
 
     set result [::pdf4tcllib::unicode::sanitize $input]
 
     if {$result eq $expected} {
-        incr passed
+        incr emoji_passed
         puts "  OK:   $name -> '$result'"
     } else {
-        incr failed
+        incr emoji_failed
         puts "  FAIL: $name"
         puts "        Erwartet: '$expected'"
         puts "        Erhalten: '$result'"
@@ -171,9 +171,9 @@ testSanitize "U+FFFD Fallback"  "\uFFFD"                  "(?)"
 
 puts ""
 puts "=== Ergebnis ==="
-puts "Bestanden: $passed  Fehlgeschlagen: $failed"
-if {$failed == 0} {
+puts "Bestanden: $emoji_passed  Fehlgeschlagen: $emoji_failed"
+if {$emoji_failed == 0} {
     puts "\nALLES OK"
 } else {
-    puts "\n$failed FEHLER"
+    puts "\n$emoji_failed FEHLER"
 }

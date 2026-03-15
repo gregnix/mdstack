@@ -1,17 +1,79 @@
 # Changelog
 
-## Version 0.3.1 (2026-03-14) -- Initial GitHub Release
+## Version 0.3.3 (2026-03-14)
 
-### Neu
+### Bug-fixes
 
-- **mdhtml 0.1** -- Markdown -> HTML Renderer (komplettiert Stack: HTML + PDF + Tk)
-- **mdtheme 0.1** -- Theme-System fuer HTML, PDF und Tk (hell, dunkel, solarized)
-- **tools/mdserver** -- HTTP/HTTPS Markdown Web Server (pure Tcl, kein Tk)
+- **mdviewer 0.3** -- Link tags had empty ranges: links did not respond to clicks.
+  Root cause: `set start [$t index end]` was called before inserting the link
+  label text. After rendering, both `start` and `end` pointed to the same
+  position (or `start > end` due to trailing newlines), so `tag add` silently
+  added nothing. The binding existed but was unreachable.
+  Fix: use `"end -1 chars"` instead of `end` for both `start` and `end`.
+  Applies to normal links and PDF-links.
+- **mdviewer 0.3** -- Task list items (`- [x]`) were rendered with
+  strikethrough (`-overstrike 1`) on the `taskdone` tag. Changed to grey
+  foreground only (`#999999`), no strikethrough.
+- **mdviewer-app-v2** -- Welcome document TOC links had wrong anchors:
+  `#tastenk-rzel` → `#keyboard-shortcuts`, `#tabellen` → `#tables`.
 
-### Erweiterungen
+### New features
 
-- **mdpdf 0.2** -- klickbare Hyperlinks, `-pdfa`, `-userpassword`, `-ownerpassword`, `-theme`
-- **mdtheme 0.1** -- `toCSS`, `toPdfOpts` fuer HTML- und PDF-Renderer
-
+- **mdviewer-app-v2** -- HTML export via `File → Export HTML…` (`Ctrl+H`),
+  optional (requires `mdhtml 0.1`).
+- **mdviewer-app-v2** -- Help viewer via `Help → Help…` (`F1`), opens
+  `help.md` in the viewer.
+- **demo/help.md** -- New help document for mdviewer-app-v2.
 
 ---
+
+## Version 0.3.2 (2026-03-14)
+
+### Bug-fixes
+
+- **mdparser 0.2** -- `parseListBlock`: Fixed nested-list bug.
+  Mixed-type nested lists (e.g. `1.` outer, `- ` inner) were parsed as
+  separate blocks instead of child nodes.
+  Root cause: ordered/unordered type check applied to all indent levels.
+  Fix: check only applies at `lineIndent <= baseIndent` (top-level markers).
+
+### Test improvements
+
+- **tests/all.tcl** -- Four-way split A/B/C/D: Core/Parser (headless),
+  Renderer (headless), GUI/Tk, PDF/Export.
+  New flags `--core`, `--gui`, `--pdf`.
+  Previously missing tests added: `parser-tip700`, `parser-tip700-t2t3`,
+  `validator`, `test-docir-md`.
+- **tests/basic.tcl** -- Core and GUI tests properly separated (Tk guard).
+- **tests/parser-inline-*.tcl** -- Counter variable names unified.
+- **tests/test-docir-md.tcl** -- Counter and `upvar` fixed.
+- **tests/validator.tcl** -- C2 test made language-independent.
+- Headless: **445 tests, 0 failures** | With Tk: **466 tests, 0 failures**
+
+### Documentation
+
+- **README.md** -- License corrected BSD→MIT, `mdvalidator` and `docir-md`
+  added, test runner instructions with flags.
+- **doc/manuals/mdparser.md** -- Nested lists documented.
+- **doc/manuals/mdvalidator.md** -- New.
+
+---
+
+## Version 0.3.1 (2026-03-14) -- Initial GitHub Release
+
+### New
+
+- **mdhtml 0.1** -- Markdown → HTML renderer (completes the stack: HTML + PDF + Tk)
+- **mdtheme 0.1** -- Shared theme system for HTML, PDF and Tk (light, dark, solarized)
+- **mdvalidator 0.1** -- AST validator (validate, report, strict mode)
+- **docir-md 0.1** -- mdparser AST → DocIR intermediate representation
+- **tools/mdserver** -- HTTP/HTTPS Markdown web server (pure Tcl, no Tk)
+
+### Enhancements
+
+- **mdpdf 0.2** -- Clickable hyperlinks, `-pdfa`, `-userpassword`,
+  `-ownerpassword`, `-theme`
+- **mdtheme 0.1** -- `toCSS`, `toPdfOpts` for HTML and PDF renderers
+- **mdparser 0.2** -- TIP-700 (bracketed spans, shortcut reference links),
+  YAML frontmatter, fenced divs, nested lists, multi-line items,
+  definition lists, reference links, inline features, backslash escapes

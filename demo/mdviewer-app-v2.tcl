@@ -24,7 +24,9 @@ package require mdviewer 0.3
 package require mdsearch 0.1
 
 # PDF-Export optional
-set ::hasPdf [expr {![catch {package require mdpdf 0.2}]}]
+set ::hasPdf  [expr {![catch {package require mdpdf  0.2}]}]
+# HTML-Export optional
+set ::hasHtml [expr {![catch {package require mdhtml 0.1}]}]
 
 # ============================================================
 # Globale Variablen
@@ -56,7 +58,12 @@ menu .menubar.file -tearoff 0
 .menubar.file add command -label "Reload"    -command cmd::reloadFile  -accelerator "Ctrl+R"
 .menubar.file add separator
 if {$::hasPdf} {
-    .menubar.file add command -label "Export PDF…" -command cmd::exportPdf -accelerator "Ctrl+P"
+    .menubar.file add command -label "Export PDF…" -command cmd::exportPdf  -accelerator "Ctrl+P"
+}
+if {$::hasHtml} {
+    .menubar.file add command -label "Export HTML…" -command cmd::exportHtml -accelerator "Ctrl+H"
+}
+if {$::hasPdf || $::hasHtml} {
     .menubar.file add separator
 }
 .menubar.file add command -label "Quit" -command exit -accelerator "Ctrl+Q"
@@ -72,6 +79,8 @@ menu .menubar.view -tearoff 0
 
 menu .menubar.help -tearoff 0
 .menubar add cascade -label "Help" -menu .menubar.help
+.menubar.help add command -label "Help..."  -command cmd::showHelp  -accelerator "F1"
+.menubar.help add separator
 .menubar.help add command -label "About..." -command cmd::showAbout
 
 # --- Keyboard Bindings ---
@@ -85,8 +94,12 @@ bind . <Control-plus>   {cmd::changeFontSize 1}
 bind . <Control-minus>  {cmd::changeFontSize -1}
 bind . <Control-Key-0>  {cmd::setFontSize 10}
 bind . <Escape>         cmd::hideSearch
+bind . <F1>             cmd::showHelp
 if {$::hasPdf} {
     bind . <Control-p> cmd::exportPdf
+}
+if {$::hasHtml} {
+    bind . <Control-h> cmd::exportHtml
 }
 
 # --- Suchleiste (oben, initial versteckt) ---
@@ -255,6 +268,42 @@ proc cmd::exportPdf {} {
 
     set ::statusText "PDF gespeichert: [file tail $outFile]"
     tk_messageBox -icon info -message "PDF erfolgreich exportiert:\n$outFile"
+}
+
+
+# --- HTML ---
+
+proc cmd::exportHtml {} {
+    if {$::currentDoc eq ""} {
+        tk_messageBox -icon info -message "No document loaded."
+        return
+    }
+
+    set initialFile [file rootname [file tail $::currentFile]].html
+    set outFile [tk_getSaveFile \
+        -defaultextension .html \
+        -filetypes {{"HTML" .html} {"All" *}} \
+        -initialfile $initialFile \
+        -title "Export HTML"]
+
+    if {$outFile eq ""} return
+
+    set ::statusText "Exporting HTMLâ¦"
+    update
+
+    if {[catch {
+        set ast [dict get $::currentDoc ast]
+        mdhtml::export $ast $outFile \
+            -title [file rootname [file tail $::currentFile]] \
+            -toc 1
+    } err]} {
+        tk_messageBox -icon error -message "HTML error:\n$err"
+        set ::statusText "HTML error"
+        return
+    }
+
+    set ::statusText "HTML saved: [file tail $outFile]"
+    tk_messageBox -icon info -message "HTML exported:\n$outFile"
 }
 
 # --- TOC ---
@@ -429,7 +478,18 @@ proc cmd::showAbout {} {
         append modules "\nmdpdf 0.2 (PDF-Export, pdf4tcllib)"
     }
     tk_messageBox -icon info -title "About Markdown Viewer" \
-        -message "Markdown Viewer v2\n\nmdstack 2.0 Showcase app\n\nModule:\n$modules\n\nShortcuts:\nCtrl+O  Open\nCtrl+F  Search\nCtrl+T  TOC\nCtrl+P  PDF\nCtrl+/-/0  Font size"
+        -message "Markdown Viewer v2\n\nmdstack 2.0 Showcase app\n\nModule:\n$modules\n\nShortcuts:\nCtrl+O  Open\nCtrl+F  Search\nCtrl+T  TOC\nCtrl+P  PDF\nCtrl+H  HTML\nCtrl+/-/0  Font size\nF1  Help"
+}
+
+
+proc cmd::showHelp {} {
+    set helpFile [file join [file dirname [info script]] help.md]
+    if {[file exists $helpFile]} {
+        cmd::loadFile $helpFile
+    } else {
+        tk_messageBox -icon info -title "Help" \
+            -message "Help file not found:\n$helpFile"
+    }
 }
 
 # ============================================================
@@ -445,11 +505,11 @@ Willkommen zur **mdstack 2.0** Showcase app!
 ## Table of Contents
 
 - [Features](#features)
-- [Keyboard Shortcuts](#tastenk-rzel)
+- [Keyboard Shortcuts](#keyboard-shortcuts)
 - [Suche](#suche)
 - [Blockquotes](#blockquotes)
 - [Code](#code)
-- [Tables](#tabellen)
+- [Tables](#tables)
 - [Listen](#listen)
 
 ---

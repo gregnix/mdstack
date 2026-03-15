@@ -18,7 +18,7 @@ package require mdparser 0.2
 package require mdtheme  0.1
 package require mdhtml   0.1
 
-set outdir [file join $scriptDir pdf]
+set outdir [file join $scriptDir html]
 file mkdir $outdir
 
 set markdown {

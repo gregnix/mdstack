@@ -23,7 +23,7 @@
 # - Scroll-to-top after render (mark set insert 1.0 + yview moveto 0)
 # - Codeblock margins (lmargin1/2, rmargin)
 # - Code language label (codelabel tag above codeblock)
-# - Task list: checked items rendered with strikethrough + grey (taskdone tag)
+# - Task list: checked items rendered in grey (taskdone tag)
 # - Image alt-text caption below loaded images (imgcaption tag)
 # - SVG support via optional tksvg package
 # - PDF link detection: [PDF] prefix, pdflink tag, -onpdf callback
@@ -564,17 +564,17 @@ proc mdviewer::renderInline {path node {parentFormatTag ""}} {
 
             # PDF-Links: eigener Tag + [PDF] Prefix
             if {[mdviewer::isPdf $resolved]} {
-                set start [$t index end]
+                set start [$t index "end -1 chars"]
                 $t insert end "\[PDF\] "
                 mdviewer::renderInlines $path [dict get $node label]
-                set end [$t index end]
+                set end [$t index "end -1 chars"]
                 $t tag add pdflink $start $end
                 $t tag add $ltag $start $end
                 $t tag bind $ltag <Button-1> [list mdviewer::dispatchPdf $path $resolved]
             } else {
-                set start [$t index end]
+                set start [$t index "end -1 chars"]
                 mdviewer::renderInlines $path [dict get $node label]
-                set end [$t index end]
+                set end [$t index "end -1 chars"]
                 $t tag add link $start $end
                 $t tag add $ltag $start $end
                 $t tag bind $ltag <Button-1> [list mdviewer::dispatchLink $path $resolved]
@@ -837,7 +837,7 @@ proc mdviewer::initTags {t fp} {
     $t tag configure link       -foreground blue   -underline 0
     $t tag configure pdflink    -foreground #cc6600 -underline 0
     $t tag configure listprefix -foreground #444444
-    $t tag configure taskdone   -overstrike 1 -foreground #999999
+    $t tag configure taskdone   -foreground #999999
     $t tag configure hr         -foreground #777777 -font ${fp}_mono \
         -spacing1 4 -spacing3 4
     $t tag configure quote -foreground #555555 \
