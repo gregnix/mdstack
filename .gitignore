@@ -1,0 +1,7 @@
+tools/mdserver/server.crt
+tools/mdserver/server.key
+**/nogit/
+demo/pdf
+test-toc.pdf
+test-emoji.pdf
+demo/html/
