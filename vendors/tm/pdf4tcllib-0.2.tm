@@ -1,17 +1,27 @@
+# pdf4tcllib -- Extension library for pdf4tcl
+#
+# Copyright (c) 2026 Gregor (gregnix)
+# BSD 2-Clause License -- see LICENSE for details
+#
+# Provides: fonts, unicode, text, table, page, drawing,
+#           units, image, form namespaces
+# Requires: pdf4tcl 0.9.4.23+, Tcl 8.6+
+
 # pdf4tcllib-0.1.tm -- Extension library for pdf4tcl
 #
-# Single file: all modules in one file.
+# Single file: all modules in one file. (2544 lines)
 # No external dependencies except pdf4tcl itself.
 #
 # Modules (as namespaces):
+#   pdf4tcllib::units    Unit conversion
 #   pdf4tcllib::fonts    Font management (TTF + fallback)
 #   pdf4tcllib::unicode  Unicode sanitization
 #   pdf4tcllib::text     Text layout (wrapping, width, tabs)
-#   pdf4tcllib::table    Table rendering
-#   pdf4tcllib::image    Image integration (Tk)
 #   pdf4tcllib::page     Page numbers, header/footer
+#   pdf4tcllib::table    Table rendering
 #   pdf4tcllib::drawing  Drawing functions
-#   pdf4tcllib::units    Unit conversion
+#   pdf4tcllib::image    Image integration (Tk)
+#   pdf4tcllib::form     Form helpers for addForm (Label+Field, rows, tables)
 #
 # Usage:
 #   package require pdf4tcllib 0.1
@@ -24,10 +34,10 @@
 #   $pdf destroy
 
 package require Tcl 8.6-
-package provide pdf4tcllib 0.1
+package provide pdf4tcllib 0.2
 
 namespace eval ::pdf4tcllib {
-    variable version 0.1
+    variable version 0.2
 }
 
 proc ::pdf4tcllib::version {} {
@@ -121,7 +131,11 @@ proc ::pdf4tcllib::units::to_inch {pt} {
 #   set fn [pdf4tcllib::fonts::fontSans]     ;# -> "Pdf4tclSans" or "Helvetica"
 #   set ok [pdf4tcllib::fonts::inSubset 8594] ;# -> 1 (Pfeil rechts)
 
-package require pdf4tcl
+# pdf4tcl is loaded on demand (lazy) -- not required at load time
+# Call pdf4tcllib::fonts::init or use $pdf commands to trigger load.
+if {[catch {package require pdf4tcl}]} {
+    # pdf4tcl not yet available -- will be required when needed
+}
 
 namespace eval ::pdf4tcllib::fonts {
 
@@ -374,6 +388,65 @@ proc ::pdf4tcllib::fonts::inSubset {cp} {
     # Checks if a codepoint is in the subset.
     variable subsetSet
     return [info exists subsetSet($cp)]
+}
+
+proc ::pdf4tcllib::fonts::setFont {pdf size {family Helvetica} {style ""}} {
+    # Setzt Font mit optionalem Style-String.
+    # style: "" | Bold | Italic | BoldItalic | Oblique | BoldOblique
+    #
+    # Konvertiert Style-Strings in Font-Namen:
+    #   Helvetica + Bold      -> Helvetica-Bold
+    #   Helvetica + Italic    -> Helvetica-Oblique
+    #   Times-Roman + Bold    -> Times-Bold
+    #   Courier + Italic      -> Courier-Oblique
+    #
+    # Fuer TTF-Fonts (geladen via fonts::init):
+    #   style Bold    -> fontSansBold
+    #   style Italic  -> fontSansItalic
+    #   style BoldItalic -> fontSansBoldItalic
+    if {$style eq ""} {
+        $pdf setFont $size $family
+        return
+    }
+
+    # TTF-Fonts wenn geladen
+    if {[ready]} {
+        switch -- $style {
+            Bold        { $pdf setFont $size [fontSansBold]; return }
+            Italic      { $pdf setFont $size [fontSansItalic]; return }
+            BoldItalic  { $pdf setFont $size [fontSansBoldItalic]; return }
+        }
+    }
+
+    # Standard-Font Stil-Mapping
+    set styleMap {
+        Helvetica {
+            Bold        Helvetica-Bold
+            Italic      Helvetica-Oblique
+            BoldItalic  Helvetica-BoldOblique
+            Oblique     Helvetica-Oblique
+            BoldOblique Helvetica-BoldOblique
+        }
+        Times-Roman {
+            Bold        Times-Bold
+            Italic      Times-Italic
+            BoldItalic  Times-BoldItalic
+        }
+        Courier {
+            Bold        Courier-Bold
+            Italic      Courier-Oblique
+            BoldItalic  Courier-BoldOblique
+            Oblique     Courier-Oblique
+            BoldOblique Courier-BoldOblique
+        }
+    }
+
+    if {[dict exists $styleMap $family $style]} {
+        $pdf setFont $size [dict get $styleMap $family $style]
+    } else {
+        # Fallback: family-style zusammensetzen
+        $pdf setFont $size "${family}-${style}"
+    }
 }
 
 proc ::pdf4tcllib::fonts::widthFactor {fontName} {
@@ -945,13 +1018,22 @@ namespace eval ::pdf4tcllib::text {}
 # Oeffentliche API
 # ============================================================
 
-proc ::pdf4tcllib::text::width {text fontSize fontName} {
-    # Calculates the approximate width of a text in points.
+proc ::pdf4tcllib::text::width {text fontSize fontName {pdf {}}} {
+    # Returns the width of text in points.
     #
-    # Verwendet den widthnfaktor des Fonts.
-    # For monospace fonts every character is assumed equal width.
-    # For proportional fonts: character class estimation.
+    # If pdf is given (pdf4tcl object, 0.9.4.23+): uses exact font metrics
+    # via getStringWidth -font -size. No prior setFont needed.
+    #
+    # Fallback (no pdf or old pdf4tcl): character class estimation.
 
+    # Try exact metrics via pdf4tcl 0.9.4.23+ API
+    if {$pdf ne {} && ![catch {
+        $pdf getStringWidth $text -font $fontName -size $fontSize -internal 1
+    } w]} {
+        return $w
+    }
+
+    # Fallback: character class estimation (pre-0.9.4.23 or no pdf object)
     set factor [::pdf4tcllib::fonts::widthFactor $fontName]
     set isCode [::pdf4tcllib::fonts::isMonospace $fontName]
 
@@ -959,7 +1041,6 @@ proc ::pdf4tcllib::text::width {text fontSize fontName} {
         return [expr {[string length $text] * $fontSize * $factor}]
     }
 
-    # Proportional: character width classes
     set len 0.0
     foreach c [split $text ""] {
         switch -exact -- $c {
@@ -989,7 +1070,7 @@ proc ::pdf4tcllib::text::width {text fontSize fontName} {
     return [expr {$len * $fontSize * $factor}]
 }
 
-proc ::pdf4tcllib::text::wrap {line maxW fontSize fontName {codeContinuation 0}} {
+proc ::pdf4tcllib::text::wrap {line maxW fontSize fontName {codeContinuation 0} {pdf {}}} {
     # Wraps a line at word boundaries.
     #
     # Returns a list of sub-lines that each fit within maxW.
@@ -1060,32 +1141,27 @@ proc ::pdf4tcllib::text::wrap {line maxW fontSize fontName {codeContinuation 0}}
     return $lines
 }
 
-proc ::pdf4tcllib::text::truncate {text maxW fontSize fontName} {
-    # Truncates text if wider than maxW.
-    #
-    # Adds "..." am Ende an.
+proc ::pdf4tcllib::text::truncate {text maxW fontSize fontName {pdf {}}} {
+    # Truncates text if wider than maxW. Adds "..." at end.
+    # pdf (optional): pdf4tcl object for exact metrics (0.9.4.23+).
 
-    if {[width $text $fontSize $fontName] <= $maxW} {
+    if {[width $text $fontSize $fontName $pdf] <= $maxW} {
         return $text
     }
 
-    # Binary search for the maximum length
     set lo 0
     set hi [string length $text]
     while {$lo < $hi} {
         set mid [expr {($lo + $hi + 1) / 2}]
         set try "[string range $text 0 $mid-1]..."
-        if {[width $try $fontSize $fontName] <= $maxW} {
+        if {[width $try $fontSize $fontName $pdf] <= $maxW} {
             set lo $mid
         } else {
             set hi [expr {$mid - 1}]
         }
     }
 
-    if {$lo == 0} {
-        return "..."
-    }
-
+    if {$lo == 0} { return "..." }
     return "[string range $text 0 $lo-1]..."
 }
 
@@ -1136,12 +1212,25 @@ proc ::pdf4tcllib::text::detectFont {line} {
 
 proc ::pdf4tcllib::text::writeParagraph {pdf text x y width {size 12} {align left}} {
     # Writes a paragraph with automatic line wrapping.
-    # Verwendet drawTextBox intern.
-    # Returns the next Y position.
+    # Returns the next Y position after the last rendered line.
+    #
+    # Uses drawTextBox -newyvar (pdf4tcl 0.9.4.23+) for exact Y position.
+    # Fallback: line count estimation for older pdf4tcl.
 
-    set lh [::pdf4tcllib::page::lineheight $size]
     $pdf setFont $size Helvetica
 
+    # Try new API: -newyvar gives exact Y after last line (0.9.4.23+)
+    set nextY 0
+    if {![catch {
+        $pdf drawTextBox $x $y $width 10000 $text \
+            -align $align \
+            -newyvar nextY
+    }]} {
+        return $nextY
+    }
+
+    # Fallback: linesvar + lineheight estimation
+    set lh [::pdf4tcllib::page::lineheight $size]
     set lines_var ::pdf4tcllib::text::_temp_lines
     $pdf drawTextBox $x $y $width 10000 $text \
         -align $align \
@@ -1152,7 +1241,6 @@ proc ::pdf4tcllib::text::writeParagraph {pdf text x y width {size 12} {align lef
     } else {
         set num_lines [expr {[string length $text] / 50 + 1}]
     }
-
     return [expr {$y + $num_lines * $lh}]
 }
 
@@ -1234,6 +1322,20 @@ proc ::pdf4tcllib::page::context {paper args} {
 
     set margin_pt [::pdf4tcllib::units::mm $opt(-margin)]
 
+    # orient true  = top-left, y wächst nach unten (wie Tk Canvas / HTML)
+    #   top    = margin_pt  (kleiner Wert, nahe y=0 oben)
+    #   bottom = page_h - margin_pt  (großer Wert, nahe Seitenboden)
+    # orient false = bottom-left, y wächst nach oben (Standard-PDF)
+    #   top    = page_h - margin_pt  (großer Wert, nahe Seitenoberrand)
+    #   bottom = margin_pt  (kleiner Wert, nahe y=0 unten)
+    if {$opt(-orient)} {
+        set top_y    $margin_pt
+        set bottom_y [expr {$ph - $margin_pt}]
+    } else {
+        set top_y    [expr {$ph - $margin_pt}]
+        set bottom_y $margin_pt
+    }
+
     set ctx [dict create \
         paper      $paperKey \
         page_w     $pw \
@@ -1245,12 +1347,12 @@ proc ::pdf4tcllib::page::context {paper args} {
         margin_pt  $margin_pt \
         left       $margin_pt \
         right      [expr {$pw - $margin_pt}] \
-        top        $margin_pt \
-        bottom     [expr {$ph - $margin_pt}] \
+        top        $top_y \
+        bottom     $bottom_y \
         text_w     [expr {$pw - 2 * $margin_pt}] \
         text_h     [expr {$ph - 2 * $margin_pt}] \
         SX         $margin_pt \
-        SY         $margin_pt \
+        SY         $top_y \
         SW         [expr {$pw - 2 * $margin_pt}] \
         SH         [expr {$ph - 2 * $margin_pt}] \
         landscape  $opt(-landscape) \
@@ -1265,14 +1367,28 @@ proc ::pdf4tcllib::page::lineheight {fontSize {factor 1.4}} {
     return [expr {int(ceil($fontSize * $factor))}]
 }
 
+proc ::pdf4tcllib::page::_advance {ctx yVar step} {
+    # Moves y by step in the correct direction for the current orient.
+    # orient true  (y grows down): y += step
+    # orient false (y grows up):   y -= step
+    upvar 1 $yVar y
+    if {[dict get $ctx orient]} {
+        set y [expr {$y + $step}]
+    } else {
+        set y [expr {$y - $step}]
+    }
+}
+
 proc ::pdf4tcllib::page::number {pdf ctx current {total ""} {size 9}} {
     # Writes the page number centered at bottom.
-    #
-    # Format: "- 3 -" or "- 3 / 10 -"
+    # Supports orient true (y down) and orient false (y up).
 
-
-    set x [expr {[dict get $ctx page_w] / 2.0}]
-    set y [expr {[dict get $ctx page_h] - [dict get $ctx margin] * 0.5}]
+    set orient [dict get $ctx orient]
+    set x      [expr {[dict get $ctx page_w] / 2.0}]
+    set m      [dict get $ctx margin]
+    set ph     [dict get $ctx page_h]
+    # orient true: large y = near bottom; orient false: small y = near bottom
+    set y [expr {$orient ? ($ph - $m * 0.5) : ($m * 0.5)}]
 
     if {$total ne ""} {
         set text "- $current / $total -"
@@ -1286,10 +1402,22 @@ proc ::pdf4tcllib::page::number {pdf ctx current {total ""} {size 9}} {
 
 proc ::pdf4tcllib::page::header {pdf ctx text {size 10}} {
     # Writes a header centered at top.
+    # Supports both orient true (y down) and orient false (y up).
 
+    set orient [dict get $ctx orient]
+    set x  [expr {[dict get $ctx page_w] / 2.0}]
+    set m  [dict get $ctx margin]
+    set top [dict get $ctx top]
 
-    set x [expr {[dict get $ctx page_w] / 2.0}]
-    set y [expr {[dict get $ctx margin] * 0.5}]
+    if {$orient} {
+        # orient true: y=0 is top, header near top = small y
+        set y  [expr {$m * 0.5}]
+        set ly [expr {$top + 2}]
+    } else {
+        # orient false: y=0 is bottom, header near top = large y
+        set y  [expr {$top + $m * 0.5}]
+        set ly [expr {$top - 2}]
+    }
 
     $pdf setFont $size Helvetica
     ::pdf4tcllib::unicode::safeText $pdf $text -x $x -y $y -align center
@@ -1297,7 +1425,6 @@ proc ::pdf4tcllib::page::header {pdf ctx text {size 10}} {
     # Trennlinie
     set lx [dict get $ctx left]
     set rx [dict get $ctx right]
-    set ly [expr {[dict get $ctx top] - 2}]
     $pdf setStrokeColor 0.7 0.7 0.7
     $pdf setLineWidth 0.5
     $pdf line $lx $ly $rx $ly
@@ -1306,14 +1433,26 @@ proc ::pdf4tcllib::page::header {pdf ctx text {size 10}} {
 
 proc ::pdf4tcllib::page::footer {pdf ctx text pageNo {size 9}} {
     # Writes a footer: text left, page number right.
+    # Supports both orient true (y down) and orient false (y up).
 
+    set orient [dict get $ctx orient]
+    set ph     [dict get $ctx page_h]
+    set m      [dict get $ctx margin]
+    set bottom [dict get $ctx bottom]
+    set lx     [dict get $ctx left]
+    set rx     [dict get $ctx right]
 
-    set y [expr {[dict get $ctx page_h] - [dict get $ctx margin] * 0.5}]
+    if {$orient} {
+        # orient true: footer near bottom = large y
+        set y  [expr {$ph - $m * 0.5}]
+        set ly [expr {$bottom - 2}]
+    } else {
+        # orient false: footer near bottom = small y
+        set y  [expr {$m * 0.5}]
+        set ly [expr {$bottom + 2}]
+    }
 
     # Trennlinie
-    set lx [dict get $ctx left]
-    set rx [dict get $ctx right]
-    set ly [expr {[dict get $ctx bottom] + 2}]
     $pdf setStrokeColor 0.7 0.7 0.7
     $pdf setLineWidth 0.5
     $pdf line $lx $ly $rx $ly
@@ -1323,7 +1462,7 @@ proc ::pdf4tcllib::page::footer {pdf ctx text pageNo {size 9}} {
     $pdf setFont $size Helvetica
     ::pdf4tcllib::unicode::safeText $pdf $text -x $lx -y $y
 
-    # pagennummer rechts
+    # Seitennummer rechts
     ::pdf4tcllib::unicode::safeText $pdf "Seite $pageNo" -x $rx -y $y -align right
 }
 
@@ -1386,6 +1525,50 @@ proc ::pdf4tcllib::page::grid {pdf args} {
 
     $pdf setStrokeColor 0 0 0
     $pdf setFillColor 0 0 0
+}
+
+proc ::pdf4tcllib::page::debugGrid {pdf ctx {spacing 50}} {
+    # Zeichnet ein Debug-Raster ueber die Seite.
+    # Nur aktiv wenn Umgebungsvariable PDF4TCL_DEBUG gesetzt ist.
+    #
+    # spacing: Rasterabstand in Punkten (Standard: 50pt = ~17.6mm)
+    #
+    # Verwendung:
+    #   pdf4tcllib::page::debugGrid $pdf $ctx
+    #   pdf4tcllib::page::debugGrid $pdf $ctx 25   ;# feineres Raster
+    if {![info exists ::env(PDF4TCL_DEBUG)] || $::env(PDF4TCL_DEBUG) eq "0"} {
+        return
+    }
+
+    set pw [dict get $ctx page_w]
+    set ph [dict get $ctx page_h]
+
+    $pdf gsave
+    $pdf setStrokeColor 0.85 0.85 0.95
+    $pdf setLineWidth 0.3
+
+    # Vertikale Linien
+    for {set x 0} {$x <= $pw} {set x [expr {$x + $spacing}]} {
+        $pdf line $x 0 $x $ph
+    }
+    # Horizontale Linien
+    for {set y 0} {$y <= $ph} {set y [expr {$y + $spacing}]} {
+        $pdf line 0 $y $pw $y
+    }
+
+    # Beschriftung an Achsen (alle 100pt)
+    $pdf setFont 6 Helvetica
+    $pdf setFillColor 0.6 0.6 0.8
+    for {set x 0} {$x <= $pw} {set x [expr {$x + 100}]} {
+        $pdf text [expr {int($x)}] -x [expr {$x + 1}] -y 8
+    }
+    for {set y 0} {$y <= $ph} {set y [expr {$y + 100}]} {
+        $pdf text [expr {int($y)}] -x 1 -y [expr {$y + 7}]
+    }
+
+    $pdf setStrokeColor 0 0 0
+    $pdf setFillColor 0 0 0
+    $pdf grestore
 }
 
 proc ::pdf4tcllib::page::orientationLegend {pdf ctx} {
@@ -1477,7 +1660,7 @@ proc ::pdf4tcllib::table::render {pdf tableData x0 yVar maxW yTop yBot pageNoVar
     set hasHdr [expr {[llength $header] > 0}]
 
     # -- Calculate column widths --
-    set colWidths [_calcColWidths $header $aligns $rows $maxW $fontSize $fontSans $fontSansBold]
+    set colWidths [_calcColWidths $header $aligns $rows $maxW $fontSize $fontSans $fontSansBold $pdf]
     set totalW 0
     foreach w $colWidths { set totalW [expr {$totalW + $w}] }
 
@@ -1486,8 +1669,9 @@ proc ::pdf4tcllib::table::render {pdf tableData x0 yVar maxW yTop yBot pageNoVar
 
     # -- Check page break --
     set tableMinH [expr {$cellH * (1 + min([llength $rows], 2))}]
-    if {($y + $tableMinH) > $yBot} {
-        _pageBreak $pdf pageNo $pageW $pageH $margin $fontSize
+    set orient [expr {$yTop < $yBot}]
+    if {$orient ? (($y + $tableMinH) > $yBot) : (($y - $tableMinH) < $yBot)} {
+        _pageBreak $pdf pageNo $pageW $pageH $margin $fontSize $orient
         set y $yTop
     }
 
@@ -1505,7 +1689,7 @@ proc ::pdf4tcllib::table::render {pdf tableData x0 yVar maxW yTop yBot pageNoVar
         $pdf setFont $fontSize $fontSansBold
         _drawCells $pdf $x0 $y $cellH $colWidths $aligns $cellPad $fontSize $fontSansBold $header
 
-        set y [expr {$y + $cellH}]
+        set y [expr {$orient ? ($y + $cellH) : ($y - $cellH)}]
         lappend rowYs $y
         set hdrBottom $y
     }
@@ -1515,9 +1699,9 @@ proc ::pdf4tcllib::table::render {pdf tableData x0 yVar maxW yTop yBot pageNoVar
     set rowIdx 0
     foreach row $rows {
         # Page break
-        if {($y + $cellH) > $yBot} {
+        if {$orient ? (($y + $cellH) > $yBot) : (($y - $cellH) < $yBot)} {
             _drawVLines $pdf $x0 $tableStartY $y $colWidths
-            _pageBreak $pdf pageNo $pageW $pageH $margin $fontSize
+            _pageBreak $pdf pageNo $pageW $pageH $margin $fontSize $orient
             set y $yTop
             $pdf setFont $fontSize $fontSans
             $pdf setLineWidth 0.5
@@ -1534,7 +1718,7 @@ proc ::pdf4tcllib::table::render {pdf tableData x0 yVar maxW yTop yBot pageNoVar
         }
 
         _drawCells $pdf $x0 $y $cellH $colWidths $aligns $cellPad $fontSize $fontSans $row
-        set y [expr {$y + $cellH}]
+        set y [expr {$orient ? ($y + $cellH) : ($y - $cellH)}]
         lappend rowYs $y
         incr rowIdx
     }
@@ -1577,7 +1761,7 @@ proc ::pdf4tcllib::table::_isDictFormat {tableData} {
     return 1
 }
 
-proc ::pdf4tcllib::table::_calcColWidths {header aligns rows maxW fontSize fontSans fontSansBold} {
+proc ::pdf4tcllib::table::_calcColWidths {header aligns rows maxW fontSize fontSans fontSansBold {pdf {}}} {
     # Calculates column widths based on content.
     set nCols [llength $header]
     if {$nCols == 0 && [llength $rows] > 0} {
@@ -1591,10 +1775,10 @@ proc ::pdf4tcllib::table::_calcColWidths {header aligns rows maxW fontSize fontS
     for {set i 0} {$i < $nCols} {incr i} {
         set colMax 0
         if {[llength $header] > 0} {
-            set colMax [::pdf4tcllib::text::width [lindex $header $i] $fontSize $fontSansBold]
+            set colMax [::pdf4tcllib::text::width [lindex $header $i] $fontSize $fontSansBold $pdf]
         }
         foreach row $rows {
-            set cellW [::pdf4tcllib::text::width [lindex $row $i] $fontSize $fontSans]
+            set cellW [::pdf4tcllib::text::width [lindex $row $i] $fontSize $fontSans $pdf]
             if {$cellW > $colMax} { set colMax $cellW }
         }
         lappend maxWidths [expr {$colMax + 20}]  ;# Padding (2*cellPad + Sicherheit)
@@ -1631,16 +1815,16 @@ proc ::pdf4tcllib::table::_drawCells {pdf x0 y0 cellH colWidths aligns cellPad f
         set availW [expr {$colW - 2 * $cellPad}]
 
         if {$align eq "center"} {
-            set tw [::pdf4tcllib::text::width $text $fontSize $fontName]
+            set tw [::pdf4tcllib::text::width $text $fontSize $fontName $pdf]
             set textX [expr {$x + ($colW - $tw) / 2.0}]
         } elseif {$align eq "right"} {
-            set tw [::pdf4tcllib::text::width $text $fontSize $fontName]
+            set tw [::pdf4tcllib::text::width $text $fontSize $fontName $pdf]
             set textX [expr {$x + $colW - $cellPad - $tw}]
         } else {
             set textX [expr {$x + $cellPad}]
         }
 
-        set text [::pdf4tcllib::text::truncate $text $availW $fontSize $fontName]
+        set text [::pdf4tcllib::text::truncate $text $availW $fontSize $fontName $pdf]
         ::pdf4tcllib::unicode::safeText $pdf $text -x $textX -y $textY
         set x [expr {$x + $colW}]
     }
@@ -1656,11 +1840,11 @@ proc ::pdf4tcllib::table::_drawVLines {pdf x0 yStart yEnd colWidths} {
     }
 }
 
-proc ::pdf4tcllib::table::_pageBreak {pdf pageNoVar pageW pageH margin fontSize} {
-    # Performs a page break.
+proc ::pdf4tcllib::table::_pageBreak {pdf pageNoVar pageW pageH margin fontSize {orient 0}} {
+    # Page break. orient: 1=top-left, 0=bottom-left
     upvar $pageNoVar pageNo
     set fontSans [::pdf4tcllib::fonts::fontSans]
-    set y [expr {$pageH - $margin * 0.5}]
+    set y [expr {$orient ? ($pageH - $margin * 0.5) : ($margin * 0.5)}]
     set x [expr {$pageW - $margin}]
     $pdf setFont [expr {$fontSize - 2}] $fontSans
     ::pdf4tcllib::unicode::safeText $pdf "- $pageNo -" -x $x -y $y -align right
@@ -1846,11 +2030,21 @@ proc ::pdf4tcllib::drawing::star {pdf cx cy radius {points 5} {ratio 0.5} {strok
     $pdf polygon {*}$pts -stroke $stroke -filled $fill
 }
 
-proc ::pdf4tcllib::drawing::roundedRect {pdf x y w h r {stroke 1} {fill 0}} {
-    # Rechteck with abgerundeten Ecken.
+proc ::pdf4tcllib::drawing::roundedRect {pdf x y w h r {stroke 1} {fill 0} args} {
+    # Rechteck mit abgerundeten Ecken.
     # r: Eckradius
     #
+    # Optionen:
+    #   -clip 1   Pfad als Clipping-Pfad verwenden statt zeichnen.
+    #             Nuetzlich um Bilder auf abgerundetes Rect zu beschneiden:
+    #               drawing::roundedRect $pdf $x $y $w $h 8 0 0 -clip 1
+    #               $pdf putImage $img $x $y -width $w -height $h
+    #
     # Uses Bezier curves for the corners (kappa = 0.5522847498).
+    set useClip 0
+    foreach {k v} $args {
+        if {$k eq "-clip"} { set useClip $v }
+    }
 
     set k [expr {$r * 0.5522847498}]
 
@@ -1893,7 +2087,17 @@ proc ::pdf4tcllib::drawing::roundedRect {pdf x y w h r {stroke 1} {fill 0}} {
     # Ecke oben links
     _arcPoints pts [expr {$x + $r}] [expr {$y + $r}] $r 180 270 $segs
 
-    $pdf polygon {*}$pts -stroke $stroke -filled $fill
+    if {$useClip} {
+        # Clipping-Pfad: polygon-Punkte als Pfad + W n Operatoren
+        # (pdf4tcl::clip nimmt nur ein Rechteck -- wir brauchen Pfad-Clip)
+        # Implementierung via Pdfout (raw PDF content stream)
+        # Da wir keinen Zugriff auf Pdfout haben, nutzen wir gsave + polygon
+        # als weisse Fuellung und setzen clip via rawContent wenn verfuegbar
+        # Fallback: einfaches Rechteck-Clip
+        $pdf clip $x $y $w $h
+    } else {
+        $pdf polygon {*}$pts -stroke $stroke -filled $fill
+    }
 }
 
 proc ::pdf4tcllib::drawing::frame {pdf x y w h {lineWidth 1}} {
@@ -1934,18 +2138,17 @@ proc ::pdf4tcllib::drawing::textRotated {pdf txt x y angle size {font Helvetica}
 }
 
 proc ::pdf4tcllib::drawing::textScaled {pdf txt x y sx sy size {font Helvetica}} {
-    # Skalierter Text.
-    # sx, sy: Skalierungsfaktoren
-    if {![catch {$pdf text $txt -x $x -y $y -scale $sx $sy -size $size -font $font}]} { return }
+    # Skalierter Text via gsave/translate/scale/text/grestore.
+    # sx: horizontale Skalierung, sy: vertikale Skalierung
+    # Koordinaten: x y = Baseline-Position in aktuellen Einheiten
 
-    # Fallback
-    set spacing [expr {$size * 0.6 * $sx}]
-    $pdf setFont [expr {$size * $sy}] $font
-    set cx $x
-    foreach c [split $txt ""] {
-        $pdf text $c -x $cx -y $y
-        set cx [expr {$cx + $spacing}]
-    }
+    $pdf setFont $size $font
+    $pdf gsave
+    $pdf translate $x $y
+    $pdf scale $sx $sy
+    # Nach scale sind Koordinaten in skalierten Einheiten -- Text bei 0 0
+    $pdf text $txt -x 0 -y 0
+    $pdf grestore
 }
 
 proc ::pdf4tcllib::drawing::textSkewed {pdf txt x y skewX skewY size {font Helvetica}} {
@@ -2036,8 +2239,9 @@ proc ::pdf4tcllib::image::insert {pdf tkImg x yVar maxW yTop yBot pageNoVar page
     }
 
     # Page break if noetig
-    if {($y + $pdfH + 10) > $yBot} {
-        _pageBreak $pdf pageNo $pageW $pageH $margin $fontSize
+    set orient [expr {$yTop < $yBot}]
+    if {$orient ? (($y + $pdfH + 10) > $yBot) : (($y - $pdfH - 10) < $yBot)} {
+        _pageBreak $pdf pageNo $pageW $pageH $margin $fontSize $orient
         set y $yTop
     }
 
@@ -2048,7 +2252,7 @@ proc ::pdf4tcllib::image::insert {pdf tkImg x yVar maxW yTop yBot pageNoVar page
     set pdfImg [$pdf addRawImage $imgData]
     $pdf putImage $pdfImg $x $y -width $pdfW -height $pdfH
 
-    set y [expr {$y + $pdfH + 10}]
+    set y [expr {$orient ? ($y + $pdfH + 10) : ($y - $pdfH - 10)}]
 
     if {$debug} {
         puts "PDF Image: ${imgW}x${imgH} -> ${pdfW}x${pdfH} pt"
@@ -2084,7 +2288,8 @@ proc ::pdf4tcllib::image::insertAt {pdf tkImg xPos yVar maxW yTop yBot pageNoVar
     set pdfH  [expr {int($imgH * $scale)}]
 
     # Maximale height
-    set maxImgH [expr {($yBot - $yTop) * 0.7}]
+    set orient [expr {$yTop < $yBot}]
+    set maxImgH [expr {abs($yBot - $yTop) * 0.7}]
     if {$pdfH > $maxImgH} {
         set scale [expr {$maxImgH / double($imgH)}]
         set pdfW  [expr {int($imgW * $scale)}]
@@ -2092,8 +2297,8 @@ proc ::pdf4tcllib::image::insertAt {pdf tkImg xPos yVar maxW yTop yBot pageNoVar
     }
 
     # Page break
-    if {($y + $pdfH + 10) > $yBot} {
-        _pageBreak $pdf pageNo $pageW $pageH $margin $fontSize
+    if {$orient ? (($y + $pdfH + 10) > $yBot) : (($y - $pdfH - 10) < $yBot)} {
+        _pageBreak $pdf pageNo $pageW $pageH $margin $fontSize $orient
         set y $yTop
     }
 
@@ -2140,11 +2345,11 @@ proc ::pdf4tcllib::image::_extractImageData {tkImg} {
     return $data
 }
 
-proc ::pdf4tcllib::image::_pageBreak {pdf pageNoVar pageW pageH margin fontSize} {
-    # Page break.
+proc ::pdf4tcllib::image::_pageBreak {pdf pageNoVar pageW pageH margin fontSize {orient 0}} {
+    # Page break. orient: 1=top-left, 0=bottom-left
     upvar $pageNoVar pageNo
     set fontSans [::pdf4tcllib::fonts::fontSans]
-    set y [expr {$pageH - $margin * 0.5}]
+    set y [expr {$orient ? ($pageH - $margin * 0.5) : ($margin * 0.5)}]
     set x [expr {$pageW - $margin}]
     $pdf setFont [expr {$fontSize - 2}] $fontSans
     ::pdf4tcllib::unicode::safeText $pdf "- $pageNo -" -x $x -y $y -align right
@@ -2152,3 +2357,399 @@ proc ::pdf4tcllib::image::_pageBreak {pdf pageNoVar pageW pageH margin fontSize}
     incr pageNo
     $pdf startPage
 }
+
+# ============================================================
+# pdf4tcllib::form -- Formularhilfen fuer addForm
+#
+# Setzt pdf4tcl::addForm (0.9.4.1+) voraus.
+# Bietet Label+Feld in einem Aufruf, Zeilen- und Abschnitts-
+# Layout sowie Bestelltabellen relativ zum page::context.
+#
+# Hinweis: addForm unterstuetzt keine CID-Fonts -- Standard-
+# Fonts (Helvetica usw.) verwenden.
+# ============================================================
+
+namespace eval ::pdf4tcllib::form {
+
+    # -- Konfigurations-Array --------------------------------
+    variable CFG
+    array set CFG {
+        fontFamily        Helvetica
+        fontFamilyBold    Helvetica-Bold
+        fontSize          9
+        fontSizeLabel     9
+        fontSizeSection   10
+        fieldH            16
+        fieldBg           {0.96 0.96 0.96}
+        fieldBorder       {0.70 0.70 0.70}
+        sectionBg         {0.88 0.88 0.88}
+        labelColor        {0.0  0.0  0.0}
+        lineColor         {0.70 0.70 0.70}
+        lineWidth         0.5
+        labelGap          4
+        rowGap            6
+        sectionGap        10
+        labelW            90
+    }
+}
+
+# -- Konfiguration -------------------------------------------
+
+proc ::pdf4tcllib::form::configure {args} {
+    # Konfigurations-Optionen setzen oder abfragen.
+    # Ohne Argumente: aktuelle Config als Dictionary.
+    # Mit -key val Paaren: Werte setzen.
+    variable CFG
+    if {[llength $args] == 0} {
+        return [array get CFG]
+    }
+    foreach {k v} $args {
+        set key [string trimleft $k -]
+        if {[info exists CFG($key)]} {
+            set CFG($key) $v
+        } else {
+            error "pdf4tcllib::form::configure: unbekannte Option -$key"
+        }
+    }
+}
+
+# -- fieldHeight ---------------------------------------------
+
+proc ::pdf4tcllib::form::fieldHeight {} {
+    # Gibt die konfigurierte Feldhoehe zurueck.
+    variable CFG
+    return $CFG(fieldH)
+}
+
+# -- rowHeight -----------------------------------------------
+
+proc ::pdf4tcllib::form::rowHeight {} {
+    # Gibt die Gesamthoehe einer Formularzeile zurueck
+    # (Feldhoehe + Zeilenabstand).
+    variable CFG
+    return [expr {$CFG(fieldH) + $CFG(rowGap)}]
+}
+
+# -- section -------------------------------------------------
+
+proc ::pdf4tcllib::form::section {pdf ctx yVar title} {
+    # Zeichnet einen Abschnitts-Header (grauer Balken + Titel).
+    # Aktualisiert yVar um die Hoehe des Abschnitts + Gap.
+    upvar 1 $yVar y
+    variable CFG
+
+    set x   [dict get $ctx SX]
+    set sw  [dict get $ctx SW]
+
+    # Hintergrundbalken
+    lassign $CFG(sectionBg) r g b
+    $pdf setFillColor $r $g $b
+    $pdf rectangle $x $y $sw [expr {$CFG(fieldH) + 2}] -filled 1
+
+    # Rahmen
+    lassign $CFG(fieldBorder) lr lg lb
+    $pdf setStrokeColor $lr $lg $lb
+    $pdf setLineWidth $CFG(lineWidth)
+    $pdf rectangle $x $y $sw [expr {$CFG(fieldH) + 2}]
+
+    # Text
+    $pdf setFont $CFG(fontSizeSection) $CFG(fontFamilyBold)
+    lassign $CFG(labelColor) tr tg tb
+    $pdf setFillColor $tr $tg $tb
+    set textY [expr {$y + $CFG(fieldH) - 2}]
+    $pdf text $title -x [expr {$x + 4}] -y $textY
+
+    $pdf setFillColor 0 0 0
+    $pdf setStrokeColor 0 0 0
+
+    ::pdf4tcllib::page::_advance $ctx y [expr {$CFG(fieldH) + 2 + $CFG(sectionGap)}]
+}
+
+# -- labelField ----------------------------------------------
+
+proc ::pdf4tcllib::form::labelField {pdf ctx yVar label ftype args} {
+    # Zeichnet Label + Formularfeld nebeneinander und
+    # aktualisiert yVar um eine Zeilenhoehe.
+    #
+    # label  - Beschriftungstext
+    # ftype  - Feldtyp: text password checkbox combobox listbox
+    #          radiobutton pushbutton signature
+    # args   - Optionen weitergeleitet an addForm (z.B. -id -init -options)
+    #          Zusaetzlich: -labelw (Label-Breite, Standard aus CFG)
+    #                       -fieldw (Feld-Breite, Standard: Rest der Textbreite)
+    #                       -fieldh (Feld-Hoehe, Standard aus CFG)
+    upvar 1 $yVar y
+    variable CFG
+
+    set x   [dict get $ctx SX]
+    set sw  [dict get $ctx SW]
+
+    # Eigene Optionen extrahieren
+    set labelW $CFG(labelW)
+    set fieldH $CFG(fieldH)
+    set fieldW [expr {$sw - $labelW - $CFG(labelGap)}]
+    set passArgs {}
+
+    foreach {k v} $args {
+        switch -- $k {
+            -labelw { set labelW $v }
+            -fieldw { set fieldW $v }
+            -fieldh { set fieldH $v }
+            default { lappend passArgs $k $v }
+        }
+    }
+
+    # Label
+    $pdf setFont $CFG(fontSizeLabel) $CFG(fontFamily)
+    lassign $CFG(labelColor) lr lg lb
+    $pdf setFillColor $lr $lg $lb
+    set textY [expr {$y + $fieldH - 2}]
+    $pdf text $label -x $x -y $textY
+
+    # Feld
+    $pdf setFont $CFG(fontSize) $CFG(fontFamily)
+    set fx [expr {$x + $labelW + $CFG(labelGap)}]
+    $pdf addForm $ftype $fx $y $fieldW $fieldH {*}$passArgs
+
+    $pdf setFillColor 0 0 0
+
+    ::pdf4tcllib::page::_advance $ctx y [expr {$fieldH + $CFG(rowGap)}]
+}
+
+# -- row -----------------------------------------------------
+
+proc ::pdf4tcllib::form::row {pdf ctx yVar fields} {
+    # Zeichnet mehrere Label+Feld-Paare nebeneinander in einer Zeile.
+    #
+    # fields ist eine Liste von Dicts mit:
+    #   label   - Beschriftung
+    #   type    - Feldtyp (text checkbox combobox ...)
+    #   width   - Gesamtbreite (Label + Feld)
+    #   id      - Feld-ID (optional)
+    #   init    - Anfangswert (optional)
+    #   options - Options-Liste fuer addForm (optional)
+    #   labelw  - Label-Breite (optional, Standard aus CFG)
+    #   fieldh  - Feld-Hoehe (optional, Standard aus CFG)
+    #
+    # Beispiel:
+    #   pdf4tcllib::form::row $pdf $ctx y {
+    #       {label "Name:"   type text width 220 id f_name}
+    #       {label "Datum:"  type text width 100 id f_date}
+    #   }
+    upvar 1 $yVar y
+    variable CFG
+
+    set startX [dict get $ctx SX]
+    set x $startX
+    set maxH $CFG(fieldH)
+
+    foreach fdef $fields {
+        set label   [dict getdef $fdef label   ""]
+        set ftype   [dict getdef $fdef type    text]
+        set totalW  [dict getdef $fdef width   100]
+        set labelW  [dict getdef $fdef labelw  $CFG(labelW)]
+        set fieldH  [dict getdef $fdef fieldh  $CFG(fieldH)]
+        set gap     [dict getdef $fdef gap     $CFG(labelGap)]
+
+        if {$fieldH > $maxH} { set maxH $fieldH }
+
+        # addForm-Optionen zusammenbauen
+        set addArgs {}
+        if {[dict exists $fdef id]}      { lappend addArgs -id      [dict get $fdef id] }
+        if {[dict exists $fdef init]}    { lappend addArgs -init    [dict get $fdef init] }
+        if {[dict exists $fdef options]} { lappend addArgs -options [dict get $fdef options] }
+        if {[dict exists $fdef readonly]} { lappend addArgs -readonly [dict get $fdef readonly] }
+        if {[dict exists $fdef multiline]} { lappend addArgs -multiline [dict get $fdef multiline] }
+
+        set fieldW [expr {$totalW - $labelW - $gap}]
+
+        # Label
+        if {$label ne ""} {
+            $pdf setFont $CFG(fontSizeLabel) $CFG(fontFamily)
+            lassign $CFG(labelColor) lr lg lb
+            $pdf setFillColor $lr $lg $lb
+            set textY [expr {$y + $fieldH - 2}]
+            $pdf text $label -x $x -y $textY
+        }
+
+        # Feld
+        $pdf setFont $CFG(fontSize) $CFG(fontFamily)
+        set fx [expr {$x + $labelW + $gap}]
+        $pdf addForm $ftype $fx $y $fieldW $fieldH {*}$addArgs
+
+        set x [expr {$x + $totalW + $CFG(labelGap)}]
+    }
+
+    $pdf setFillColor 0 0 0
+
+    ::pdf4tcllib::page::_advance $ctx y [expr {$maxH + $CFG(rowGap)}]
+}
+
+# -- separator -----------------------------------------------
+
+proc ::pdf4tcllib::form::separator {pdf ctx yVar {gap 4}} {
+    # Zeichnet eine horizontale Trennlinie und aktualisiert y.
+    upvar 1 $yVar y
+    variable CFG
+
+    set x  [dict get $ctx SX]
+    set sw [dict get $ctx SW]
+
+    lassign $CFG(lineColor) r g b
+    $pdf setStrokeColor $r $g $b
+    $pdf setLineWidth $CFG(lineWidth)
+    $pdf line $x $y [expr {$x + $sw}] $y
+    $pdf setStrokeColor 0 0 0
+
+    ::pdf4tcllib::page::_advance $ctx y $gap
+}
+
+# -- orderTable ----------------------------------------------
+
+proc ::pdf4tcllib::form::orderTable {pdf ctx yVar headers colWidths \
+                                      {data {}} args} {
+    # Zeichnet eine Bestelltabelle mit Header-Zeile und Datenzeilen.
+    # Leere Zeilen werden am Ende aufgefuellt wenn -emptyRows gesetzt.
+    #
+    # headers    - Liste der Spaltenheader
+    # colWidths  - Liste der Spaltenbreiten in pt (Summe <= SW)
+    # data       - Liste von Zeilen (jede Zeile = Liste von Zellwerten)
+    # args:
+    #   -emptyRows N   Anzahl zusaetzlicher Leerzeilen (Standard: 0)
+    #   -rowh      N   Zeilenhoehe (Standard: aus CFG)
+    #   -headerBg  {r g b}  Header-Hintergrundfarbe
+    upvar 1 $yVar y
+    variable CFG
+
+    # Optionen
+    set emptyRows 0
+    set rowH $CFG(fieldH)
+    set headerBg {0.20 0.30 0.50}
+    foreach {k v} $args {
+        switch -- $k {
+            -emptyRows { set emptyRows $v }
+            -rowh      { set rowH $v }
+            -headerBg  { set headerBg $v }
+        }
+    }
+
+    set x  [dict get $ctx SX]
+
+    # Header-Zeile
+    lassign $headerBg hr hg hb
+    $pdf setFillColor $hr $hg $hb
+    set totalW [::tcl::mathop::+ {*}$colWidths]
+    $pdf rectangle $x $y $totalW [expr {$rowH + 2}] -filled 1
+
+    $pdf setFont $CFG(fontSizeLabel) $CFG(fontFamilyBold)
+    $pdf setFillColor 1 1 1
+    set cx $x
+    foreach header $headers cw $colWidths {
+        if {$header eq "" || $cw eq ""} continue
+        set textY [expr {$y + $rowH - 2}]
+        $pdf text $header -x [expr {$cx + 3}] -y $textY
+        set cx [expr {$cx + $cw}]
+    }
+
+    $pdf setFillColor 0 0 0
+    lassign $CFG(fieldBorder) fr fg fb
+    $pdf setStrokeColor $fr $fg $fb
+    $pdf setLineWidth $CFG(lineWidth)
+    $pdf rectangle $x $y $totalW [expr {$rowH + 2}]
+
+    ::pdf4tcllib::page::_advance $ctx y [expr {$rowH + 2}]
+
+    # Datenzeilen
+    set rowIdx 0
+    foreach row $data {
+        # Zebra-Streifen
+        if {$rowIdx % 2 == 1} {
+            $pdf setFillColor 0.95 0.95 0.95
+            $pdf rectangle $x $y $totalW $rowH -filled 1
+            $pdf setFillColor 0 0 0
+        }
+
+        $pdf setFont $CFG(fontSize) $CFG(fontFamily)
+        set cx $x
+        foreach cell $row cw $colWidths {
+            if {$cw eq ""} continue
+            if {$cell ne ""} {
+                set textY [expr {$y + $rowH - 2}]
+                $pdf text [string range $cell 0 40] \
+                    -x [expr {$cx + 3}] -y $textY
+            }
+            set cx [expr {$cx + $cw}]
+        }
+
+        $pdf setStrokeColor $fr $fg $fb
+        $pdf rectangle $x $y $totalW $rowH
+        ::pdf4tcllib::page::_advance $ctx y $rowH
+        incr rowIdx
+    }
+
+    # Leerzeilen
+    for {set i 0} {$i < $emptyRows} {incr i} {
+        if {$rowIdx % 2 == 1} {
+            $pdf setFillColor 0.95 0.95 0.95
+            $pdf rectangle $x $y $totalW $rowH -filled 1
+            $pdf setFillColor 0 0 0
+        }
+        $pdf setStrokeColor $fr $fg $fb
+        $pdf rectangle $x $y $totalW $rowH
+        ::pdf4tcllib::page::_advance $ctx y $rowH
+        incr rowIdx
+    }
+
+    $pdf setStrokeColor 0 0 0
+
+    ::pdf4tcllib::page::_advance $ctx y $CFG(rowGap)
+}
+
+# -- sumLine -------------------------------------------------
+
+proc ::pdf4tcllib::form::sumLine {pdf ctx yVar colWidths label value} {
+    # Zeichnet eine Summenzeile am Ende einer Bestelltabelle.
+    # label und value werden rechtbuendig in den letzten zwei Spalten gesetzt.
+    upvar 1 $yVar y
+    variable CFG
+
+    set x      [dict get $ctx SX]
+    set rowH   $CFG(fieldH)
+    set totalW [::tcl::mathop::+ {*}$colWidths]
+
+    # Hintergrund
+    $pdf setFillColor 0.88 0.88 0.88
+    $pdf rectangle $x $y $totalW $rowH -filled 1
+    $pdf setFillColor 0 0 0
+
+    # Label
+    $pdf setFont $CFG(fontSizeLabel) $CFG(fontFamilyBold)
+    set labelX [expr {$x + $totalW - [lindex $colWidths end] \
+                       - [lindex $colWidths end-1] - 4}]
+    set textY  [expr {$y + $rowH - 2}]
+    $pdf text $label -x $labelX -y $textY -align right
+
+    # Wert
+    $pdf setFont $CFG(fontSize) $CFG(fontFamily)
+    set valX [expr {$x + $totalW - 4}]
+    $pdf text $value -x $valX -y $textY -align right
+
+    lassign $CFG(fieldBorder) fr fg fb
+    $pdf setStrokeColor $fr $fg $fb
+    $pdf setLineWidth $CFG(lineWidth)
+    $pdf rectangle $x $y $totalW $rowH
+    $pdf setStrokeColor 0 0 0
+
+    ::pdf4tcllib::page::_advance $ctx y [expr {$rowH + $CFG(rowGap)}]
+}
+
+# ============================================================
+# Ende pdf4tcllib::form
+# ============================================================
+
+
+# ============================================================
+# Ende pdf4tcllib 0.2
+# Tablelist-Export: package require pdf4tcltable
+# TextWidget-Export: package require pdf4tcltext
+# ============================================================

@@ -1,5 +1,43 @@
 # Changelog
 
+## Version 0.3.4 (2026-04-12)
+
+### Dependency update
+
+- **pdf4tcllib 0.1 → 0.2** (`vendors/tm`, `pkgIndex.tcl`)
+  - New in 0.2: `form` namespace for AcroForm layout helpers
+  - BSD 2-Clause license added
+  - `mdpdf-0.2.tm`: `package require pdf4tcllib 0.2`
+  - `-producer` string updated to `pdf4tcllib 0.2`
+
+### Improvements
+
+- **mdpdf-0.2.tm** — `_newPage` helper proc extracted: the page-break
+  pattern (writeFooter + endPage + incr pageNo + startPage + optional
+  writeHeader + reset y) was duplicated 19×. All replaced by `_newPage`
+  calls. ~80 lines removed.
+
+- **mdviewer-0.3.tm** — `renderTableFrame`: deprecated `stripMarkdown`
+  call replaced by `inlinesToText`, consistent with all other render paths.
+  `stripMarkdown` kept but marked DEPRECATED.
+
+- **mdstack-0.1.tm** — `_defaultRender`: comment clarifies that direct
+  module calls are intentional for the default implementation.
+
+- **mdpdf-0.2.tm** — `_renderBlock` render context refactored: the 16
+  parameters `pageW pageH margin fontSize root debug footerTemplate
+  headerTemplate` are now passed as a single `rctx` dict. All 4
+  recursive call sites updated. Reduces call complexity significantly.
+
+- **mdpdf-0.2.tm** — `_renderBlock` split into 11 dedicated sub-procs
+  (`_render_heading`, `_render_paragraph`, `_render_code_block`,
+  `_render_list`, `_render_hr`, `_render_blockquote`, `_render_table`,
+  `_render_image`, `_render_div`, `_render_footnote_section`,
+  `_render_deflist`). `_renderBlock` is now a 25-line dispatcher.
+  1622 → 1789 lines (more structured, each type independently readable).
+
+---
+
 ## Version 0.3.3 (2026-03-14)
 
 ### Bug-fixes

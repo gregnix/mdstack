@@ -1019,7 +1019,7 @@ proc mdviewer::renderTable {path block} {
                     [lindex [lindex [dict get $block rowsInlines] $rowIdx] $c] \
                     $rawCell $w $align tablecell
             } else {
-                set cell [mdviewer::stripMarkdown $rawCell]
+                set cell [mdviewer::inlinesToText [list [dict create type text value $rawCell]]]
                 $t insert end [mdviewer::alignText $cell $w $align] tablecell
             }
             $t insert end " │" tablecell
@@ -1256,6 +1256,7 @@ proc mdviewer::alignText {text width align} {
 
 # DEPRECATED: Ersetzt durch inlinesToText (Prio 17).
 # Only as fallback for ASTs without headerInlines/rowsInlines.
+# DEPRECATED: use inlinesToText instead.
 proc mdviewer::stripMarkdown {text} {
     # ![alt](url) -> [alt]
     regsub -all {!\[([^\]]*)\]\([^)]+\)} $text {[\1]} text

@@ -23,4 +23,4 @@ package ifneeded mdviewer        0.3 [list source [file join $dir lib mdviewer-0
 package ifneeded uicontextmenu   0.1 [list source [file join $dir lib uicontextmenu-0.1.tm]]
 
 # pkgIndex.tcl -- mdstack vendors
-package ifneeded pdf4tcllib 0.1 [list source [file join $dir vendors tm pdf4tcllib-0.1.tm]]
+package ifneeded pdf4tcllib 0.2 [list source [file join $dir vendors tm pdf4tcllib-0.2.tm]]

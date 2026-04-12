@@ -652,6 +652,8 @@ proc mdstack::_onEditorChange {} {
 }
 
 # Default-Render (verwendet mdparser + mdmodel + mdviewer)
+# Diese Proc ruft mdparser/mdmodel/mdviewer direkt auf — das ist bewusst.
+# Fuer eigene Renderer: -render Callback bei setPreviewAPI uebergeben.
 proc mdstack::_defaultRender {w text} {
     if {![winfo exists $w]} return
     

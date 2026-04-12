@@ -5,7 +5,7 @@
 > For exact signatures and options refer to the English version.
 
 
-> Version 0.3
+> Version 0.4
 
 ## Zweck
 
@@ -142,10 +142,14 @@ https://localhost:8443/index.md?theme=hell
 | URL | Verhalten |
 |-----|-----------|
 | `/` | `index.md` wenn vorhanden, sonst Verzeichnis-Listing |
-| `/datei.md` | Markdown -> HTML |
+| `/datei.md` | Markdown → HTML |
+| `/datei` | Clean URL: versucht automatisch `/datei.md` |
 | `/verzeichnis/` | `index.md` oder Verzeichnis-Listing |
 | `.css`, `.js`, `.png`, `.jpg`, `.gif`, `.svg`, `.pdf` | Statische Datei |
 | Nicht gefunden | 404-Seite |
+
+**Clean URLs** erlauben Links ohne `.md`-Endung (z.B. `/dict`, `/array`).
+Wird von `nroff2md --linkmode server` für SEE ALSO-Querverweise genutzt.
 
 ---
 

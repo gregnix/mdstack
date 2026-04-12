@@ -14,14 +14,14 @@ dann über `mdserver` als navigierbare Web-Seite ausgeliefert.
 
 ```
 Quelldistribution
-  src/tcl9.0.3/doc/*.n      nroff-Quellformat
-  src/tk9.0.3/doc/*.n       nroff-Quellformat
+  tcltkdoc/tcl9.0/doc/*.n    nroff-Quellformat (Tcl)
+  tcltkdoc/tk9.0/doc/*.n     nroff-Quellformat (Tk)
         |
-        v nroff2md.tcl --batch
-  sites/tcltk/md/*.md       Markdown
+        v nroff2md.tcl --batch --linkmode server
+  sites/tcltk/md/*.md        Markdown (425 Seiten + index.md)
         |
         v mdserver.tcl
-  http://localhost:8080/    Browser
+  http://localhost:8080/     Browser
 ```
 
 ---
@@ -37,7 +37,7 @@ Die Site-Struktur des mdserver-Projekts:
 ```
 site/
   tools/
-    nroff2md.tcl        Konverter
+    nroff2md.tcl        Konverter (standalone, alle Module eingebettet)
   sites/
     tcltk/
       md/               Konvertierte Manpages (wird erzeugt)
@@ -48,12 +48,15 @@ site/
 
 ## Schritt 2: Manpages konvertieren
 
-### Tcl-Manpages
+### Tcl und Tk in einem Schritt
+
+`nroff2md --batch` sucht rekursiv nach `.n`- und `.3`-Dateien:
 
 ```bash
 tclsh tools/nroff2md.tcl \
-  --batch src/tcl9.0.3/doc/ \
-  sites/tcltk/md/
+  --batch tcltkdoc/ \
+  sites/tcltk/md/ \
+  --linkmode server
 ```
 
 Ausgabe (Auszug):
@@ -61,32 +64,55 @@ Ausgabe (Auszug):
 ```
 Written: sites/tcltk/md/dict.md
 Written: sites/tcltk/md/chan.md
-Written: sites/tcltk/md/string.md
 ...
-Converted: 248  Failed: 0  Total: 248
+Converted: 425  Failed: 0  Total: 425
+Index:   sites/tcltk/md/index.md (425 entries)
 ```
 
-### Tk-Manpages (optional, zusätzlich)
+Ein einziger Aufruf genügt — `tcl9.0/doc/` und `tk9.0/doc/` werden
+automatisch gefunden.
 
-```bash
-tclsh tools/nroff2md.tcl \
-  --batch src/tk9.0.3/doc/ \
-  sites/tcltk/md/
+### Was wird erzeugt
+
+**`sites/tcltk/md/*.md`** — 425 konvertierte Manpages, jede beginnt mit:
+```markdown
+[<< Index](index.md)
 ```
 
-Die Ausgabe landet im selben Verzeichnis. Namenskonflikte gibt es nicht, da die
-Dateinamen eindeutig sind.
+**`sites/tcltk/md/index.md`** — kategorisiertes Inhaltsverzeichnis:
 
-### Mit expliziter Codesprache
+```markdown
+## Tcl Commands
 
-Standardmäßig verwendet `nroff2md` `tcl` als Sprache für Code-Blöcke. Das ist
-für alle Tcl/Tk-Manpages korrekt:
+[A](#tcl-a) | [B](#tcl-b) | [C](#tcl-c) | ...
+
+### tcl-a
+
+- [after(n)](/after)
+- [apply(n)](/apply)
+- [array(n)](/array)
+
+## Tk Commands
+
+[B](#tk-b) | [C](#tk-c) | ...
+
+## C API
+
+[A](#c-a) | ...
+```
+
+### Link-Modi
+
+| Modus | Verwendung | Links |
+|-------|-----------|-------|
+| `--linkmode server` | mit mdserver | `/pagename` |
+| `--linkmode file` | Dateisystem/Editor | `pagename.md` |
+| `--linkmode none` | kein Linking (Standard) | Plaintext |
+
+### Ohne Index
 
 ```bash
-tclsh tools/nroff2md.tcl \
-  --batch src/tcl9.0.3/doc/ \
-  sites/tcltk/md/ \
-  -lang tcl
+tclsh tools/nroff2md.tcl --batch tcltkdoc/ sites/tcltk/md/ --no-index
 ```
 
 ---
@@ -111,57 +137,74 @@ Press Ctrl+C to stop.
 
 Browser öffnen: **http://localhost:8080/**
 
+### Clean URLs
+
+Der mdserver unterstützt Clean URLs — SEE ALSO-Links ohne `.md`-Endung
+werden automatisch aufgelöst:
+
+```
+/dict    → dict.md    ✅
+/array   → array.md   ✅
+```
+
+Deshalb funktioniert `--linkmode server` direkt.
+
 ---
 
 ## Was der mdserver anzeigt
 
 ### Index-Seite (`/`)
 
-Die Startseite zeigt alle konvertierten Manpages mit verlinkten Titeln, sortiert
-alphabetisch. Titel werden aus dem `.TH`-Makro des nroff-Originals gewonnen —
-das ergibt lesbare Namen wie *dict*, *chan*, *string* statt Dateinamen.
+Da `index.md` vorhanden ist, zeigt der Server diese statt der automatischen
+Dateiliste. Die `index.md` enthält:
+
+- Drei Kategorien: **Tcl Commands**, **Tk Commands**, **C API**
+- Alphabetische Sprungmarken: `[A](#tcl-a) | [B](#tcl-b) | ...`
+- Links zu allen 425 Seiten als `/pagename`
 
 ### Einzelne Seite
 
 Jede Manpage wird als HTML gerendert mit:
 
+- `[<< Index](index.md)` als Zurück-Navigation
 - H1-Überschrift aus `.TH` (Seitenname)
-- H2-Abschnitte aus `.SH` (NAME, SYNOPSIS, DESCRIPTION, EXAMPLES, ...)
+- H2-Abschnitte aus `.SH` (NAME, SYNOPSIS, DESCRIPTION, ...)
 - H3-Abschnitte aus `.SS`
-- Fettdruck für Befehlsnamen (`\fB...\fR`)
-- Kursiv für Argumente (`\fI...\fR`)
-- Code-Blöcke aus `.nf`/`.fi` und `.CS`/`.CE`
-- Definition-Listen aus `.TP` (Befehlsoptionen, Schlüsselwörter)
+- Code-Blöcke aus `.CS`/`.CE` und `.nf`/`.fi`
+- Definition-Listen aus `.TP` (korrekt getrennt, auch wenn Term und
+  Beschreibung auf einer Zeile stehen)
+- SEE ALSO als klickbare Links zu anderen Seiten
 
 ---
 
 ## Einzelne Datei konvertieren
 
-Für schnelle Tests oder die Konvertierung einzelner Seiten:
-
 ```bash
 # Ausgabe auf stdout
-tclsh tools/nroff2md.tcl src/tcl9.0.3/doc/dict.n
+tclsh tools/nroff2md.tcl tcltkdoc/tcl9.0/doc/dict.n
 
 # In Datei schreiben
-tclsh tools/nroff2md.tcl src/tcl9.0.3/doc/dict.n sites/tcltk/md/dict.md
+tclsh tools/nroff2md.tcl tcltkdoc/tcl9.0/doc/dict.n sites/tcltk/md/dict.md
 
 # Aus stdin
-cat src/tcl9.0.3/doc/dict.n | tclsh tools/nroff2md.tcl -
+cat tcltkdoc/tcl9.0/doc/dict.n | tclsh tools/nroff2md.tcl -
 ```
 
 ---
 
 ## Manpages aktualisieren
 
-Wenn eine neue Tcl/Tk-Version erscheint, reicht ein erneuter Batch-Lauf:
+Wenn eine neue Tcl/Tk-Version erscheint:
 
 ```bash
 # Altes md-Verzeichnis leeren
 rm sites/tcltk/md/*.md
 
 # Neu konvertieren
-tclsh tools/nroff2md.tcl --batch src/tcl9.0.4/doc/ sites/tcltk/md/
+tclsh tools/nroff2md.tcl \
+  --batch tcltkdoc/ \
+  sites/tcltk/md/ \
+  --linkmode server
 ```
 
 Der mdserver muss dafür nicht neu gestartet werden — er liest `.md`-Dateien
@@ -169,32 +212,7 @@ bei jedem Request frisch vom Dateisystem.
 
 ---
 
-## Bekannte Einschränkungen
-
-**TP-Listen mit verketteten Einträgen:** In einigen Manpages (z.B. `chan.n`)
-stehen mehrere `.TP`-Einträge direkt hintereinander ohne trennende `.PP`-Makros.
-Der aktuelle nroff2md-Renderer fasst die Einträge korrekt zusammen, aber
-aufeinanderfolgende Terme können ohne Zwischenzeile gerendert werden. An einem
-Fix wird gearbeitet.
-
-**C-API-Manpages (`.3`-Dateien):** Die C-API-Seiten (z.B. `CrtChannel.3`,
-`DString.3`) enthalten häufig C-Code-Blöcke. Diese werden mit `-lang tcl`
-markiert, was nicht optimal ist. Mit `-lang c` wäre es besser:
-
-```bash
-# Nur C-API-Seiten mit -lang c konvertieren
-tclsh tools/nroff2md.tcl --batch src/tcl9.0.3/doc/ sites/tcltk/md/c-api/ -lang c
-```
-
-**Tabs in Tabellen:** Das `.SO`-Makro (Standard-Optionen) erzeugt
-tab-separierte Layouts, die als Freitext-Absätze gerendert werden, nicht als
-Markdown-Tabellen. Betrifft vor allem Tk-Widget-Optionsseiten.
-
----
-
 ## Automatischer Start-Wrapper
-
-Für den täglichen Gebrauch empfiehlt sich ein kleines Start-Script:
 
 ```bash
 #!/bin/bash
@@ -205,12 +223,25 @@ exec tclsh mdserver.tcl \
   --port 8080
 ```
 
-Aufruf:
-
 ```bash
 chmod +x start-tcldoc.sh
 ./start-tcldoc.sh
 ```
+
+---
+
+## Bekannte Einschränkungen
+
+**C-API-Manpages (`.3`-Dateien):** C-Code-Blöcke werden mit `-lang tcl`
+markiert. Für reine C-API-Konvertierung:
+
+```bash
+tclsh tools/nroff2md.tcl --batch tcltkdoc/tcl9.0/doc/ sites/tcltk/md/ -lang c
+```
+
+**Tabs in Tabellen:** Das `.SO`-Makro erzeugt tab-separierte Layouts,
+die als Freitext gerendert werden, nicht als Markdown-Tabellen.
+Betrifft Tk-Widget-Optionsseiten.
 
 ---
 

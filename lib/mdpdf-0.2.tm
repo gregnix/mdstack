@@ -6,7 +6,7 @@
 #
 # Requirements:
 #   package require pdf4tcl 0.9.4.11+
-#   package require pdf4tcllib 0.1
+#   package require pdf4tcllib 0.2
 #
 # New options (0.9.4.11):
 #   -compress 1|0         zlib compression (default: 1)
@@ -174,7 +174,7 @@ proc mdpdf::exportFile {mdFile outputFile args} {
     }
 
     # pdf4tcllib for preprocessBytes laden
-    if {[catch {package require pdf4tcllib 0.1} err]} {
+    if {[catch {package require pdf4tcllib 0.2} err]} {
         error "pdf4tcllib not available: $err"
     }
 
@@ -227,7 +227,7 @@ proc mdpdf::export {ast outputFile args} {
     if {[catch {package require pdf4tcl} err]} {
         error "pdf4tcl not available: $err"
     }
-    if {[catch {package require pdf4tcllib 0.1} err]} {
+    if {[catch {package require pdf4tcllib 0.2} err]} {
         error "pdf4tcllib not available: $err"
     }
 
@@ -259,7 +259,7 @@ proc mdpdf::export {ast outputFile args} {
     $pdf metadata \
         -title    $metaTitle \
         -creator  $metaCreator \
-        -producer "pdf4tcl [package require pdf4tcl] / pdf4tcllib 0.1"
+        -producer "pdf4tcl [package require pdf4tcl] / pdf4tcllib 0.2"
 
     # Page dimensions via page::context
     set ctx [::pdf4tcllib::page::context $opts(pagesize)]
@@ -301,22 +301,27 @@ proc mdpdf::export {ast outputFile args} {
         set y [expr {$y + $lineH}]
     }
 
+    # Build render context dict
+    set rctx [dict create \
+        pageW          $pageW          \
+        pageH          $pageH          \
+        margin         $margin         \
+        fontSize       $fontSize       \
+        root           $opts(root)     \
+        debug          $opts(debug)    \
+        footerTemplate $opts(footer)   \
+        headerTemplate $opts(header)]
+
     # Render blocks
     if {[dict exists $ast blocks]} {
         foreach block [dict get $ast blocks] {
-            set y [mdpdf::_renderBlock $pdf $block $y $x0 $maxW $yTop $yBot \
-                $pageW $pageH $margin $fontSize $opts(root) $opts(debug) \
-                pageNo $opts(footer) $opts(header) 0]
+            set y [mdpdf::_renderBlock $pdf $rctx $block $y $x0 $maxW $yTop $yBot \
+                pageNo 0]
 
             # Check page break
             if {$y > $yBot} {
-                mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $opts(footer)
-                $pdf endPage
-                incr pageNo
-                $pdf startPage
-                if {$opts(header) ne ""} {
-                    mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $opts(header)
-                }
+                mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                    $opts(footer) $opts(header)
                 set y $yTop
             }
         }
@@ -351,623 +356,672 @@ proc mdpdf::exportModel {doc outputFile args} {
 # Block-Rendering
 # ============================================================
 
-proc mdpdf::_renderBlock {pdf block y x0 maxW yTop yBot pageW pageH margin fontSize root debug pageNoVar footerTemplate headerTemplate {quoteDepth 0}} {
+proc mdpdf::_renderBlock {pdf rctx block y x0 maxW yTop yBot pageNoVar {quoteDepth 0}} {
     upvar $pageNoVar pageNo
-
-    set type [dict get $block type]
-    set lineH [expr {int(ceil($fontSize * 1.4))}]
-
-    switch $type {
+    set type  [dict get $block type]
+    set lineH [expr {int(ceil([dict get $rctx fontSize] * 1.4))}]
+    switch -- $type {
         heading {
-            set level [dict get $block level]
-            set text [::pdf4tcllib::unicode::sanitize [mdpdf::_inlinesToPlainText $block]]
-            # Scaling: H1 +6pt, H2 +4pt, H3 +2pt, H4 +1pt, H5-H6 = base
-            set hDeltas {6 4 2 1 0 0}
-            set hDelta [lindex $hDeltas [expr {min($level - 1, 5)}]]
-            set hFontSize [expr {$fontSize + $hDelta}]
-
-            # Space before heading (except at page top)
-            if {$y > $yTop + $lineH} {
-                set y [expr {$y + int($hFontSize * 1.2)}]
-            }
-
-            # Check page break (heading + at least 2 lines of text)
-            if {$y + $hFontSize * 3.5 > $yBot} {
-                mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                $pdf endPage
-                incr pageNo
-                $pdf startPage
-                if {$headerTemplate ne ""} {
-                    mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                }
-                set y $yTop
-            }
-
-            $pdf setFont $hFontSize [::pdf4tcllib::fonts::fontSansBold]
-            $pdf text $text -x $x0 -y $y
-            # PDF-Bookmark: level 0=H1, 1=H2, 2=H3 usw. H3+ geschlossen
-            set bmLevel [expr {$level - 1}]
-            set bmClosed [expr {$level > 2 ? 1 : 0}]
-            $pdf bookmarkAdd -title $text -level $bmLevel -closed $bmClosed
-            set y [expr {$y + int($hFontSize * 1.6)}]
+            return [mdpdf::_render_heading $pdf $rctx $block $y $x0 $maxW $yTop $yBot $pageNoVar $quoteDepth]
         }
-
         paragraph {
-            set baseStyle [expr {$quoteDepth > 0 ? "italic" : "normal"}]
-
-            if {[dict exists $block content]} {
-                set segs [mdpdf::_inlinesToSegments [dict get $block content] $baseStyle]
-            } else {
-                set segs [list [list "" "normal"]]
-            }
-
-            set wrappedLines [mdpdf::_wrapStyledSegments $segs $maxW $fontSize]
-
-            foreach lineSegs $wrappedLines {
-                if {$y + $lineH > $yBot} {
-                    mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                    $pdf endPage
-                    incr pageNo
-                    $pdf startPage
-                    if {$headerTemplate ne ""} {
-                        mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                    }
-                    set y $yTop
-                }
-
-                mdpdf::_renderStyledLine $pdf $lineSegs $y $x0 $fontSize
-                set y [expr {$y + $lineH}]
-            }
+            return [mdpdf::_render_paragraph $pdf $rctx $block $y $x0 $maxW $yTop $yBot $pageNoVar $quoteDepth]
         }
-
         code_block {
-            set code [dict get $block text]
-
-            # Space before code block
-            set y [expr {$y + int($lineH * 0.4)}]
-
-            # Check page break
-            if {$y + $lineH > $yBot} {
-                mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                $pdf endPage
-                incr pageNo
-                $pdf startPage
-                if {$headerTemplate ne ""} {
-                    mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                }
-                set y $yTop
-            }
-
-            set codeFontName [::pdf4tcllib::fonts::fontMono]
-            $pdf setFont $fontSize $codeFontName
-            set lines [split $code "\n"]
-            set codeLineH [expr {int($fontSize * 1.2)}]
-            set codePadding 6
-            set codeX0 [expr {$x0 + $codePadding}]
-            set codeMaxW [expr {$maxW - 2 * $codePadding}]
-
-            foreach line $lines {
-                if {$y + $codeLineH > $yBot} {
-                    mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                    $pdf endPage
-                    incr pageNo
-                    $pdf startPage
-                    if {$headerTemplate ne ""} {
-                        mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                    }
-                    set y $yTop
-                }
-
-                # text::wrap with codeContinuation for backslash wrapping
-                set wrapped [::pdf4tcllib::text::wrap $line $codeMaxW $fontSize $codeFontName 1]
-                foreach wline $wrapped {
-                    if {$y + $codeLineH > $yBot} {
-                        mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                        $pdf endPage
-                        incr pageNo
-                        $pdf startPage
-                        set y $yTop
-                    }
-
-                    $pdf setFont $fontSize $codeFontName
-                    $pdf text [::pdf4tcllib::unicode::sanitize $wline -mono 1] -x $codeX0 -y $y
-                    set y [expr {$y + $codeLineH}]
-                }
-            }
-            # Space after code block
-            set y [expr {$y + int($lineH * 0.4)}]
+            return [mdpdf::_render_code_block $pdf $rctx $block $y $x0 $maxW $yTop $yBot $pageNoVar $quoteDepth]
         }
-
         list {
-            set items [dict get $block items]
-            if {[dict exists $block style]} {
-                set ordered [expr {[dict get $block style] eq "ordered"}]
-            } else {
-                set ordered 0
-            }
-
-            set baseStyle [expr {$quoteDepth > 0 ? "italic" : "normal"}]
-            set num 1
-            set numItems [llength $items]
-            set itemIdx  0
-
-            # Kompakt-Check: kurze Listen (bis 8 Items) zusammenhalten.
-            # Wenn die ganze Liste nicht auf die aktuelle Seite passt
-            # aber auf eine neue Seite passen wuerde -> jetzt umbrechen.
-            set totalH [expr {$numItems * $lineH}]
-            set pageH_usable [expr {$yBot - $yTop}]
-            if {$numItems <= 8 && $totalH <= $pageH_usable &&
-                $y + $totalH > $yBot} {
-                mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                $pdf endPage
-                incr pageNo
-                $pdf startPage
-                if {$headerTemplate ne ""} {
-                    mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                }
-                set y $yTop
-            }
-
-            foreach item $items {
-                # Normaler Seitenumbruch-Check pro Item
-                if {$y + $lineH > $yBot} {
-                    mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                    $pdf endPage
-                    incr pageNo
-                    $pdf startPage
-                    if {$headerTemplate ne ""} {
-                        mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                    }
-                    set y $yTop
-                }
-
-                if {$ordered} {
-                    set prefix "$num. "
-                } elseif {[dict exists $item checked]} {
-                    # Task-List-Item
-                    set prefix [expr {[dict get $item checked] ? {[x] } : {[ ] }}]
-                } else {
-                    set prefix "- "
-                }
-
-                set indent   0
-                set itemX0   $x0
-                set itemMaxW $maxW
-
-                set segs [list [list $prefix $baseStyle]]
-                # Render first paragraph from item blocks
-                set itemBlocks [dict get $item blocks]
-                set firstBlock [lindex $itemBlocks 0]
-                if {[dict get $firstBlock type] eq "paragraph" &&
-                    [dict exists $firstBlock content]} {
-                    lappend segs {*}[mdpdf::_inlinesToSegments \
-                        [dict get $firstBlock content] $baseStyle]
-                }
-
-                # Continuation lines of wrapped text: indent to align after prefix
-                set prefixW [::pdf4tcllib::text::width $prefix $fontSize \
-                    [mdpdf::_styleToFont $baseStyle]]
-                set contX [expr {$itemX0 + $prefixW}]
-                set contW [expr {$itemMaxW - $prefixW}]
-
-                set wrappedLines [mdpdf::_wrapStyledSegments $segs $itemMaxW $fontSize]
-
-                set lineIdx 0
-                foreach lineSegs $wrappedLines {
-                    if {$y + $lineH > $yBot} {
-                        mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                        $pdf endPage
-                        incr pageNo
-                        $pdf startPage
-                        set y $yTop
-                    }
-                    if {$lineIdx == 0} {
-                        mdpdf::_renderStyledLine $pdf $lineSegs $y $itemX0 $fontSize
-                    } else {
-                        mdpdf::_renderStyledLine $pdf $lineSegs $y $contX $fontSize
-                    }
-                    set y [expr {$y + $lineH}]
-                    incr lineIdx
-                }
-
-                # Sub-lists: rekursiv mit tieferer Einrückung
-                foreach subBlock [lrange $itemBlocks 1 end] {
-                    set subType [dict get $subBlock type]
-                    if {$subType eq "list"} {
-                        set subIndent [expr {$itemX0 + 12}]
-                        set subMaxW   [expr {$maxW - ($subIndent - $x0)}]
-                        set y [mdpdf::_renderBlock $pdf $subBlock $y \
-                            $subIndent $subMaxW $yTop $yBot $pageW $pageH $margin \
-                            $fontSize $root $debug pageNo \
-                            $footerTemplate $headerTemplate $quoteDepth]
-                    }
-                }
-
-                incr num
-                incr itemIdx
-            }
+            return [mdpdf::_render_list $pdf $rctx $block $y $x0 $maxW $yTop $yBot $pageNoVar $quoteDepth]
         }
-
         hr {
-            if {$y + $lineH > $yBot} {
-                mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                $pdf endPage
-                incr pageNo
-                $pdf startPage
-                if {$headerTemplate ne ""} {
-                    mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                }
-                set y $yTop
-            }
-
-            set y [expr {$y + $lineH * 0.5}]
-            $pdf setStrokeColor 0.5 0.5 0.5
-            $pdf setLineWidth 0.5
-            $pdf line $x0 $y [expr {$x0 + $maxW}] $y
-            $pdf setStrokeColor 0 0 0
-            set y [expr {$y + $lineH * 1.0}]
+            return [mdpdf::_render_hr $pdf $rctx $block $y $x0 $maxW $yTop $yBot $pageNoVar $quoteDepth]
         }
-
         blockquote {
-            set indent [expr {20 + $quoteDepth * 15}]
-            set quoteX [expr {$x0 + $indent}]
-            set quoteW [expr {$maxW - $indent}]
-            set newDepth [expr {$quoteDepth + 1}]
+            return [mdpdf::_render_blockquote $pdf $rctx $block $y $x0 $maxW $yTop $yBot $pageNoVar $quoteDepth]
+        }
+        table {
+            return [mdpdf::_render_table $pdf $rctx $block $y $x0 $maxW $yTop $yBot $pageNoVar $quoteDepth]
+        }
+        image {
+            return [mdpdf::_render_image $pdf $rctx $block $y $x0 $maxW $yTop $yBot $pageNoVar $quoteDepth]
+        }
+        div {
+            return [mdpdf::_render_div $pdf $rctx $block $y $x0 $maxW $yTop $yBot $pageNoVar $quoteDepth]
+        }
+        footnote_section {
+            return [mdpdf::_render_footnote_section $pdf $rctx $block $y $x0 $maxW $yTop $yBot $pageNoVar $quoteDepth]
+        }
+        deflist {
+            return [mdpdf::_render_deflist $pdf $rctx $block $y $x0 $maxW $yTop $yBot $pageNoVar $quoteDepth]
+        }
+        default {
+            if {[dict get $rctx debug]} {
+                puts "mdpdf: Unbekannter Block-Typ: $type"
+            }
+        }
+    }
+    return $y
+}
 
-            # Top-Margin vor Blockquote
-            set y [expr {$y + int($lineH * 0.5)}]
+proc mdpdf::_render_heading {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDepth} {
+    upvar $pageNoVar pageNo
+    set pageW          [dict get $rctx pageW]
+    set pageH          [dict get $rctx pageH]
+    set margin         [dict get $rctx margin]
+    set fontSize       [dict get $rctx fontSize]
+    set root           [dict get $rctx root]
+    set debug          [dict get $rctx debug]
+    set footerTemplate [dict get $rctx footerTemplate]
+    set headerTemplate [dict get $rctx headerTemplate]
+    set lineH [expr {int(ceil($fontSize * 1.4))}]
+    set level [dict get $block level]
+    set text [::pdf4tcllib::unicode::sanitize [mdpdf::_inlinesToPlainText $block]]
+    # Scaling: H1 +6pt, H2 +4pt, H3 +2pt, H4 +1pt, H5-H6 = base
+    set hDeltas {6 4 2 1 0 0}
+    set hDelta [lindex $hDeltas [expr {min($level - 1, 5)}]]
+    set hFontSize [expr {$fontSize + $hDelta}]
 
-            if {[dict exists $block blocks]} {
-                set subBlocks [dict get $block blocks]
-                set numSubs [llength $subBlocks]
-                set subIdx 0
+    # Space before heading (except at page top)
+    if {$y > $yTop + $lineH} {
+        set y [expr {$y + int($hFontSize * 1.2)}]
+    }
 
-                foreach subBlock $subBlocks {
-                    set y [mdpdf::_renderBlock $pdf $subBlock $y $quoteX $quoteW \
-                        $yTop $yBot $pageW $pageH $margin $fontSize $root $debug \
-                        pageNo $footerTemplate $headerTemplate $newDepth]
+    # Check page break (heading + at least 2 lines of text)
+    if {$y + $hFontSize * 3.5 > $yBot} {
+        mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+            $footerTemplate $headerTemplate
+    }
 
-                    incr subIdx
-                    if {$subIdx < $numSubs} {
-                        set y [expr {$y + int($lineH * 0.3)}]
-                    }
+    $pdf setFont $hFontSize [::pdf4tcllib::fonts::fontSansBold]
+    $pdf text $text -x $x0 -y $y
+    # PDF-Bookmark: level 0=H1, 1=H2, 2=H3 usw. H3+ geschlossen
+    set bmLevel [expr {$level - 1}]
+    set bmClosed [expr {$level > 2 ? 1 : 0}]
+    $pdf bookmarkAdd -title $text -level $bmLevel -closed $bmClosed
+    set y [expr {$y + int($hFontSize * 1.6)}]
+    return $y
+}
 
-                    if {$y > $yBot} {
-                        mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin \
-                            $fontSize $footerTemplate
-                        $pdf endPage
-                        incr pageNo
-                        $pdf startPage
-                        set y $yTop
-                    }
-                }
+proc mdpdf::_render_paragraph {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDepth} {
+    upvar $pageNoVar pageNo
+    set pageW          [dict get $rctx pageW]
+    set pageH          [dict get $rctx pageH]
+    set margin         [dict get $rctx margin]
+    set fontSize       [dict get $rctx fontSize]
+    set root           [dict get $rctx root]
+    set debug          [dict get $rctx debug]
+    set footerTemplate [dict get $rctx footerTemplate]
+    set headerTemplate [dict get $rctx headerTemplate]
+    set lineH [expr {int(ceil($fontSize * 1.4))}]
+    set baseStyle [expr {$quoteDepth > 0 ? "italic" : "normal"}]
+
+    if {[dict exists $block content]} {
+        set segs [mdpdf::_inlinesToSegments [dict get $block content] $baseStyle]
+    } else {
+        set segs [list [list "" "normal"]]
+    }
+
+    set wrappedLines [mdpdf::_wrapStyledSegments $segs $maxW $fontSize]
+
+    foreach lineSegs $wrappedLines {
+        if {$y + $lineH > $yBot} {
+            mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                $footerTemplate $headerTemplate
+        }
+
+        mdpdf::_renderStyledLine $pdf $lineSegs $y $x0 $fontSize
+        set y [expr {$y + $lineH}]
+    }
+    return $y
+}
+
+proc mdpdf::_render_code_block {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDepth} {
+    upvar $pageNoVar pageNo
+    set pageW          [dict get $rctx pageW]
+    set pageH          [dict get $rctx pageH]
+    set margin         [dict get $rctx margin]
+    set fontSize       [dict get $rctx fontSize]
+    set root           [dict get $rctx root]
+    set debug          [dict get $rctx debug]
+    set footerTemplate [dict get $rctx footerTemplate]
+    set headerTemplate [dict get $rctx headerTemplate]
+    set lineH [expr {int(ceil($fontSize * 1.4))}]
+    set code [dict get $block text]
+
+    # Space before code block
+    set y [expr {$y + int($lineH * 0.4)}]
+
+    # Check page break
+    if {$y + $lineH > $yBot} {
+        mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+            $footerTemplate $headerTemplate
+    }
+
+    set codeFontName [::pdf4tcllib::fonts::fontMono]
+    $pdf setFont $fontSize $codeFontName
+    set lines [split $code "\n"]
+    set codeLineH [expr {int($fontSize * 1.2)}]
+    set codePadding 6
+    set codeX0 [expr {$x0 + $codePadding}]
+    set codeMaxW [expr {$maxW - 2 * $codePadding}]
+
+    foreach line $lines {
+        if {$y + $codeLineH > $yBot} {
+            mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                $footerTemplate $headerTemplate
+        }
+
+        # text::wrap with codeContinuation for backslash wrapping
+        set wrapped [::pdf4tcllib::text::wrap $line $codeMaxW $fontSize $codeFontName 1]
+        foreach wline $wrapped {
+            if {$y + $codeLineH > $yBot} {
+                mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                    $footerTemplate $headerTemplate
+            }
+
+            $pdf setFont $fontSize $codeFontName
+            $pdf text [::pdf4tcllib::unicode::sanitize $wline -mono 1] -x $codeX0 -y $y
+            set y [expr {$y + $codeLineH}]
+        }
+    }
+    # Space after code block
+    set y [expr {$y + int($lineH * 0.4)}]
+    return $y
+}
+
+proc mdpdf::_render_list {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDepth} {
+    upvar $pageNoVar pageNo
+    set pageW          [dict get $rctx pageW]
+    set pageH          [dict get $rctx pageH]
+    set margin         [dict get $rctx margin]
+    set fontSize       [dict get $rctx fontSize]
+    set root           [dict get $rctx root]
+    set debug          [dict get $rctx debug]
+    set footerTemplate [dict get $rctx footerTemplate]
+    set headerTemplate [dict get $rctx headerTemplate]
+    set lineH [expr {int(ceil($fontSize * 1.4))}]
+    set items [dict get $block items]
+    if {[dict exists $block style]} {
+        set ordered [expr {[dict get $block style] eq "ordered"}]
+    } else {
+        set ordered 0
+    }
+
+    set baseStyle [expr {$quoteDepth > 0 ? "italic" : "normal"}]
+    set num 1
+    set numItems [llength $items]
+    set itemIdx  0
+
+    # Kompakt-Check: kurze Listen (bis 8 Items) zusammenhalten.
+    # Wenn die ganze Liste nicht auf die aktuelle Seite passt
+    # aber auf eine neue Seite passen wuerde -> jetzt umbrechen.
+    set totalH [expr {$numItems * $lineH}]
+    set pageH_usable [expr {$yBot - $yTop}]
+    if {$numItems <= 8 && $totalH <= $pageH_usable &&
+        $y + $totalH > $yBot} {
+        mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+            $footerTemplate $headerTemplate
+    }
+
+    foreach item $items {
+        # Normaler Seitenumbruch-Check pro Item
+        if {$y + $lineH > $yBot} {
+            mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                $footerTemplate $headerTemplate
+        }
+
+        if {$ordered} {
+            set prefix "$num. "
+        } elseif {[dict exists $item checked]} {
+            # Task-List-Item
+            set prefix [expr {[dict get $item checked] ? {[x] } : {[ ] }}]
+        } else {
+            set prefix "- "
+        }
+
+        set indent   0
+        set itemX0   $x0
+        set itemMaxW $maxW
+
+        set segs [list [list $prefix $baseStyle]]
+        # Render first paragraph from item blocks
+        set itemBlocks [dict get $item blocks]
+        set firstBlock [lindex $itemBlocks 0]
+        if {[dict get $firstBlock type] eq "paragraph" &&
+            [dict exists $firstBlock content]} {
+            lappend segs {*}[mdpdf::_inlinesToSegments \
+                [dict get $firstBlock content] $baseStyle]
+        }
+
+        # Continuation lines of wrapped text: indent to align after prefix
+        set prefixW [::pdf4tcllib::text::width $prefix $fontSize \
+            [mdpdf::_styleToFont $baseStyle]]
+        set contX [expr {$itemX0 + $prefixW}]
+        set contW [expr {$itemMaxW - $prefixW}]
+
+        set wrappedLines [mdpdf::_wrapStyledSegments $segs $itemMaxW $fontSize]
+
+        set lineIdx 0
+        foreach lineSegs $wrappedLines {
+            if {$y + $lineH > $yBot} {
+                mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                    $footerTemplate $headerTemplate
+            }
+            if {$lineIdx == 0} {
+                mdpdf::_renderStyledLine $pdf $lineSegs $y $itemX0 $fontSize
             } else {
-                if {$y + $lineH > $yBot} {
-                    mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin \
-                        $fontSize $footerTemplate
-                    $pdf endPage
-                    incr pageNo
-                    $pdf startPage
-                    set y $yTop
-                }
-                set y [expr {$y + $lineH}]
+                mdpdf::_renderStyledLine $pdf $lineSegs $y $contX $fontSize
+            }
+            set y [expr {$y + $lineH}]
+            incr lineIdx
+        }
+
+        # Sub-lists: rekursiv mit tieferer Einrückung
+        foreach subBlock [lrange $itemBlocks 1 end] {
+            set subType [dict get $subBlock type]
+            if {$subType eq "list"} {
+                set subIndent [expr {$itemX0 + 12}]
+                set subMaxW   [expr {$maxW - ($subIndent - $x0)}]
+                set y [mdpdf::_renderBlock $pdf $subBlock $y \
+                    $subIndent $subMaxW $yTop $yBot $pageW $pageH $margin \
+                    $fontSize $root $debug pageNo \
+                    $footerTemplate $headerTemplate $quoteDepth]
             }
         }
 
-        table {
-            set header [dict get $block header]
-            set rows [dict get $block rows]
-            set alignments [dict get $block alignments]
-            set hasInlines [dict exists $block headerInlines]
+        incr num
+        incr itemIdx
+    }
+    return $y
+}
 
-            set cols [llength $header]
-            set cellPad 4
-            set fontSans [::pdf4tcllib::fonts::fontSans]
-            set fontBold [::pdf4tcllib::fonts::fontSansBold]
+proc mdpdf::_render_hr {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDepth} {
+    upvar $pageNoVar pageNo
+    set pageW          [dict get $rctx pageW]
+    set pageH          [dict get $rctx pageH]
+    set margin         [dict get $rctx margin]
+    set fontSize       [dict get $rctx fontSize]
+    set root           [dict get $rctx root]
+    set debug          [dict get $rctx debug]
+    set footerTemplate [dict get $rctx footerTemplate]
+    set headerTemplate [dict get $rctx headerTemplate]
+    set lineH [expr {int(ceil($fontSize * 1.4))}]
+    if {$y + $lineH > $yBot} {
+        mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+            $footerTemplate $headerTemplate
+    }
 
-            # Measure column widths and per-column minimum widths.
-            # colPixelWidths: max content width per column (for proportional scaling)
-            # colMinWidths:   min width = longest single word per column + padding
-            #                 (ensures no word is broken mid-token after scaling)
-            set colPixelWidths [lrepeat $cols 0]
-            set colMinWidths   [lrepeat $cols 0]
+    set y [expr {$y + $lineH * 0.5}]
+    $pdf setStrokeColor 0.5 0.5 0.5
+    $pdf setLineWidth 0.5
+    $pdf line $x0 $y [expr {$x0 + $maxW}] $y
+    $pdf setStrokeColor 0 0 0
+    set y [expr {$y + $lineH * 1.0}]
+    return $y
+}
 
-            # Header widths (bold)
-            for {set c 0} {$c < $cols} {incr c} {
-                if {$hasInlines} {
-                    set cellText [mdpdf::_inlineListToText [lindex [dict get $block headerInlines] $c]]
-                } else {
-                    set cellText [lindex $header $c]
-                }
-                set pw [::pdf4tcllib::text::width $cellText $fontSize $fontBold]
-                if {$pw > [lindex $colPixelWidths $c]} {
-                    lset colPixelWidths $c $pw
-                }
-                set mw [mdpdf::_maxWordWidth $cellText $fontSize $fontBold]
-                if {$mw > [lindex $colMinWidths $c]} {
-                    lset colMinWidths $c $mw
-                }
+proc mdpdf::_render_blockquote {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDepth} {
+    upvar $pageNoVar pageNo
+    set pageW          [dict get $rctx pageW]
+    set pageH          [dict get $rctx pageH]
+    set margin         [dict get $rctx margin]
+    set fontSize       [dict get $rctx fontSize]
+    set root           [dict get $rctx root]
+    set debug          [dict get $rctx debug]
+    set footerTemplate [dict get $rctx footerTemplate]
+    set headerTemplate [dict get $rctx headerTemplate]
+    set lineH [expr {int(ceil($fontSize * 1.4))}]
+    set indent [expr {20 + $quoteDepth * 15}]
+    set quoteX [expr {$x0 + $indent}]
+    set quoteW [expr {$maxW - $indent}]
+    set newDepth [expr {$quoteDepth + 1}]
+
+    # Top-Margin vor Blockquote
+    set y [expr {$y + int($lineH * 0.5)}]
+
+    if {[dict exists $block blocks]} {
+        set subBlocks [dict get $block blocks]
+        set numSubs [llength $subBlocks]
+        set subIdx 0
+
+        foreach subBlock $subBlocks {
+            set y [mdpdf::_renderBlock $pdf $subBlock $y $quoteX $quoteW \
+                $yTop $yBot $pageW $pageH $margin $fontSize $root $debug \
+                pageNo $footerTemplate $headerTemplate $newDepth]
+
+            incr subIdx
+            if {$subIdx < $numSubs} {
+                set y [expr {$y + int($lineH * 0.3)}]
             }
 
-            # Data widths (normal)
-            set ri 0
-            foreach row $rows {
-                for {set c 0} {$c < $cols} {incr c} {
-                    if {$hasInlines} {
-                        set cellText [mdpdf::_inlineListToText [lindex [lindex [dict get $block rowsInlines] $ri] $c]]
-                    } else {
-                        set cellText [string trim [lindex $row $c]]
-                    }
-                    set pw [::pdf4tcllib::text::width $cellText $fontSize $fontSans]
-                    if {$pw > [lindex $colPixelWidths $c]} {
-                        lset colPixelWidths $c $pw
-                    }
-                    set mw [mdpdf::_maxWordWidth $cellText $fontSize $fontSans]
-                    if {$mw > [lindex $colMinWidths $c]} {
-                        lset colMinWidths $c $mw
-                    }
-                }
-                incr ri
+            if {$y > $yBot} {
+                mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                    $footerTemplate $headerTemplate
             }
+        }
+    } else {
+        if {$y + $lineH > $yBot} {
+            mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                $footerTemplate $headerTemplate
+        }
+        set y [expr {$y + $lineH}]
+    }
+    return $y
+}
 
-            # Padding hinzurechnen
-            set totalNeeded 0
-            set colWidthsPt {}
-            set colMinPt    {}
-            for {set c 0} {$c < $cols} {incr c} {
-                set cw [expr {[lindex $colPixelWidths $c] + 2 * $cellPad}]
-                lappend colWidthsPt $cw
-                set totalNeeded [expr {$totalNeeded + $cw}]
-                lappend colMinPt [expr {[lindex $colMinWidths $c] + 2 * $cellPad}]
-            }
+proc mdpdf::_render_table {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDepth} {
+    upvar $pageNoVar pageNo
+    set pageW          [dict get $rctx pageW]
+    set pageH          [dict get $rctx pageH]
+    set margin         [dict get $rctx margin]
+    set fontSize       [dict get $rctx fontSize]
+    set root           [dict get $rctx root]
+    set debug          [dict get $rctx debug]
+    set footerTemplate [dict get $rctx footerTemplate]
+    set headerTemplate [dict get $rctx headerTemplate]
+    set lineH [expr {int(ceil($fontSize * 1.4))}]
+    set header [dict get $block header]
+    set rows [dict get $block rows]
+    set alignments [dict get $block alignments]
+    set hasInlines [dict exists $block headerInlines]
 
-            # Proportionale Skalierung auf maxW mit Mindestbreiten-Schutz.
-            # Algorithmus:
-            #   1. Alle Spalten proportional skalieren.
-            #   2. Spalten unter colMinPt auf colMinPt klemmen (fixed).
-            #   3. Verbleibenden Platz auf freie Spalten proportional verteilen.
-            #   4. Wiederholen bis keine neuen fixed-Spalten mehr entstehen.
-            if {$totalNeeded > 0} {
-                set fixed   [lrepeat $cols 0]
-                set widths  {}
-                set scale   [expr {double($maxW) / $totalNeeded}]
-                for {set c 0} {$c < $cols} {incr c} {
-                    lappend widths [expr {int([lindex $colWidthsPt $c] * $scale)}]
-                }
+    set cols [llength $header]
+    set cellPad 4
+    set fontSans [::pdf4tcllib::fonts::fontSans]
+    set fontBold [::pdf4tcllib::fonts::fontSansBold]
 
-                for {set iter 0} {$iter < $cols} {incr iter} {
-                    # Feststellen welche Spalten unter Minimum liegen
-                    set newFixed 0
-                    set fixedTotal 0
-                    set freeTotal  0
-                    for {set c 0} {$c < $cols} {incr c} {
-                        if {[lindex $fixed $c]} {
-                            set fixedTotal [expr {$fixedTotal + [lindex $widths $c]}]
-                        } elseif {[lindex $widths $c] < [lindex $colMinPt $c]} {
-                            lset fixed $c 1
-                            lset widths $c [lindex $colMinPt $c]
-                            set fixedTotal [expr {$fixedTotal + [lindex $widths $c]}]
-                            incr newFixed
-                        } else {
-                            set freeTotal [expr {$freeTotal + [lindex $colWidthsPt $c]}]
-                        }
-                    }
-                    if {$newFixed == 0} break
-                    # Freie Spalten auf verbleibenden Platz skalieren
-                    set remaining [expr {$maxW - $fixedTotal}]
-                    if {$remaining > 0 && $freeTotal > 0} {
-                        set s2 [expr {double($remaining) / $freeTotal}]
-                        for {set c 0} {$c < $cols} {incr c} {
-                            if {![lindex $fixed $c]} {
-                                lset widths $c [expr {int([lindex $colWidthsPt $c] * $s2)}]
-                            }
-                        }
-                    } else {
-                        # Kein Platz mehr: alle freien Spalten auf Minimum
-                        for {set c 0} {$c < $cols} {incr c} {
-                            if {![lindex $fixed $c]} {
-                                lset widths $c [lindex $colMinPt $c]
-                            }
-                        }
-                        break
-                    }
-                }
-                set colWidthsPt $widths
-            }
+    # Measure column widths and per-column minimum widths.
+    # colPixelWidths: max content width per column (for proportional scaling)
+    # colMinWidths:   min width = longest single word per column + padding
+    #                 (ensures no word is broken mid-token after scaling)
+    set colPixelWidths [lrepeat $cols 0]
+    set colMinWidths   [lrepeat $cols 0]
 
-            set tableW 0
-            foreach cw $colWidthsPt { set tableW [expr {$tableW + $cw}] }
+    # Header widths (bold)
+    for {set c 0} {$c < $cols} {incr c} {
+        if {$hasInlines} {
+            set cellText [mdpdf::_inlineListToText [lindex [dict get $block headerInlines] $c]]
+        } else {
+            set cellText [lindex $header $c]
+        }
+        set pw [::pdf4tcllib::text::width $cellText $fontSize $fontBold]
+        if {$pw > [lindex $colPixelWidths $c]} {
+            lset colPixelWidths $c $pw
+        }
+        set mw [mdpdf::_maxWordWidth $cellText $fontSize $fontBold]
+        if {$mw > [lindex $colMinWidths $c]} {
+            lset colMinWidths $c $mw
+        }
+    }
 
-            set hasHeader 0
-            foreach h $header {
-                if {$h ne ""} { set hasHeader 1; break }
-            }
-
-            # Basis-Zeilenhoehe (single line) und Zeilenabstand fuer Wraparound
-            set rowH     [expr {int($fontSize * 1.8)}]
-            set cellLineH [expr {int($fontSize * 1.3)}]
-            set cellTopPad [expr {int($fontSize * 0.85)}]
-
-            # Pre-compute: Zeilen umbrechen und individuelle Zeilenhoehen berechnen
-            # wrappedRows: Liste von Zeilen, jede Zeile ist Liste von Zellen,
-            #              jede Zelle ist Liste von Textzeilen nach dem Umbrechen
-            set wrappedRows {}
-            set rowHeights {}
-            set ri 0
-            foreach row $rows {
-                set wrappedRow {}
-                set maxLines 1
-                for {set c 0} {$c < $cols} {incr c} {
-                    if {$hasInlines} {
-                        set cellText [mdpdf::_inlineListToText                             [lindex [lindex [dict get $block rowsInlines] $ri] $c]]
-                    } else {
-                        set cellText [string trim [lindex $row $c]]
-                    }
-                    set colW [lindex $colWidthsPt $c]
-                    set cellMaxW [expr {$colW - 2 * $cellPad}]
-                    set lines [::pdf4tcllib::text::wrap $cellText $cellMaxW $fontSize $fontSans]
-                    if {[llength $lines] == 0} { set lines [list ""] }
-                    lappend wrappedRow $lines
-                    if {[llength $lines] > $maxLines} {
-                        set maxLines [llength $lines]
-                    }
-                }
-                lappend wrappedRows $wrappedRow
-                # Zeilenhoehe: single line = rowH, jede weitere Zeile + cellLineH
-                lappend rowHeights [expr {$rowH + ($maxLines - 1) * $cellLineH}]
-                incr ri
-            }
-
-            # Tabelle beginnen: ggf. Seite wechseln wenn kein Platz
-            # (mind. Header + 1 Datenzeile muss passen)
-            set firstRowH [expr {[llength $rowHeights] > 0 ? [lindex $rowHeights 0] : $rowH}]
-            set minH [expr {$hasHeader ? $rowH + $firstRowH : $firstRowH}]
-            if {$y + $minH > $yBot} {
-                mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                $pdf endPage
-                incr pageNo
-                $pdf startPage
-                if {$headerTemplate ne ""} {
-                    mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                }
-                set y $yTop
-            }
-
-            # Segment-Tracking: vertikale Linien per Seite
-            set segTopY $y
-
-            if {$hasHeader} {
-                set y [mdpdf::_drawTableHeader $pdf $x0 $y $tableW $colWidthsPt \
-                    $alignments $fontSize $fontBold \
-                    $cellPad $cellTopPad $rowH $cellLineH $hasInlines $block $header]
+    # Data widths (normal)
+    set ri 0
+    foreach row $rows {
+        for {set c 0} {$c < $cols} {incr c} {
+            if {$hasInlines} {
+                set cellText [mdpdf::_inlineListToText [lindex [lindex [dict get $block rowsInlines] $ri] $c]]
             } else {
-                # Oberer Rand (keine Header-Zeile)
-                $pdf setStrokeColor 0.4 0.4 0.4
-                $pdf setLineWidth 0.5
-                $pdf line $x0 $segTopY [expr {$x0 + $tableW}] $segTopY
+                set cellText [string trim [lindex $row $c]]
             }
+            set pw [::pdf4tcllib::text::width $cellText $fontSize $fontSans]
+            if {$pw > [lindex $colPixelWidths $c]} {
+                lset colPixelWidths $c $pw
+            }
+            set mw [mdpdf::_maxWordWidth $cellText $fontSize $fontSans]
+            if {$mw > [lindex $colMinWidths $c]} {
+                lset colMinWidths $c $mw
+            }
+        }
+        incr ri
+    }
 
-            set rowIdx 0
-            foreach wrappedRow $wrappedRows {
-                set thisRowH [lindex $rowHeights $rowIdx]
+    # Padding hinzurechnen
+    set totalNeeded 0
+    set colWidthsPt {}
+    set colMinPt    {}
+    for {set c 0} {$c < $cols} {incr c} {
+        set cw [expr {[lindex $colPixelWidths $c] + 2 * $cellPad}]
+        lappend colWidthsPt $cw
+        set totalNeeded [expr {$totalNeeded + $cw}]
+        lappend colMinPt [expr {[lindex $colMinWidths $c] + 2 * $cellPad}]
+    }
 
-                if {$y + $thisRowH > $yBot} {
-                    # Segment abschliessen: untere Linie + vertikale Linien
-                    $pdf setStrokeColor 0.7 0.7 0.7
-                    $pdf setLineWidth 0.3
-                    $pdf line $x0 $y [expr {$x0 + $tableW}] $y
-                    mdpdf::_drawTableVLines $pdf $x0 $segTopY $y $colWidthsPt
+    # Proportionale Skalierung auf maxW mit Mindestbreiten-Schutz.
+    # Algorithmus:
+    #   1. Alle Spalten proportional skalieren.
+    #   2. Spalten unter colMinPt auf colMinPt klemmen (fixed).
+    #   3. Verbleibenden Platz auf freie Spalten proportional verteilen.
+    #   4. Wiederholen bis keine neuen fixed-Spalten mehr entstehen.
+    if {$totalNeeded > 0} {
+        set fixed   [lrepeat $cols 0]
+        set widths  {}
+        set scale   [expr {double($maxW) / $totalNeeded}]
+        for {set c 0} {$c < $cols} {incr c} {
+            lappend widths [expr {int([lindex $colWidthsPt $c] * $scale)}]
+        }
 
-                    # Neue Seite + ggf. Header wiederholen
-                    mdpdf::_tablePageBreak $pdf pageNo y $yTop $pageW $pageH $margin \
-                        $fontSize $footerTemplate $headerTemplate \
-                        $hasHeader $x0 $tableW $colWidthsPt $alignments \
-                        $cellPad $cellTopPad $rowH $cellLineH $hasInlines $block $header
-
-                    set segTopY $y
+        for {set iter 0} {$iter < $cols} {incr iter} {
+            # Feststellen welche Spalten unter Minimum liegen
+            set newFixed 0
+            set fixedTotal 0
+            set freeTotal  0
+            for {set c 0} {$c < $cols} {incr c} {
+                if {[lindex $fixed $c]} {
+                    set fixedTotal [expr {$fixedTotal + [lindex $widths $c]}]
+                } elseif {[lindex $widths $c] < [lindex $colMinPt $c]} {
+                    lset fixed $c 1
+                    lset widths $c [lindex $colMinPt $c]
+                    set fixedTotal [expr {$fixedTotal + [lindex $widths $c]}]
+                    incr newFixed
+                } else {
+                    set freeTotal [expr {$freeTotal + [lindex $colWidthsPt $c]}]
                 }
-
-                set x $x0
-                $pdf setFont $fontSize $fontSans
+            }
+            if {$newFixed == 0} break
+            # Freie Spalten auf verbleibenden Platz skalieren
+            set remaining [expr {$maxW - $fixedTotal}]
+            if {$remaining > 0 && $freeTotal > 0} {
+                set s2 [expr {double($remaining) / $freeTotal}]
                 for {set c 0} {$c < $cols} {incr c} {
-                    set lines [lindex $wrappedRow $c]
-                    set colW [lindex $colWidthsPt $c]
-                    set align [lindex $alignments $c]
-                    set lineY [expr {$y + $cellTopPad}]
-                    foreach ln $lines {
-                        set textW [::pdf4tcllib::text::width $ln $fontSize $fontSans]
-                        switch -- $align {
-                            right  { set cellX [expr {$x + $colW - $cellPad - $textW}] }
-                            center { set cellX [expr {$x + ($colW - $textW) / 2}] }
-                            default { set cellX [expr {$x + $cellPad}] }
-                        }
-                        $pdf text [::pdf4tcllib::unicode::sanitize $ln] -x $cellX -y $lineY
-                        set lineY [expr {$lineY + $cellLineH}]
+                    if {![lindex $fixed $c]} {
+                        lset widths $c [expr {int([lindex $colWidthsPt $c] * $s2)}]
                     }
-                    set x [expr {$x + $colW}]
                 }
-                set y [expr {$y + $thisRowH}]
-                incr rowIdx
-
-                $pdf setStrokeColor 0.7 0.7 0.7
-                $pdf setLineWidth 0.3
-                $pdf line $x0 $y [expr {$x0 + $tableW}] $y
+            } else {
+                # Kein Platz mehr: alle freien Spalten auf Minimum
+                for {set c 0} {$c < $cols} {incr c} {
+                    if {![lindex $fixed $c]} {
+                        lset widths $c [lindex $colMinPt $c]
+                    }
+                }
+                break
             }
+        }
+        set colWidthsPt $widths
+    }
 
-            # Letztes Segment abschliessen: vertikale Linien
+    set tableW 0
+    foreach cw $colWidthsPt { set tableW [expr {$tableW + $cw}] }
+
+    set hasHeader 0
+    foreach h $header {
+        if {$h ne ""} { set hasHeader 1; break }
+    }
+
+    # Basis-Zeilenhoehe (single line) und Zeilenabstand fuer Wraparound
+    set rowH     [expr {int($fontSize * 1.8)}]
+    set cellLineH [expr {int($fontSize * 1.3)}]
+    set cellTopPad [expr {int($fontSize * 0.85)}]
+
+    # Pre-compute: Zeilen umbrechen und individuelle Zeilenhoehen berechnen
+    # wrappedRows: Liste von Zeilen, jede Zeile ist Liste von Zellen,
+    #              jede Zelle ist Liste von Textzeilen nach dem Umbrechen
+    set wrappedRows {}
+    set rowHeights {}
+    set ri 0
+    foreach row $rows {
+        set wrappedRow {}
+        set maxLines 1
+        for {set c 0} {$c < $cols} {incr c} {
+            if {$hasInlines} {
+                set cellText [mdpdf::_inlineListToText                             [lindex [lindex [dict get $block rowsInlines] $ri] $c]]
+            } else {
+                set cellText [string trim [lindex $row $c]]
+            }
+            set colW [lindex $colWidthsPt $c]
+            set cellMaxW [expr {$colW - 2 * $cellPad}]
+            set lines [::pdf4tcllib::text::wrap $cellText $cellMaxW $fontSize $fontSans]
+            if {[llength $lines] == 0} { set lines [list ""] }
+            lappend wrappedRow $lines
+            if {[llength $lines] > $maxLines} {
+                set maxLines [llength $lines]
+            }
+        }
+        lappend wrappedRows $wrappedRow
+        # Zeilenhoehe: single line = rowH, jede weitere Zeile + cellLineH
+        lappend rowHeights [expr {$rowH + ($maxLines - 1) * $cellLineH}]
+        incr ri
+    }
+
+    # Tabelle beginnen: ggf. Seite wechseln wenn kein Platz
+    # (mind. Header + 1 Datenzeile muss passen)
+    set firstRowH [expr {[llength $rowHeights] > 0 ? [lindex $rowHeights 0] : $rowH}]
+    set minH [expr {$hasHeader ? $rowH + $firstRowH : $firstRowH}]
+    if {$y + $minH > $yBot} {
+        mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+            $footerTemplate $headerTemplate
+    }
+
+    # Segment-Tracking: vertikale Linien per Seite
+    set segTopY $y
+
+    if {$hasHeader} {
+        set y [mdpdf::_drawTableHeader $pdf $x0 $y $tableW $colWidthsPt \
+            $alignments $fontSize $fontBold \
+            $cellPad $cellTopPad $rowH $cellLineH $hasInlines $block $header]
+    } else {
+        # Oberer Rand (keine Header-Zeile)
+        $pdf setStrokeColor 0.4 0.4 0.4
+        $pdf setLineWidth 0.5
+        $pdf line $x0 $segTopY [expr {$x0 + $tableW}] $segTopY
+    }
+
+    set rowIdx 0
+    foreach wrappedRow $wrappedRows {
+        set thisRowH [lindex $rowHeights $rowIdx]
+
+        if {$y + $thisRowH > $yBot} {
+            # Segment abschliessen: untere Linie + vertikale Linien
+            $pdf setStrokeColor 0.7 0.7 0.7
+            $pdf setLineWidth 0.3
+            $pdf line $x0 $y [expr {$x0 + $tableW}] $y
             mdpdf::_drawTableVLines $pdf $x0 $segTopY $y $colWidthsPt
 
-            $pdf setStrokeColor 0 0 0
-            $pdf setLineWidth 1.0
-            set y [expr {$y + $lineH * 0.5}]
+            # Neue Seite + ggf. Header wiederholen
+            mdpdf::_tablePageBreak $pdf pageNo y $yTop $pageW $pageH $margin \
+                $fontSize $footerTemplate $headerTemplate \
+                $hasHeader $x0 $tableW $colWidthsPt $alignments \
+                $cellPad $cellTopPad $rowH $cellLineH $hasInlines $block $header
+
+            set segTopY $y
         }
 
-        image {
-            set url [dict get $block url]
-            set alt [dict get $block alt]
-
-            set imgPath ""
-            if {$root ne "" && ![string match "/*" $url] && ![string match "?:*" $url]} {
-                set imgPath [file join $root $url]
-            } else {
-                set imgPath $url
+        set x $x0
+        $pdf setFont $fontSize $fontSans
+        for {set c 0} {$c < $cols} {incr c} {
+            set lines [lindex $wrappedRow $c]
+            set colW [lindex $colWidthsPt $c]
+            set align [lindex $alignments $c]
+            set lineY [expr {$y + $cellTopPad}]
+            foreach ln $lines {
+                set textW [::pdf4tcllib::text::width $ln $fontSize $fontSans]
+                switch -- $align {
+                    right  { set cellX [expr {$x + $colW - $cellPad - $textW}] }
+                    center { set cellX [expr {$x + ($colW - $textW) / 2}] }
+                    default { set cellX [expr {$x + $cellPad}] }
+                }
+                $pdf text [::pdf4tcllib::unicode::sanitize $ln] -x $cellX -y $lineY
+                set lineY [expr {$lineY + $cellLineH}]
             }
+            set x [expr {$x + $colW}]
+        }
+        set y [expr {$y + $thisRowH}]
+        incr rowIdx
 
-            set imgH 100
-            if {$y + $imgH > $yBot} {
-                mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                $pdf endPage
-                incr pageNo
-                $pdf startPage
-                set y $yTop
-            }
+        $pdf setStrokeColor 0.7 0.7 0.7
+        $pdf setLineWidth 0.3
+        $pdf line $x0 $y [expr {$x0 + $tableW}] $y
+    }
 
-            set fontSans [::pdf4tcllib::fonts::fontSans]
+    # Letztes Segment abschliessen: vertikale Linien
+    mdpdf::_drawTableVLines $pdf $x0 $segTopY $y $colWidthsPt
 
-            if {[catch {package require Tk} err] == 0} {
-                if {[file exists $imgPath]} {
-                    set ext [string tolower [file extension $imgPath]]
-                    if {$ext in {.png .gif .jpg .jpeg}} {
-                        if {[catch {
-                            if {$ext eq ".jpg" || $ext eq ".jpeg"} {
-                                package require Img
-                            }
-                            set imgName "mdpdf_img_[clock seconds]_[incr ::mdpdf::imgCounter]"
-                            image create photo $imgName -file $imgPath
+    $pdf setStrokeColor 0 0 0
+    $pdf setLineWidth 1.0
+    set y [expr {$y + $lineH * 0.5}]
+    return $y
+}
 
-                            set imgW [image width $imgName]
-                            set imgH [image height $imgName]
+proc mdpdf::_render_image {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDepth} {
+    upvar $pageNoVar pageNo
+    set pageW          [dict get $rctx pageW]
+    set pageH          [dict get $rctx pageH]
+    set margin         [dict get $rctx margin]
+    set fontSize       [dict get $rctx fontSize]
+    set root           [dict get $rctx root]
+    set debug          [dict get $rctx debug]
+    set footerTemplate [dict get $rctx footerTemplate]
+    set headerTemplate [dict get $rctx headerTemplate]
+    set lineH [expr {int(ceil($fontSize * 1.4))}]
+    set url [dict get $block url]
+    set alt [dict get $block alt]
 
-                            if {$imgW > $maxW} {
-                                set scale [expr {double($maxW) / $imgW}]
-                                set imgW $maxW
-                                set imgH [expr {int($imgH * $scale)}]
-                            }
+    set imgPath ""
+    if {$root ne "" && ![string match "/*" $url] && ![string match "?:*" $url]} {
+        set imgPath [file join $root $url]
+    } else {
+        set imgPath $url
+    }
 
-                            if {$y + $imgH > $yBot} {
-                                mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                                $pdf endPage
-                                incr pageNo
-                                $pdf startPage
-                                set y $yTop
-                            }
+    set imgH 100
+    if {$y + $imgH > $yBot} {
+        mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+            $footerTemplate $headerTemplate
+    }
 
-                            $pdf setFont $fontSize $fontSans
-                            $pdf text "\[$alt\]" -x $x0 -y $y
-                            set y [expr {$y + $lineH}]
+    set fontSans [::pdf4tcllib::fonts::fontSans]
 
-                            image delete $imgName
-                        } err]} {
-                            $pdf setFont $fontSize $fontSans
-                            $pdf text "\[$alt\]" -x $x0 -y $y
-                            set y [expr {$y + $lineH}]
-                        }
-                    } else {
-                        $pdf setFont $fontSize $fontSans
-                        $pdf text "\[$alt\]" -x $x0 -y $y
-                        set y [expr {$y + $lineH}]
+    if {[catch {package require Tk} err] == 0} {
+        if {[file exists $imgPath]} {
+            set ext [string tolower [file extension $imgPath]]
+            if {$ext in {.png .gif .jpg .jpeg}} {
+                if {[catch {
+                    if {$ext eq ".jpg" || $ext eq ".jpeg"} {
+                        package require Img
                     }
-                } else {
+                    set imgName "mdpdf_img_[clock seconds]_[incr ::mdpdf::imgCounter]"
+                    image create photo $imgName -file $imgPath
+
+                    set imgW [image width $imgName]
+                    set imgH [image height $imgName]
+
+                    if {$imgW > $maxW} {
+                        set scale [expr {double($maxW) / $imgW}]
+                        set imgW $maxW
+                        set imgH [expr {int($imgH * $scale)}]
+                    }
+
+                    if {$y + $imgH > $yBot} {
+                        mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                            $footerTemplate $headerTemplate
+                    }
+
+                    $pdf setFont $fontSize $fontSans
+                    $pdf text "\[$alt\]" -x $x0 -y $y
+                    set y [expr {$y + $lineH}]
+
+                    image delete $imgName
+                } err]} {
                     $pdf setFont $fontSize $fontSans
                     $pdf text "\[$alt\]" -x $x0 -y $y
                     set y [expr {$y + $lineH}]
@@ -977,127 +1031,132 @@ proc mdpdf::_renderBlock {pdf block y x0 maxW yTop yBot pageW pageH margin fontS
                 $pdf text "\[$alt\]" -x $x0 -y $y
                 set y [expr {$y + $lineH}]
             }
+        } else {
+            $pdf setFont $fontSize $fontSans
+            $pdf text "\[$alt\]" -x $x0 -y $y
+            set y [expr {$y + $lineH}]
         }
-
-        div {
-            # Fenced div ::: .class ... ::: (Pandoc/TIP 700)
-            foreach subBlock [dict get $block blocks] {
-                set y [mdpdf::_renderBlock $pdf $subBlock $y $x0 $maxW $yTop $yBot $pageW $pageH $margin $fontSize $root $debug pageNo $footerTemplate $headerTemplate $quoteDepth]
-            }
-        }
-
-        footnote_section {
-            # Separator line
-            set y [expr {$y + $lineH * 0.5}]
-            if {$y + $lineH * 3 > $yBot} {
-                mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                $pdf endPage
-                incr pageNo
-                $pdf startPage
-                if {$headerTemplate ne ""} {
-                    mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                }
-                set y $yTop
-            }
-            $pdf setStrokeColor 0.6 0.6 0.6
-            $pdf setLineWidth 0.5
-            $pdf line $x0 $y [expr {$x0 + $maxW * 0.4}] $y
-            $pdf setStrokeColor 0 0 0
-            # Genug Abstand: Linie muss ueber dem Ascender liegen
-            # Ascender ~ 0.75*fnFontSize; lineH*0.75 sichert ausreichend Platz
-            set y [expr {$y + int($lineH * 0.75)}]
-
-            set fnFontSize [expr {$fontSize - 1}]
-            set fnLineH [expr {$fnFontSize * 1.4}]
-            foreach fn [dict get $block footnotes] {
-                set fnNum [dict get $fn num]
-                set fnText [mdpdf::_inlineListToText [dict get $fn content]]
-
-                if {$y + $fnLineH > $yBot} {
-                    mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                    $pdf endPage
-                    incr pageNo
-                    $pdf startPage
-                    if {$headerTemplate ne ""} {
-                        mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                    }
-                    set y $yTop
-                }
-
-                set prefix "$fnNum. "
-                set fontSans [::pdf4tcllib::fonts::fontSans]
-                set fontBold [::pdf4tcllib::fonts::fontSansBold]
-                $pdf setFont $fnFontSize $fontBold
-                $pdf text $prefix -x $x0 -y $y
-                set prefixW [::pdf4tcllib::text::width $prefix $fnFontSize $fontBold]
-
-                $pdf setFont $fnFontSize $fontSans
-                set fnText [::pdf4tcllib::unicode::sanitize $fnText]
-                $pdf text $fnText -x [expr {$x0 + $prefixW}] -y $y
-                set y [expr {$y + $fnLineH}]
-            }
-            $pdf setFont $fontSize [::pdf4tcllib::fonts::fontSans]
-        }
-
-        deflist {
-            # Definition List: Term (bold) + Definitionen (eingerückt)
-            set dlIndent [expr {$x0 + 16}]
-            set dlMaxW   [expr {$maxW - 16}]
-            foreach dlItem [dict get $block items] {
-                # Term
-                if {$y + $lineH > $yBot} {
-                    mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                    $pdf endPage
-                    incr pageNo
-                    $pdf startPage
-                    if {$headerTemplate ne ""} {
-                        mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                    }
-                    set y $yTop
-                }
-                set termSegs [mdpdf::_inlinesToSegments [dict get $dlItem term] "bold"]
-                set termLines [mdpdf::_wrapStyledSegments $termSegs $maxW $fontSize]
-                foreach lineSegs $termLines {
-                    mdpdf::_renderStyledLine $pdf $lineSegs $y $x0 $fontSize
-                    set y [expr {$y + $lineH}]
-                }
-                # Definitionen (eingerückt mit Doppelpunkt-Prefix)
-                foreach defInlines [dict get $dlItem definitions] {
-                    if {$y + $lineH > $yBot} {
-                        mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
-                        $pdf endPage
-                        incr pageNo
-                        $pdf startPage
-                        if {$headerTemplate ne ""} {
-                            mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
-                        }
-                        set y $yTop
-                    }
-                    set defSegs [mdpdf::_inlinesToSegments $defInlines "normal"]
-                    set defLines [mdpdf::_wrapStyledSegments $defSegs $dlMaxW $fontSize]
-                    foreach lineSegs $defLines {
-                        mdpdf::_renderStyledLine $pdf $lineSegs $y $dlIndent $fontSize
-                        set y [expr {$y + $lineH}]
-                    }
-                }
-                set y [expr {$y + int($lineH * 0.3)}]
-            }
-        }
-
-        default {
-            if {$debug} {
-                puts "mdpdf: Unbekannter Block-Typ: $type"
-            }
-        }
+    } else {
+        $pdf setFont $fontSize $fontSans
+        $pdf text "\[$alt\]" -x $x0 -y $y
+        set y [expr {$y + $lineH}]
     }
-
     return $y
 }
 
-# ============================================================
-# Inline -> Plain-Text (for TOC, Heading-Text)
-# ============================================================
+proc mdpdf::_render_div {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDepth} {
+    upvar $pageNoVar pageNo
+    set pageW          [dict get $rctx pageW]
+    set pageH          [dict get $rctx pageH]
+    set margin         [dict get $rctx margin]
+    set fontSize       [dict get $rctx fontSize]
+    set root           [dict get $rctx root]
+    set debug          [dict get $rctx debug]
+    set footerTemplate [dict get $rctx footerTemplate]
+    set headerTemplate [dict get $rctx headerTemplate]
+    set lineH [expr {int(ceil($fontSize * 1.4))}]
+    # Fenced div ::: .class ... ::: (Pandoc/TIP 700)
+    foreach subBlock [dict get $block blocks] {
+        set y [mdpdf::_renderBlock $pdf $rctx $subBlock $y $x0 $maxW $yTop $yBot pageNo $quoteDepth]
+    }
+    return $y
+}
 
+proc mdpdf::_render_footnote_section {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDepth} {
+    upvar $pageNoVar pageNo
+    set pageW          [dict get $rctx pageW]
+    set pageH          [dict get $rctx pageH]
+    set margin         [dict get $rctx margin]
+    set fontSize       [dict get $rctx fontSize]
+    set root           [dict get $rctx root]
+    set debug          [dict get $rctx debug]
+    set footerTemplate [dict get $rctx footerTemplate]
+    set headerTemplate [dict get $rctx headerTemplate]
+    set lineH [expr {int(ceil($fontSize * 1.4))}]
+    # Separator line
+    set y [expr {$y + $lineH * 0.5}]
+    if {$y + $lineH * 3 > $yBot} {
+        mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+            $footerTemplate $headerTemplate
+    }
+    $pdf setStrokeColor 0.6 0.6 0.6
+    $pdf setLineWidth 0.5
+    $pdf line $x0 $y [expr {$x0 + $maxW * 0.4}] $y
+    $pdf setStrokeColor 0 0 0
+    # Genug Abstand: Linie muss ueber dem Ascender liegen
+    # Ascender ~ 0.75*fnFontSize; lineH*0.75 sichert ausreichend Platz
+    set y [expr {$y + int($lineH * 0.75)}]
+
+    set fnFontSize [expr {$fontSize - 1}]
+    set fnLineH [expr {$fnFontSize * 1.4}]
+    foreach fn [dict get $block footnotes] {
+        set fnNum [dict get $fn num]
+        set fnText [mdpdf::_inlineListToText [dict get $fn content]]
+
+        if {$y + $fnLineH > $yBot} {
+            mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                $footerTemplate $headerTemplate
+        }
+
+        set prefix "$fnNum. "
+        set fontSans [::pdf4tcllib::fonts::fontSans]
+        set fontBold [::pdf4tcllib::fonts::fontSansBold]
+        $pdf setFont $fnFontSize $fontBold
+        $pdf text $prefix -x $x0 -y $y
+        set prefixW [::pdf4tcllib::text::width $prefix $fnFontSize $fontBold]
+
+        $pdf setFont $fnFontSize $fontSans
+        set fnText [::pdf4tcllib::unicode::sanitize $fnText]
+        $pdf text $fnText -x [expr {$x0 + $prefixW}] -y $y
+        set y [expr {$y + $fnLineH}]
+    }
+    $pdf setFont $fontSize [::pdf4tcllib::fonts::fontSans]
+    return $y
+}
+
+proc mdpdf::_render_deflist {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDepth} {
+    upvar $pageNoVar pageNo
+    set pageW          [dict get $rctx pageW]
+    set pageH          [dict get $rctx pageH]
+    set margin         [dict get $rctx margin]
+    set fontSize       [dict get $rctx fontSize]
+    set root           [dict get $rctx root]
+    set debug          [dict get $rctx debug]
+    set footerTemplate [dict get $rctx footerTemplate]
+    set headerTemplate [dict get $rctx headerTemplate]
+    set lineH [expr {int(ceil($fontSize * 1.4))}]
+    # Definition List: Term (bold) + Definitionen (eingerückt)
+    set dlIndent [expr {$x0 + 16}]
+    set dlMaxW   [expr {$maxW - 16}]
+    foreach dlItem [dict get $block items] {
+        # Term
+        if {$y + $lineH > $yBot} {
+            mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                $footerTemplate $headerTemplate
+        }
+        set termSegs [mdpdf::_inlinesToSegments [dict get $dlItem term] "bold"]
+        set termLines [mdpdf::_wrapStyledSegments $termSegs $maxW $fontSize]
+        foreach lineSegs $termLines {
+            mdpdf::_renderStyledLine $pdf $lineSegs $y $x0 $fontSize
+            set y [expr {$y + $lineH}]
+        }
+        # Definitionen (eingerückt mit Doppelpunkt-Prefix)
+        foreach defInlines [dict get $dlItem definitions] {
+            if {$y + $lineH > $yBot} {
+                mdpdf::_newPage $pdf pageNo y $yTop $pageW $pageH $margin $fontSize \
+                    $footerTemplate $headerTemplate
+            }
+            set defSegs [mdpdf::_inlinesToSegments $defInlines "normal"]
+            set defLines [mdpdf::_wrapStyledSegments $defSegs $dlMaxW $fontSize]
+            foreach lineSegs $defLines {
+                mdpdf::_renderStyledLine $pdf $lineSegs $y $dlIndent $fontSize
+                set y [expr {$y + $lineH}]
+            }
+        }
+        set y [expr {$y + int($lineH * 0.3)}]
+    }
+    return $y
+}
 proc mdpdf::_inlinesToPlainText {block} {
     set result ""
     if {![dict exists $block content]} { return $result }
@@ -1470,6 +1529,22 @@ proc mdpdf::_renderTOC {pdf ast y x0 maxW fontSize debug} {
 # ============================================================
 # Header / Footer
 # ============================================================
+
+# ------------------------------------------------------------
+proc mdpdf::_newPage {pdf pageNoVar yVar yTop pageW pageH margin fontSize footerTemplate headerTemplate} {
+    # Schliesst aktuelle Seite, startet neue mit Header/Footer.
+    # Inkrementiert pageNo und setzt y auf yTop (beides per upvar).
+    upvar $pageNoVar pageNo
+    upvar $yVar      y
+    mdpdf::_writeFooter $pdf $pageNo $pageW $pageH $margin $fontSize $footerTemplate
+    $pdf endPage
+    incr pageNo
+    $pdf startPage
+    if {$headerTemplate ne ""} {
+        mdpdf::_writeHeader $pdf $pageNo $pageW $pageH $margin $fontSize $headerTemplate
+    }
+    set y $yTop
+}
 
 proc mdpdf::_writeHeader {pdf pageNo pageW pageH margin fontSize headerTemplate} {
     set headerY [expr {$margin * 0.5}]

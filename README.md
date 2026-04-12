@@ -2,7 +2,7 @@
 
 A complete Markdown processing stack for Tcl/Tk applications.
 
-**Version:** 0.3.3  
+**Version:** 0.3.4  
 **Status:** Stable
 
 ---

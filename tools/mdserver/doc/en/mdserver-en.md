@@ -1,6 +1,6 @@
 # mdserver
 
-> Version 0.3
+> Version 0.4
 
 ## Purpose
 
@@ -107,9 +107,13 @@ openssl req -x509 -newkey rsa:4096 \
 | URL pattern | Result |
 |-------------|--------|
 | `/file.md` | Rendered as HTML |
+| `/file` | Clean URL: tries `/file.md` automatically |
 | `/file.html` | Served as-is |
 | `/image.png` | Served with correct MIME type |
 | `/` | Directory index or `index.md` |
+
+**Clean URLs** allow links without `.md` extension (e.g. `/dict`, `/array`).
+This is used by `nroff2md --linkmode server` for SEE ALSO cross-references.
 
 ---
 
