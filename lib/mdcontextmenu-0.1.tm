@@ -1,4 +1,5 @@
 # mdcontextmenu-0.1.tm
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 # ------------------------------------------------------------
 # Context menus for Markdown editor
 # ------------------------------------------------------------

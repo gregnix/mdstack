@@ -1,4 +1,5 @@
 # mdoutline-0.1.tm
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Heading-Outline-Panel for den mdtext-Editor.
 # Zeigt Headings als Baumstruktur, Klick springt zur Stelle im Editor.

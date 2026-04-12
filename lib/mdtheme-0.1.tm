@@ -1,4 +1,5 @@
 # mdtheme-0.1.tm
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Color scheme system for mdviewer und mdhelp.
 # Defines theme dicts with all colors for viewer, editor, TIP-700.

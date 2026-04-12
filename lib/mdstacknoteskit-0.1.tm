@@ -1,4 +1,5 @@
 # mdstacknoteskit-0.1.tm
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 # Adapter zwischen noteskit und mdstack
 #
 # Connects noteskit (Note management) mit mdstack (Editor-Orchestrator).

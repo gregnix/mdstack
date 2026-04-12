@@ -1,4 +1,5 @@
 # mdparser-0.2.tm
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Markdown parser that produces a Tcl-friendly AST (Markdown-AST v1).
 #

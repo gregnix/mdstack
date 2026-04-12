@@ -1,4 +1,5 @@
 # mdvalidator-0.1.tm -- AST Validator for mdstack AST-Spec v0.3
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Validates each node in the AST against the specification.
 # Returns a list of errors (empty = valid).

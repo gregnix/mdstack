@@ -1,4 +1,5 @@
 # mdtext.tm
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 # ------------------------------------------------------------
 # mdtext – structured text widget core
 # ------------------------------------------------------------

@@ -1,4 +1,5 @@
 # mdviewer-0.3.tm
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Tk widget to render Markdown-AST v1.
 #

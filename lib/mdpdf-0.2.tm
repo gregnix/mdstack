@@ -1,4 +1,5 @@
 # mdpdf-0.2.tm
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 # ============================================================
 # PDF export for mdstack (pdf4tcllib backend)
 # ============================================================
@@ -622,10 +623,8 @@ proc mdpdf::_render_list {pdf rctx block y x0 maxW yTop yBot pageNoVar quoteDept
             if {$subType eq "list"} {
                 set subIndent [expr {$itemX0 + 12}]
                 set subMaxW   [expr {$maxW - ($subIndent - $x0)}]
-                set y [mdpdf::_renderBlock $pdf $subBlock $y \
-                    $subIndent $subMaxW $yTop $yBot $pageW $pageH $margin \
-                    $fontSize $root $debug pageNo \
-                    $footerTemplate $headerTemplate $quoteDepth]
+                set y [mdpdf::_renderBlock $pdf $rctx $subBlock $y \
+                    $subIndent $subMaxW $yTop $yBot pageNo $quoteDepth]
             }
         }
 
@@ -685,9 +684,8 @@ proc mdpdf::_render_blockquote {pdf rctx block y x0 maxW yTop yBot pageNoVar quo
         set subIdx 0
 
         foreach subBlock $subBlocks {
-            set y [mdpdf::_renderBlock $pdf $subBlock $y $quoteX $quoteW \
-                $yTop $yBot $pageW $pageH $margin $fontSize $root $debug \
-                pageNo $footerTemplate $headerTemplate $newDepth]
+            set y [mdpdf::_renderBlock $pdf $rctx $subBlock $y $quoteX $quoteW \
+                $yTop $yBot pageNo $newDepth]
 
             incr subIdx
             if {$subIdx < $numSubs} {

@@ -1,3 +1,4 @@
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 package require Tk
 package require mdtext   0.1
 package require mdparser 0.2

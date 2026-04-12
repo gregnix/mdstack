@@ -1,4 +1,5 @@
 # mdhtml-0.1.tm -- Markdown AST zu HTML Renderer
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Wandelt den von mdparser-0.2 erzeugten AST in sauberes HTML um.
 #

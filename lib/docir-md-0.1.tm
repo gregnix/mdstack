@@ -1,4 +1,5 @@
 # docir-md-0.1.tm
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Mapper: mdparser-0.2 AST  →  DocIR 0.2
 #

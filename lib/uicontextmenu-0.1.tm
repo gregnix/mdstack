@@ -1,4 +1,5 @@
 # uicontextmenu-0.1.tm
+# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 # Generic, reusable context menu system
 # Package: uicontextmenu 0.1
 #
