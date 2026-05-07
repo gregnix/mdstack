@@ -28,12 +28,12 @@ oder [GitHub](https://github.com/gregnix/pdf4tcl) fuer den Quellcode.
 ## Code-Bloecke
 
 ```tcl
-package require mdhtml 0.1
-package require mdtheme 0.1
+package require mdstack::html 0.1
+package require mdstack::theme 0.1
 
-set ast  [mdparser::parse $markdown]
-set html [mdhtml::render $ast -theme hell -toc 1]
-mdhtml::export $ast output.html -theme dunkel -css custom.css
+set ast  [mdstack::parser::parse $markdown]
+set html [mdstack::html::render $ast -theme hell -toc 1]
+mdstack::html::export $ast output.html -theme dunkel -css custom.css
 ```
 
 ```bash

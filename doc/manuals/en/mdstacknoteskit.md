@@ -1,4 +1,4 @@
-# mdstacknoteskit
+# mdstack::stacknoteskit
 
 ## Purpose
 
@@ -24,7 +24,7 @@ Enables integration of noteskit notes into mdstack-based applications.
          └────────┬───────────┘
                   ▼
          ┌─────────────────┐
-         │ mdstacknoteskit │
+         │ mdstack::stacknoteskit │
          │    (Adapter)    │
          └─────────────────┘
 ```
@@ -43,7 +43,7 @@ Enables integration of noteskit notes into mdstack-based applications.
 ```tcl
 package require noteskit        0.1
 package require mdstack         0.1
-package require mdstacknoteskit 0.1
+package require mdstack::stacknoteskit 0.1
 
 # 1. Initialize noteskit
 noteskit::init sqlite -db notes.db
@@ -55,25 +55,25 @@ mdstack::setEditorAPI \
     -clear    [list $editor clear]
 
 # 3. Load a note
-mdstacknoteskit::loadNote $noteId
+mdstack::stacknoteskit::loadNote $noteId
 
 # 4. Save changes
-mdstacknoteskit::saveCurrent
+mdstack::stacknoteskit::saveCurrent
 ```
 
 ---
 
 ## API
 
-### `mdstacknoteskit::loadNote id`
+### `mdstack::stacknoteskit::loadNote id`
 
 Loads a note from noteskit into mdstack.
 
-### `mdstacknoteskit::saveCurrent`
+### `mdstack::stacknoteskit::saveCurrent`
 
 Saves the current mdstack entry back to noteskit.
 
-### `mdstacknoteskit::connectCallbacks`
+### `mdstack::stacknoteskit::connectCallbacks`
 
 Sets up automatic save-on-change callbacks between noteskit and mdstack.
 
@@ -83,11 +83,11 @@ Sets up automatic save-on-change callbacks between noteskit and mdstack.
 
 ```tcl
 # Open note
-mdstacknoteskit::loadNote $selectedId
+mdstack::stacknoteskit::loadNote $selectedId
 
 # Auto-save on mdstack save event
 mdstack::onsave {
-    mdstacknoteskit::saveCurrent
+    mdstack::stacknoteskit::saveCurrent
 }
 
 # Close with save prompt

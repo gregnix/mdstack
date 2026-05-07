@@ -1,5 +1,4 @@
 # uicontextmenu-0.1.tm
-# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 # Generic, reusable context menu system
 # Package: uicontextmenu 0.1
 #
@@ -15,7 +14,7 @@
 
 package require Tk
 
-namespace eval ::uicontextmenu {
+namespace eval ::mdstack::uicontextmenu {
     namespace export create attach detach show \
                    addItem addSeparator addSubmenu \
                    addCheckItem addRadioItem \
@@ -36,7 +35,7 @@ namespace eval ::uicontextmenu {
 #   {label command ?accelerator? ?state?}
 #   oder "-" for Separator
 #
-proc ::uicontextmenu::create {path args} {
+proc ::mdstack::uicontextmenu::create {path args} {
     variable instances
     
     # Defaults
@@ -85,11 +84,11 @@ proc ::uicontextmenu::create {path args} {
 #   -state       normal|disabled (Default: normal)
 #   -icon        Icon-Image (optional)
 #
-proc ::uicontextmenu::addItem {menu label args} {
+proc ::mdstack::uicontextmenu::addItem {menu label args} {
     variable instances
     
     if {![info exists instances($menu)]} {
-        error "uicontextmenu::addItem: Unknown menu '$menu'"
+        error "mdstack::uicontextmenu::addItem: Unknown menu '$menu'"
     }
     
     # Defaults
@@ -131,11 +130,11 @@ proc ::uicontextmenu::addItem {menu label args} {
 # ------------------------------------------------------------
 # addSeparator - Add separator
 # ------------------------------------------------------------
-proc ::uicontextmenu::addSeparator {menu} {
+proc ::mdstack::uicontextmenu::addSeparator {menu} {
     variable instances
     
     if {![info exists instances($menu)]} {
-        error "uicontextmenu::addSeparator: Unknown menu '$menu'"
+        error "mdstack::uicontextmenu::addSeparator: Unknown menu '$menu'"
     }
     
     $menu add separator
@@ -145,11 +144,11 @@ proc ::uicontextmenu::addSeparator {menu} {
 # ------------------------------------------------------------
 # addSubmenu - Add submenu
 # ------------------------------------------------------------
-proc ::uicontextmenu::addSubmenu {menu label submenu} {
+proc ::mdstack::uicontextmenu::addSubmenu {menu label submenu} {
     variable instances
     
     if {![info exists instances($menu)]} {
-        error "uicontextmenu::addSubmenu: Unknown menu '$menu'"
+        error "mdstack::uicontextmenu::addSubmenu: Unknown menu '$menu'"
     }
     
     $menu add cascade -label $label -menu $submenu
@@ -170,11 +169,11 @@ proc ::uicontextmenu::addSubmenu {menu label submenu} {
 # ------------------------------------------------------------
 # addCheckItem - Add checkbutton entry
 # ------------------------------------------------------------
-proc ::uicontextmenu::addCheckItem {menu label args} {
+proc ::mdstack::uicontextmenu::addCheckItem {menu label args} {
     variable instances
     
     if {![info exists instances($menu)]} {
-        error "uicontextmenu::addCheckItem: Unknown menu '$menu'"
+        error "mdstack::uicontextmenu::addCheckItem: Unknown menu '$menu'"
     }
     
     # Defaults
@@ -190,7 +189,7 @@ proc ::uicontextmenu::addCheckItem {menu label args} {
     # Create variable automatically if not specified
     if {$opts(-variable) eq ""} {
         set safeName [string map {. _ " " _} $label]
-        set opts(-variable) "::uicontextmenu::check_${menu}_${safeName}"
+        set opts(-variable) "::mdstack::uicontextmenu::check_${menu}_${safeName}"
         set $opts(-variable) $opts(-offvalue)
     }
     
@@ -225,11 +224,11 @@ proc ::uicontextmenu::addCheckItem {menu label args} {
 # ------------------------------------------------------------
 # addRadioItem - Add radiobutton entry
 # ------------------------------------------------------------
-proc ::uicontextmenu::addRadioItem {menu label args} {
+proc ::mdstack::uicontextmenu::addRadioItem {menu label args} {
     variable instances
     
     if {![info exists instances($menu)]} {
-        error "uicontextmenu::addRadioItem: Unknown menu '$menu'"
+        error "mdstack::uicontextmenu::addRadioItem: Unknown menu '$menu'"
     }
     
     # Defaults
@@ -277,11 +276,11 @@ proc ::uicontextmenu::addRadioItem {menu label args} {
 # Options:
 #   -button  2|3 (Default: plattformabhaengig)
 #
-proc ::uicontextmenu::attach {menu widget args} {
+proc ::mdstack::uicontextmenu::attach {menu widget args} {
     variable instances
     
     if {![info exists instances($menu)]} {
-        error "uicontextmenu::attach: Unknown menu '$menu'"
+        error "mdstack::uicontextmenu::attach: Unknown menu '$menu'"
     }
     
     # Defaults
@@ -301,10 +300,10 @@ proc ::uicontextmenu::attach {menu widget args} {
     
     # Create bindings
     if {[tk windowingsystem] eq "aqua"} {
-        bind $widget <Button-$opts(-button)> [list ::uicontextmenu::show $menu %X %Y]
-        bind $widget <Control-Button-1> [list ::uicontextmenu::show $menu %X %Y]
+        bind $widget <Button-$opts(-button)> [list ::mdstack::uicontextmenu::show $menu %X %Y]
+        bind $widget <Control-Button-1> [list ::mdstack::uicontextmenu::show $menu %X %Y]
     } else {
-        bind $widget <Button-$opts(-button)> [list ::uicontextmenu::show $menu %X %Y]
+        bind $widget <Button-$opts(-button)> [list ::mdstack::uicontextmenu::show $menu %X %Y]
     }
     
     # Widget registrieren
@@ -316,7 +315,7 @@ proc ::uicontextmenu::attach {menu widget args} {
 # ------------------------------------------------------------
 # detach - Menu von Widget loesen
 # ------------------------------------------------------------
-proc ::uicontextmenu::detach {menu widget} {
+proc ::mdstack::uicontextmenu::detach {menu widget} {
     variable instances
     
     if {![info exists instances($menu)]} return
@@ -341,7 +340,7 @@ proc ::uicontextmenu::detach {menu widget} {
 # ------------------------------------------------------------
 # show - Show menu
 # ------------------------------------------------------------
-proc ::uicontextmenu::show {menu x y} {
+proc ::mdstack::uicontextmenu::show {menu x y} {
     variable instances
     
     if {![info exists instances($menu)]} return
@@ -361,7 +360,7 @@ proc ::uicontextmenu::show {menu x y} {
 # ------------------------------------------------------------
 # enable / disable - Enable/disable menu entry
 # ------------------------------------------------------------
-proc ::uicontextmenu::enable {menu label} {
+proc ::mdstack::uicontextmenu::enable {menu label} {
     variable instances
     
     if {![info exists instances($menu)]} return
@@ -373,7 +372,7 @@ proc ::uicontextmenu::enable {menu label} {
     $menu entryconfigure $idx -state normal
 }
 
-proc ::uicontextmenu::disable {menu label} {
+proc ::mdstack::uicontextmenu::disable {menu label} {
     variable instances
     
     if {![info exists instances($menu)]} return
@@ -388,7 +387,7 @@ proc ::uicontextmenu::disable {menu label} {
 # ------------------------------------------------------------
 # setCallback - Change callback after creation
 # ------------------------------------------------------------
-proc ::uicontextmenu::setCallback {menu label command} {
+proc ::mdstack::uicontextmenu::setCallback {menu label command} {
     variable instances
     
     if {![info exists instances($menu)]} return
@@ -403,7 +402,7 @@ proc ::uicontextmenu::setCallback {menu label command} {
 # ------------------------------------------------------------
 # setUpdateHandler - Handler for dynamische Menus
 # ------------------------------------------------------------
-proc ::uicontextmenu::setUpdateHandler {menu handler} {
+proc ::mdstack::uicontextmenu::setUpdateHandler {menu handler} {
     variable instances
     
     if {![info exists instances($menu)]} return
@@ -414,7 +413,7 @@ proc ::uicontextmenu::setUpdateHandler {menu handler} {
 # ------------------------------------------------------------
 # destroy - Destroy menu
 # ------------------------------------------------------------
-proc ::uicontextmenu::destroy {menu} {
+proc ::mdstack::uicontextmenu::destroy {menu} {
     variable instances
     
     if {![info exists instances($menu)]} return
@@ -441,7 +440,7 @@ proc ::uicontextmenu::destroy {menu} {
 # ------------------------------------------------------------
 # createStandardEdit - Standard edit context menu
 # ------------------------------------------------------------
-proc ::uicontextmenu::createStandardEdit {path args} {
+proc ::mdstack::uicontextmenu::createStandardEdit {path args} {
     array set opts {
         -cutcmd     {}
         -copycmd    {}
@@ -493,13 +492,13 @@ proc ::uicontextmenu::createStandardEdit {path args} {
 #       {radio label -variable var -value val ?-command cmd?}
 #   }
 #
-proc ::uicontextmenu::createFromSpec {path spec} {
+proc ::mdstack::uicontextmenu::createFromSpec {path spec} {
     set menu [create $path]
     _buildFromSpec $menu $spec
     return $menu
 }
 
-proc ::uicontextmenu::_buildFromSpec {menu spec} {
+proc ::mdstack::uicontextmenu::_buildFromSpec {menu spec} {
     foreach item $spec {
         if {$item eq "-"} {
             addSeparator $menu
@@ -547,4 +546,4 @@ proc ::uicontextmenu::_buildFromSpec {menu spec} {
     }
 }
 
-package provide uicontextmenu 0.1
+package provide mdstack::uicontextmenu 0.1

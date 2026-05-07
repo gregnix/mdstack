@@ -2,8 +2,14 @@
 # test/parser-multiline-list.tcl
 # Tests for Multi-Line List Items
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
-package require mdparser 0.2
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
+package require mdstack::parser 0.2
 
 set total 0; set passed 0; set failed 0; set skipped 0
 
@@ -43,7 +49,7 @@ proc itemText {item} {
 # 1. Simple multi-line (2 lines)
 # ============================================================
 
-set ast [mdparser::parse {- First item continues
+set ast [mdstack::parser::parse {- First item continues
   on this line.
 - Second item.}]
 set lst [getBlock $ast 0]
@@ -56,7 +62,7 @@ assert "ml-simple-item2"  {[itemText [getItem $lst 1]] eq "Second item."}
 # 2. Multi-line with 3 lines
 # ============================================================
 
-set ast [mdparser::parse {- Langer Text der
+set ast [mdstack::parser::parse {- Langer Text der
   spanning multiple
   lines here.
 - Kurz.}]
@@ -68,7 +74,7 @@ assert "ml-three-text" {[itemText [getItem $lst 0]] eq "Langer Text der spanning
 # 3. Multiple multi-line items
 # ============================================================
 
-set ast [mdparser::parse {- Erstes Item
+set ast [mdstack::parser::parse {- Erstes Item
   continues here.
 - Zweites Item
   auch mehrzeilig.
@@ -84,7 +90,7 @@ assert "ml-multi-item3" {[itemText [getItem $lst 2]] eq "Drittes nur einzeilig."
 # 4. Ordered multi-line
 # ============================================================
 
-set ast [mdparser::parse {1. First step that
+set ast [mdstack::parser::parse {1. First step that
    is somewhat longer.
 2. Second step.
 3. Third continues
@@ -99,7 +105,7 @@ assert "ml-ordered-item3" {[itemText [getItem $lst 2]] eq "Third continues on ne
 # 5. Multi-line + sub-items
 # ============================================================
 
-set ast [mdparser::parse {- Langer Text der
+set ast [mdstack::parser::parse {- Langer Text der
   continues here
   - Sub-Item A
   - Sub-Item B
@@ -118,7 +124,7 @@ assert "ml-sub-sub-a"     {[itemText [getItem $sub 0]] eq "Sub-Item A"}
 # 6. Inline formatting across line boundaries
 # ============================================================
 
-set ast [mdparser::parse {- Text mit **bold**
+set ast [mdstack::parser::parse {- Text mit **bold**
   and *italic* words.
 - Normal.}]
 set lst [getBlock $ast 0]
@@ -138,7 +144,7 @@ assert "ml-inline-em"     {$hasEm == 1}
 # 7. Backward compatibility: Flache Liste
 # ============================================================
 
-set ast [mdparser::parse {- A
+set ast [mdstack::parser::parse {- A
 - B
 - C}]
 set lst [getBlock $ast 0]
@@ -150,7 +156,7 @@ assert "ml-compat-item1" {[itemText [getItem $lst 0]] eq "A"}
 # 8. Backward compatibility: Nested ohne Multi-Line
 # ============================================================
 
-set ast [mdparser::parse {- Top
+set ast [mdstack::parser::parse {- Top
   - Sub
 - Top 2}]
 set lst [getBlock $ast 0]
@@ -163,7 +169,7 @@ assert "ml-compat-nested-has-children" {[llength [dict get [getItem $lst 0] bloc
 # 9. Code in multi-line
 # ============================================================
 
-set ast [mdparser::parse {- Use `command`
+set ast [mdstack::parser::parse {- Use `command`
   for execution.
 - Other item.}]
 set lst [getBlock $ast 0]
@@ -174,7 +180,7 @@ assert "ml-code-text" {[itemText [getItem $lst 0]] eq "Use command for execution
 # 10. Blank line ends multi-line (no code block swallowing)
 # ============================================================
 
-set ast [mdparser::parse {- Item eins.
+set ast [mdstack::parser::parse {- Item eins.
 - Item zwei.
 
     code block}]
@@ -188,7 +194,7 @@ assert "ml-blank-stops-code"  {[dict get [lindex $blocks 1] type] eq "code_block
 # 11. Task list multi-line
 # ============================================================
 
-set ast [mdparser::parse {- [ ] Task that
+set ast [mdstack::parser::parse {- [ ] Task that
   is somewhat longer.
 - [x] Erledigt.}]
 set lst [getBlock $ast 0]
@@ -201,7 +207,7 @@ assert "ml-task-done"    {[dict get [getItem $lst 1] checked] == 1}
 # 12. 4-space indentation as continuation
 # ============================================================
 
-set ast [mdparser::parse {- Item mit
+set ast [mdstack::parser::parse {- Item mit
     four spaces indentation.
 - Next.}]
 set lst [getBlock $ast 0]
@@ -212,7 +218,7 @@ assert "ml-4space-text" {[itemText [getItem $lst 0]] eq "Item mit four spaces in
 # 13. Paragraph vor und nach Liste bleibt erhalten
 # ============================================================
 
-set ast [mdparser::parse {Text davor.
+set ast [mdstack::parser::parse {Text davor.
 
 - Mehrzeiliges
   Item hier.

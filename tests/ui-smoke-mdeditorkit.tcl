@@ -1,46 +1,51 @@
 package require tcltest
 namespace import ::tcltest::*
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
 
 package require Tk
-package require mdeditorkit 0.2
+package require mdstack::editorkit 0.2
 
 test ui-1 "create mdeditorkit" -body {
-    set w [mdeditorkit::create .k]
+    set w [mdstack::editorkit::create .k]
     update
-    set m [mdeditorkit::mode $w]
+    set m [mdstack::editorkit::mode $w]
     destroy $w
     set m
 } -result split
 
 test ui-2 "set text and render" -body {
     # debounce=0 for immediate parsing
-    set w [mdeditorkit::create .k -debounce 0]
-    mdeditorkit::settext $w "# Title\n\nText"
+    set w [mdstack::editorkit::create .k -debounce 0]
+    mdstack::editorkit::settext $w "# Title\n\nText"
     update idletasks
     update
-    set doc [mdeditorkit::getdocmodel $w]
+    set doc [mdstack::editorkit::getdocmodel $w]
     destroy $w
     expr {[dict exists $doc headings]}
 } -result 1
 
 test ui-3 "mode switching" -body {
-    set w [mdeditorkit::create .k]
-    mdeditorkit::setmode $w edit
-    set a [mdeditorkit::mode $w]
-    mdeditorkit::setmode $w preview
-    set b [mdeditorkit::mode $w]
+    set w [mdstack::editorkit::create .k]
+    mdstack::editorkit::setmode $w edit
+    set a [mdstack::editorkit::mode $w]
+    mdstack::editorkit::setmode $w preview
+    set b [mdstack::editorkit::mode $w]
     destroy $w
     list $a $b
 } -result {edit preview}
 
 test ui-4 "gettext returns set text" -body {
-    set w [mdeditorkit::create .k]
+    set w [mdstack::editorkit::create .k]
     set input "# Test\n\nContent"
-    mdeditorkit::settext $w $input
+    mdstack::editorkit::settext $w $input
     update
-    set output [mdeditorkit::gettext $w]
+    set output [mdstack::editorkit::gettext $w]
     destroy $w
     expr {$input eq $output}
 } -result 1

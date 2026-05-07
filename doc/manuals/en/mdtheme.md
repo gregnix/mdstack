@@ -1,15 +1,15 @@
-# mdtheme
+# mdstack::theme
 
 > Version 0.1
 
 ## Purpose
 
-`mdtheme` provides shared color themes and typography settings for all
+`mdstack::theme` provides shared color themes and typography settings for all
 mdstack renderers:
 
-- **mdviewer** (Tk widget) — colors for text tags
-- **mdhtml** (HTML renderer) — via `toCSS`
-- **mdpdf** (PDF renderer) — via `toPdfOpts`
+- **mdstack::viewer** (Tk widget) — colors for text tags
+- **mdstack::html** (HTML renderer) — via `toCSS`
+- **mdstack::pdf** (PDF renderer) — via `toPdfOpts`
 
 Define a theme once, all three renderers benefit.
 
@@ -27,36 +27,36 @@ Define a theme once, all three renderers benefit.
 ### Query and activate themes
 
 ```tcl
-mdtheme::names       ;# --> dunkel hell solarized
-mdtheme::current     ;# --> hell
-mdtheme::activate dunkel
+mdstack::theme::names       ;# --> dunkel hell solarized
+mdstack::theme::current     ;# --> hell
+mdstack::theme::activate dunkel
 ```
 
 ### Read individual values
 
 ```tcl
-mdtheme::color bg        ;# --> #ffffff  (current theme)
-mdtheme::get hell bg     ;# --> #ffffff  (named theme)
-mdtheme::get hell font_size  ;# --> 11
+mdstack::theme::color bg        ;# --> #ffffff  (current theme)
+mdstack::theme::get hell bg     ;# --> #ffffff  (named theme)
+mdstack::theme::get hell font_size  ;# --> 11
 ```
 
 ### Read full theme dict
 
 ```tcl
-set th [mdtheme::theme hell]
+set th [mdstack::theme::theme hell]
 dict get $th link    ;# --> #0066cc
 ```
 
 ### For HTML renderer
 
 ```tcl
-package require mdtheme 0.1
-package require mdhtml  0.1
+package require mdstack::theme 0.1
+package require mdstack::html  0.1
 
-set html [mdhtml::render $ast -theme hell]
+set html [mdstack::html::render $ast -theme hell]
 
 # Theme as base + external overrides (recommended):
-set html [mdhtml::render $ast -theme hell -css custom.css]
+set html [mdstack::html::render $ast -theme hell -css custom.css]
 ```
 
 `toCSS` returns a complete CSS string with all colors and typography
@@ -66,10 +66,10 @@ the theme CSS — later rules win.
 ### For PDF renderer
 
 ```tcl
-package require mdtheme 0.1
-package require mdpdf   0.2
+package require mdstack::theme 0.1
+package require mdstack::pdf   0.2
 
-mdpdf::export $ast output.pdf -theme hell
+mdstack::pdf::export $ast output.pdf -theme hell
 ```
 
 `toPdfOpts` returns a dict with PDF-relevant values:
@@ -78,11 +78,11 @@ mdpdf::export $ast output.pdf -theme hell
 ### For Tk viewer
 
 ```tcl
-package require mdtheme  0.1
-package require mdviewer 0.3
+package require mdstack::theme  0.1
+package require mdstack::viewer 0.3
 
-mdtheme::activate dunkel
-mdtheme::applyToViewer .viewer
+mdstack::theme::activate dunkel
+mdstack::theme::applyToViewer .viewer
 ```
 
 ---
@@ -116,7 +116,7 @@ All themes share these defaults (overridable per theme dict):
 ## Adding a custom theme
 
 ```tcl
-set mdtheme::themes(mytheme) {
+set mdstack::theme::themes(mytheme) {
     name   "My Theme"
     bg     "#fafafa"
     fg     "#111111"
@@ -125,7 +125,7 @@ set mdtheme::themes(mytheme) {
     margin_page 60
     ;# ... all required keys as in "hell" ...
 }
-mdtheme::activate mytheme
+mdstack::theme::activate mytheme
 ```
 
 ---
@@ -150,6 +150,6 @@ mdtheme::activate mytheme
 
 ## See also
 
-- [mdhtml](mdhtml.md) – HTML renderer
-- [mdpdf](mdpdf.md) – PDF renderer
-- [mdviewer](mdviewer.md) – Tk viewer
+- [mdstack::html](mdhtml.md) – HTML renderer
+- [mdstack::pdf](mdpdf.md) – PDF renderer
+- [mdstack::viewer](mdviewer.md) – Tk viewer

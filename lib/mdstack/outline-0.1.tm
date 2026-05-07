@@ -1,5 +1,4 @@
 # mdoutline-0.1.tm
-# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Heading-Outline-Panel for den mdtext-Editor.
 # Zeigt Headings als Baumstruktur, Klick springt zur Stelle im Editor.
@@ -7,24 +6,24 @@
 # Abhaengigkeiten: Tk, mdtext 0.1
 #
 # API:
-#   mdoutline::create $path -editor $ed  -> $path
-#   mdoutline::refresh $path
-#   mdoutline::gotoSelection $path
-#   mdoutline::dispatch $path subcommand
-#   mdoutline::destroy $path
+#   mdstack::outline::create $path -editor $ed  -> $path
+#   mdstack::outline::refresh $path
+#   mdstack::outline::gotoSelection $path
+#   mdstack::outline::dispatch $path subcommand
+#   mdstack::outline::destroy $path
 
 package require Tk
-package require mdtext 0.1
+package require mdstack::text 0.1
 
-package provide mdoutline 0.1
+package provide mdstack::outline 0.1
 
-namespace eval mdoutline {
+namespace eval mdstack::outline {
     namespace export create refresh gotoSelection dispatch destroy
     variable state
     array set state {}
 }
 
-proc mdoutline::create {path args} {
+proc mdstack::outline::create {path args} {
     variable state
 
     # Parse options
@@ -34,11 +33,11 @@ proc mdoutline::create {path args} {
         switch -- $k {
             -editor   { set editor $v }
             -refresh  { set refreshMs $v }
-            default   { error "mdoutline::create: unknown option $k" }
+            default   { error "mdstack::outline::create: unknown option $k" }
         }
     }
     if {$editor eq ""} {
-        error "mdoutline::create: -editor is required"
+        error "mdstack::outline::create: -editor is required"
     }
 
     ttk::frame $path
@@ -72,15 +71,15 @@ proc mdoutline::create {path args} {
     set state($path,afterid) ""
 
     # Doppelklick oder Select springt zum Heading
-    bind $tree <<TreeviewSelect>> [list mdoutline::gotoSelection $path]
+    bind $tree <<TreeviewSelect>> [list mdstack::outline::gotoSelection $path]
 
     # Initiales Refresh
-    mdoutline::refresh $path
+    mdstack::outline::refresh $path
 
     return $path
 }
 
-proc mdoutline::refresh {path} {
+proc mdstack::outline::refresh {path} {
     variable state
     set tree $state($path,tree)
     set ed $state($path,editor)
@@ -89,7 +88,7 @@ proc mdoutline::refresh {path} {
     $tree delete [$tree children {}]
 
     # Headings aus dem Editor holen
-    set headings [mdtext::getHeadings $ed]
+    set headings [mdstack::text::getHeadings $ed]
 
     foreach h $headings {
         lassign $h level text idx
@@ -105,7 +104,7 @@ proc mdoutline::refresh {path} {
     }
 }
 
-proc mdoutline::gotoSelection {path} {
+proc mdstack::outline::gotoSelection {path} {
     variable state
     set tree $state($path,tree)
     set ed $state($path,editor)
@@ -117,7 +116,7 @@ proc mdoutline::gotoSelection {path} {
     if {[llength $values] == 0} return
 
     set idx [lindex $values 0]
-    set t [mdtext::_t $ed]
+    set t [mdstack::text::_t $ed]
 
     # Cursor setzen und sichtbar machen
     $t mark set insert $idx
@@ -132,18 +131,18 @@ proc mdoutline::gotoSelection {path} {
 }
 
 # Dispatcher for mdcontextmenu-Kompatibilitaet
-proc mdoutline::dispatch {path subcmd args} {
+proc mdstack::outline::dispatch {path subcmd args} {
     variable state
     switch -- $subcmd {
         tree    { return $state($path,tree) }
         editor  { return $state($path,editor) }
-        refresh { return [mdoutline::refresh $path] }
-        goto    { return [mdoutline::gotoSelection $path] }
-        default { error "mdoutline::dispatch: unknown subcommand $subcmd" }
+        refresh { return [mdstack::outline::refresh $path] }
+        goto    { return [mdstack::outline::gotoSelection $path] }
+        default { error "mdstack::outline::dispatch: unknown subcommand $subcmd" }
     }
 }
 
-proc mdoutline::destroy {path} {
+proc mdstack::outline::destroy {path} {
     variable state
     if {[info exists state($path,afterid)] && $state($path,afterid) ne ""} {
         after cancel $state($path,afterid)

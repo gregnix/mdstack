@@ -1,5 +1,4 @@
 # mdstack-0.1.tm
-# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 # ============================================================
 # Markdown Stack Orchestrator
 # ============================================================
@@ -77,7 +76,7 @@ namespace eval mdstack {
 #   -onchange   SCRIPT  (Optional) Registriert Change-Callback am Editor
 #
 # Example:
-#   set editor [mdtext::create .editor]
+#   set editor [mdstack::text::create .editor]
 #   mdstack::setEditorAPI \
 #       -getText   [list $editor get] \
 #       -setText   [list $editor set] \
@@ -659,8 +658,8 @@ proc mdstack::_defaultRender {w text} {
     if {![winfo exists $w]} return
     
     catch {
-        set ast [mdparser::parse $text]
-        set doc [mdmodel::new $ast]
-        mdviewer::renderModel $w $doc
+        set ast [mdstack::parser::parse $text]
+        set doc [mdstack::model::new $ast]
+        mdstack::viewer::renderModel $w $doc
     }
 }

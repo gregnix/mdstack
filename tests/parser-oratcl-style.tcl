@@ -1,12 +1,17 @@
 #!/usr/bin/env tclsh
 # parser-oratcl-style.tcl - Realworld test with man-page style documents
 
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
 package require tcltest
 namespace import ::tcltest::*
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
-
-package require mdparser 0.2
+package require mdstack::parser 0.2
 
 # ============================================================
 # Simulate oratcl.md structure: headings + indented content
@@ -40,7 +45,7 @@ test oratcl-structure-1 "typical man-page: heading + indented description" -body
     oralogoff
         Disconnects from the Oracle server.
 }
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set blocks [dict get $ast blocks]
     set types {}
     foreach b $blocks {
@@ -58,7 +63,7 @@ test oratcl-structure-2 "indented text preserves internal structure" -body {
         Example:
             set lda [oralogon user/pass@db]
 }
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set blocks [dict get $ast blocks]
     set codeBlock [lindex $blocks 1]
     set text [dict get $codeBlock text]
@@ -74,7 +79,7 @@ test oratcl-structure-3 "8-space indent becomes 4-space in output" -body {
         package require Oratcl 4.6
         set lda [oralogon scott/tiger@orcl]
 }
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set blocks [dict get $ast blocks]
     set codeBlock [lindex $blocks 1]
     set firstLine [lindex [split [dict get $codeBlock text] "\n"] 0]
@@ -98,7 +103,7 @@ test oratcl-block-count "large document produces correct block count" -body {
 
     Content of section C line 1
 }
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set blocks [dict get $ast blocks]
     # 3 headings + 3 code blocks = 6
     llength $blocks
@@ -112,7 +117,7 @@ test oratcl-no-paragraph-merging "indented lines NOT merged into single paragrap
     Line two of description.
     Line three of description.
 }
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set blocks [dict get $ast blocks]
     set second [lindex $blocks 1]
     # Must be code, NOT paragraph
@@ -126,7 +131,7 @@ test oratcl-linebreaks-preserved "line breaks within indented code preserved" -b
     multiple lines and should
     keep its line structure.
 }
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 1]
     set text [dict get $block text]
     set lines [split $text "\n"]
@@ -142,7 +147,7 @@ test old-vs-new-1 "fenced code blocks still work unchanged" -body {
 package require Oratcl
 set lda [oralogon scott/tiger]
 ```}
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 0]
     list [dict get $block type] [dict get $block language]
 } -result {code_block tcl}
@@ -150,7 +155,7 @@ set lda [oralogon scott/tiger]
 test old-vs-new-2 "normal paragraphs still work" -body {
     set md {This is a normal paragraph with no special indentation.
 It continues on the next line.}
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 0]
     dict get $block type
 } -result {paragraph}
@@ -161,7 +166,7 @@ test old-vs-new-3 "tables still parsed correctly" -body {
 | oralogon | Connect to Oracle |
 | oralogoff | Disconnect |
 }
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 0]
     dict get $block type
 } -result {table}

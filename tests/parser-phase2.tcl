@@ -3,8 +3,14 @@
 # Tests fuer Phase 2: Link-Label inline[], list_item Block-Modell
 # ============================================================
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
-package require mdparser 0.2
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
+package require mdstack::parser 0.2
 
 set total 0; set passed 0; set failed 0; set skipped 0
 
@@ -44,7 +50,7 @@ proc flatLabel {inlines} {
 puts "--- A. Link label als inline\[\] ---"
 
 # A1. Simple link: label is list with one text node
-set r [mdparser::parseInlines {[Tcl](https://tcl.tk)}]
+set r [mdstack::parser::parseInlines {[Tcl](https://tcl.tk)}]
 set link [lindex $r 0]
 assert "A1-link-type"       {[dict get $link type] eq "link"}
 assert "A1-label-is-list"   {[llength [dict get $link label]] >= 1}
@@ -52,44 +58,44 @@ assert "A1-label-text"      {[flatLabel [dict get $link label]] eq "Tcl"}
 assert "A1-url"             {[dict get $link url] eq "https://tcl.tk"}
 
 # A2. Formatierter Link: **bold** im Label
-set r [mdparser::parseInlines {[**Bold** link](https://example.com)}]
+set r [mdstack::parser::parseInlines {[**Bold** link](https://example.com)}]
 set link [lindex $r 0]
 assert "A2-label-has-strong" {[dict get [lindex [dict get $link label] 0] type] eq "strong"}
 assert "A2-label-flat"       {[flatLabel [dict get $link label]] eq "Bold link"}
 
 # A3. Link mit inline_code im Label
-set r [mdparser::parseInlines {[`code` ref](https://example.com)}]
+set r [mdstack::parser::parseInlines {[`code` ref](https://example.com)}]
 set link [lindex $r 0]
 set first [lindex [dict get $link label] 0]
 assert "A3-label-has-code"  {[dict get $first type] eq "inline_code"}
 assert "A3-label-flat"      {[flatLabel [dict get $link label]] eq "code ref"}
 
 # A4. Link mit emphasis im Label
-set r [mdparser::parseInlines {[*italic* text](https://example.com)}]
+set r [mdstack::parser::parseInlines {[*italic* text](https://example.com)}]
 set link [lindex $r 0]
 assert "A4-label-has-em"    {[dict get [lindex [dict get $link label] 0] type] eq "emphasis"}
 assert "A4-label-flat"      {[flatLabel [dict get $link label]] eq "italic text"}
 
 # A5. Autolink: label ist auch inline[]
-set r [mdparser::parseInlines {<https://example.com>}]
+set r [mdstack::parser::parseInlines {<https://example.com>}]
 set link [lindex $r 0]
 assert "A5-autolink-label-list" {[llength [dict get $link label]] >= 1}
 assert "A5-autolink-label-text" {[flatLabel [dict get $link label]] eq "https://example.com"}
 
 # A6. Bare URL: label ist inline[]
-set r [mdparser::parseInlines {visit https://example.com today}]
+set r [mdstack::parser::parseInlines {visit https://example.com today}]
 set link [lindex $r 1]
 assert "A6-bare-label-list" {[llength [dict get $link label]] >= 1}
 assert "A6-bare-label-text" {[flatLabel [dict get $link label]] eq "https://example.com"}
 
 # A7. Mailto autolink: label ist inline[]
-set r [mdparser::parseInlines {mail <user@example.com> bitte}]
+set r [mdstack::parser::parseInlines {mail <user@example.com> bitte}]
 set link [lindex $r 1]
 assert "A7-mailto-label-list" {[llength [dict get $link label]] >= 1}
 assert "A7-mailto-label-text" {[flatLabel [dict get $link label]] eq "user@example.com"}
 
 # A8. Link mit Title: label ist inline[]
-set r [mdparser::parseInlines {[Tcl](https://tcl.tk "The Tcl Language")}]
+set r [mdstack::parser::parseInlines {[Tcl](https://tcl.tk "The Tcl Language")}]
 set link [lindex $r 0]
 assert "A8-title-present"  {[dict get $link title] eq "The Tcl Language"}
 assert "A8-label-is-list"  {[llength [dict get $link label]] >= 1}
@@ -102,7 +108,7 @@ assert "A8-label-flat"     {[flatLabel [dict get $link label]] eq "Tcl"}
 puts "--- B. list_item Block-Modell ---"
 
 # B1. Simple list: items have type list_item + blocks
-set ast [mdparser::parse {- Alpha
+set ast [mdstack::parser::parse {- Alpha
 - Beta}]
 set lst [getBlock $ast 0]
 set item [getItem $lst 0]
@@ -120,7 +126,7 @@ set inlines [dict get $para content]
 assert "B2-text-value" {[dict get [lindex $inlines 0] value] eq "Alpha"}
 
 # B3. Nested list: sub-list is second block in item
-set ast [mdparser::parse {- Parent
+set ast [mdstack::parser::parse {- Parent
   - Child A
   - Child B}]
 set lst [getBlock $ast 0]
@@ -137,14 +143,14 @@ assert "B3-child-type"       {[dict get $childItem type] eq "list_item"}
 assert "B3-child-blocks"     {[llength [dict get $childItem blocks]] == 1}
 
 # B4. Ordered list items haben auch type list_item
-set ast [mdparser::parse {1. Eins
+set ast [mdstack::parser::parse {1. Eins
 2. Zwei}]
 set lst [getBlock $ast 0]
 assert "B4-ordered"          {[dict get $lst style] eq "ordered"}
 assert "B4-item-type"        {[dict get [getItem $lst 0] type] eq "list_item"}
 
 # B5. Task list: checked auf Item-Ebene (nicht im Paragraph)
-set ast [mdparser::parse {- [x] Done
+set ast [mdstack::parser::parse {- [x] Done
 - [ ] Open}]
 set lst [getBlock $ast 0]
 set item0 [getItem $lst 0]
@@ -156,7 +162,7 @@ assert "B5-checked-open"     {[dict get $item1 checked] == 0}
 assert "B5-has-blocks"       {[dict exists $item0 blocks]}
 
 # B6. Kein children-Key mehr vorhanden
-set ast [mdparser::parse {- Parent
+set ast [mdstack::parser::parse {- Parent
   - Child}]
 set item [getItem [getBlock $ast 0] 0]
 assert "B6-no-children-key"  {![dict exists $item children]}
@@ -165,7 +171,7 @@ assert "B6-no-children-key"  {![dict exists $item children]}
 assert "B7-no-content-key"   {![dict exists $item content]}
 
 # B8. Multi-line item: Text wird zusammengefuegt im Paragraph
-set ast [mdparser::parse {- Langer Text
+set ast [mdstack::parser::parse {- Langer Text
   der continues here.
 - Kurz.}]
 set lst [getBlock $ast 0]
@@ -177,7 +183,7 @@ foreach i [dict get $para content] {
 assert "B8-multiline-joined" {$flat eq "Langer Text der continues here."}
 
 # B9. Formatting in item: strong in paragraph block
-set ast [mdparser::parse {- **Bold** item}]
+set ast [mdstack::parser::parse {- **Bold** item}]
 set lst [getBlock $ast 0]
 set para [lindex [dict get [getItem $lst 0] blocks] 0]
 set hasStrong 0
@@ -187,7 +193,7 @@ foreach i [dict get $para content] {
 assert "B9-strong-in-para" {$hasStrong == 1}
 
 # B10. Triple nested: blocks correct
-set ast [mdparser::parse {- L1
+set ast [mdstack::parser::parse {- L1
   - L2
     - L3}]
 set lst [getBlock $ast 0]
@@ -209,7 +215,7 @@ assert "B10-l3-item-type"   {[dict get [getItem $sub3 0] type] eq "list_item"}
 puts "--- C. parseBlocks Dispatcher ---"
 
 # C1. Alle Block-Typen werden erkannt
-set ast [mdparser::parse {# Heading
+set ast [mdstack::parser::parse {# Heading
 
 Paragraph text.
 
@@ -256,7 +262,7 @@ assert "C2-first-heading"  {[dict get [lindex $blocks 0] type] eq "heading"}
 
 puts "--- D. Reference Links ---"
 
-set ast [mdparser::parse {See [**bold** ref][r1] here.
+set ast [mdstack::parser::parse {See [**bold** ref][r1] here.
 
 [r1]: https://example.com "Title"}]
 set para [getBlock $ast 0]

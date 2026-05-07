@@ -2,8 +2,14 @@
 # test/parser-nested-lists.tcl
 # Tests for nested lists
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
-package require mdparser 0.2
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
+package require mdstack::parser 0.2
 
 set total 0; set passed 0; set failed 0; set skipped 0
 
@@ -38,7 +44,7 @@ proc getSubList {item} {
 # 1. Flache Liste (Rueckwaertskompatibilitaet)
 # ============================================================
 
-set ast [mdparser::parse {- Alpha
+set ast [mdstack::parser::parse {- Alpha
 - Beta
 - Gamma}]
 set lst [getBlock $ast 0]
@@ -54,7 +60,7 @@ assert "flat-no-children" {![hasSubBlocks [getItem $lst 0]]}
 # 2. Simple nesting (2 levels)
 # ============================================================
 
-set ast [mdparser::parse {- Item 1
+set ast [mdstack::parser::parse {- Item 1
   - Sub A
   - Sub B
 - Item 2}]
@@ -76,7 +82,7 @@ assert "nest2-sub-item2"   {[itemText [getItem $sub 1]] eq "Sub B"}
 # 3. Drei Ebenen
 # ============================================================
 
-set ast [mdparser::parse {- L1
+set ast [mdstack::parser::parse {- L1
   - L2
     - L3
   - L2b
@@ -96,7 +102,7 @@ assert "nest3-l3-item1" {[itemText [getItem $sub3 0]] eq "L3"}
 # 4. Gemischt ordered/unordered
 # ============================================================
 
-set ast [mdparser::parse {1. First
+set ast [mdstack::parser::parse {1. First
    - Sub unordered
    - Sub zwei
 2. Second
@@ -115,7 +121,7 @@ assert "mixed-sub-count"     {[llength [dict get $sub items]] == 2}
 # 5. Task list nested
 # ============================================================
 
-set ast [mdparser::parse {- [ ] Todo 1
+set ast [mdstack::parser::parse {- [ ] Todo 1
   - [x] Sub done
   - [ ] Sub open
 - [x] Todo 2}]
@@ -132,7 +138,7 @@ assert "task-sub2-checked"   {[dict get [getItem $sub 1] checked] == 0}
 # 6. 4-Space Einrueckung
 # ============================================================
 
-set ast [mdparser::parse {- Item
+set ast [mdstack::parser::parse {- Item
     - Sub 4 spaces
 - Item 2}]
 set lst [getBlock $ast 0]
@@ -145,7 +151,7 @@ assert "4space-sub-text" {[itemText [getItem $sub 0]] eq "Sub 4 spaces"}
 # 7. Inline formatting in nested items
 # ============================================================
 
-set ast [mdparser::parse {- **Bold** item
+set ast [mdstack::parser::parse {- **Bold** item
   - *Italic* sub}]
 set lst [getBlock $ast 0]
 
@@ -167,7 +173,7 @@ assert "inline-em-sub" {$hasEm == 1}
 # 8. Ordered list nested
 # ============================================================
 
-set ast [mdparser::parse {1. Eins
+set ast [mdstack::parser::parse {1. Eins
    1. Sub eins
    2. Sub zwei
 2. Zwei}]
@@ -182,7 +188,7 @@ assert "ord-nested-sub-count"   {[llength [dict get $sub items]] == 2}
 # 9. Mehrere Items mit je eigenen Kindern
 # ============================================================
 
-set ast [mdparser::parse {- A
+set ast [mdstack::parser::parse {- A
   - A1
   - A2
 - B
@@ -204,7 +210,7 @@ assert "multi-B-sub-count" {[llength [dict get $subB items]] == 1}
 # 10. Only one block type (no interference with other blocks)
 # ============================================================
 
-set ast [mdparser::parse {Paragraph davor.
+set ast [mdstack::parser::parse {Paragraph davor.
 
 - Item
   - Sub

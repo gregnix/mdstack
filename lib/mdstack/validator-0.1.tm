@@ -1,20 +1,19 @@
 # mdvalidator-0.1.tm -- AST Validator for mdstack AST-Spec v0.3
-# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Validates each node in the AST against the specification.
 # Returns a list of errors (empty = valid).
 #
 # Usage:
-#   package require mdvalidator 0.1
-#   set errors [mdvalidator::validate $ast]
-#   set errors [mdvalidator::validate $ast -strict]
+#   package require mdstack::validator 0.1
+#   set errors [mdstack::validator::validate $ast]
+#   set errors [mdstack::validator::validate $ast -strict]
 #
 # In strict mode, warnings are also reported as errors
 # (e.g. unknown node types, empty text.value).
 
-package provide mdvalidator 0.1
+package provide mdstack::validator 0.1
 
-namespace eval mdvalidator {
+namespace eval mdstack::validator {
     variable errors
     variable strict
     variable path
@@ -23,7 +22,7 @@ namespace eval mdvalidator {
 # validate --
 #   Main entry: validates a complete AST.
 #   Returns a list of error strings.
-proc mdvalidator::validate {ast args} {
+proc mdstack::validator::validate {ast args} {
     variable errors
     variable strict
     variable path
@@ -47,7 +46,7 @@ proc mdvalidator::validate {ast args} {
 
 # report --
 #   Formatted output of validation results.
-proc mdvalidator::report {ast args} {
+proc mdstack::validator::report {ast args} {
     set errs [validate $ast {*}$args]
     if {[llength $errs] == 0} {
         return "AST valide (Spec v0.3)"
@@ -61,13 +60,13 @@ proc mdvalidator::report {ast args} {
 
 # --- Internal Validation Procs ---
 
-proc mdvalidator::addError {msg} {
+proc mdstack::validator::addError {msg} {
     variable errors
     variable path
     lappend errors "${path}: $msg"
 }
 
-proc mdvalidator::addWarning {msg} {
+proc mdstack::validator::addWarning {msg} {
     variable errors
     variable strict
     variable path
@@ -76,7 +75,7 @@ proc mdvalidator::addWarning {msg} {
     }
 }
 
-proc mdvalidator::requireField {node field} {
+proc mdstack::validator::requireField {node field} {
     if {![dict exists $node $field]} {
         addError "Required field '$field' missing"
         return 0
@@ -84,12 +83,12 @@ proc mdvalidator::requireField {node field} {
     return 1
 }
 
-proc mdvalidator::requireString {node field} {
+proc mdstack::validator::requireString {node field} {
     if {![requireField $node $field]} { return 0 }
     return 1
 }
 
-proc mdvalidator::requireList {node field} {
+proc mdstack::validator::requireList {node field} {
     if {![requireField $node $field]} { return 0 }
     set val [dict get $node $field]
     if {[catch {llength $val}]} {
@@ -101,7 +100,7 @@ proc mdvalidator::requireList {node field} {
 
 # --- Document ---
 
-proc mdvalidator::validateDocument {node} {
+proc mdstack::validator::validateDocument {node} {
     variable path
     set saved $path
     set path "/document"
@@ -127,7 +126,7 @@ proc mdvalidator::validateDocument {node} {
 
 # --- Block Nodes ---
 
-proc mdvalidator::validateBlock {node} {
+proc mdstack::validator::validateBlock {node} {
     variable path
     set saved $path
 
@@ -155,7 +154,7 @@ proc mdvalidator::validateBlock {node} {
     set path $saved
 }
 
-proc mdvalidator::validateHeading {node} {
+proc mdstack::validator::validateHeading {node} {
     variable path
     append path "/heading"
 
@@ -180,7 +179,7 @@ proc mdvalidator::validateHeading {node} {
     }
 }
 
-proc mdvalidator::validateParagraph {node} {
+proc mdstack::validator::validateParagraph {node} {
     variable path
     append path "/paragraph"
 
@@ -193,7 +192,7 @@ proc mdvalidator::validateParagraph {node} {
     }
 }
 
-proc mdvalidator::validateCodeBlock {node} {
+proc mdstack::validator::validateCodeBlock {node} {
     variable path
     append path "/code_block"
 
@@ -201,7 +200,7 @@ proc mdvalidator::validateCodeBlock {node} {
     requireField $node text
 }
 
-proc mdvalidator::validateList {node} {
+proc mdstack::validator::validateList {node} {
     variable path
     set saved $path
     append path "/list"
@@ -225,7 +224,7 @@ proc mdvalidator::validateList {node} {
     set path $saved
 }
 
-proc mdvalidator::validateListItem {node} {
+proc mdstack::validator::validateListItem {node} {
     variable path
     set saved $path
     append path "/list_item"
@@ -261,7 +260,7 @@ proc mdvalidator::validateListItem {node} {
     set path $saved
 }
 
-proc mdvalidator::validateBlockquote {node} {
+proc mdstack::validator::validateBlockquote {node} {
     variable path
     set saved $path
     append path "/blockquote"
@@ -278,26 +277,48 @@ proc mdvalidator::validateBlockquote {node} {
     set path $saved
 }
 
-proc mdvalidator::validateTable {node} {
+proc mdstack::validator::validateTable {node} {
     variable path
     append path "/table"
 
-    requireList $node header
-    requireList $node alignments
-    requireList $node rows
-    requireList $node headerInlines
-    requireList $node rowsInlines
+    # Seit A.3 Lesart 2 (2026-05-07):
+    # Tabellen-AST = {type table content {tableRow*} meta {columns N alignments {...} hasHeader 0|1}}
+    # Konsumenten greifen rekursiv über content zu, nicht mehr auf header/rows/headerInlines/rowsInlines.
+    requireList $node content
 
-    if {[dict exists $node alignments]} {
-        foreach a [dict get $node alignments] {
-            if {$a ni {left center right}} {
-                addError "alignment must left/center/right sein, ist '$a'"
+    if {[dict exists $node meta]} {
+        set meta [dict get $node meta]
+        if {![dict exists $meta columns]} {
+            addError "meta.columns fehlt"
+        } elseif {![string is integer -strict [dict get $meta columns]]} {
+            addError "meta.columns muss Integer sein"
+        }
+        if {![dict exists $meta alignments]} {
+            addError "meta.alignments fehlt"
+        } else {
+            foreach a [dict get $meta alignments] {
+                if {$a ni {left center right}} {
+                    addError "alignment must left/center/right sein, ist '$a'"
+                }
+            }
+        }
+    } else {
+        addError "meta fehlt"
+    }
+
+    # Jeder content-Eintrag muss ein tableRow sein
+    if {[dict exists $node content]} {
+        set rowIdx 0
+        foreach row [dict get $node content] {
+            incr rowIdx
+            if {[catch {dict get $row type} t] || $t ne "tableRow"} {
+                addError "content\[$rowIdx\]: erwarte type=tableRow, ist '$t'"
             }
         }
     }
 }
 
-proc mdvalidator::validateDeflist {node} {
+proc mdstack::validator::validateDeflist {node} {
     variable path
     set saved $path
     append path "/deflist"
@@ -326,7 +347,7 @@ proc mdvalidator::validateDeflist {node} {
     set path $saved
 }
 
-proc mdvalidator::validateDiv {node} {
+proc mdstack::validator::validateDiv {node} {
     variable path
     set saved $path
     append path "/div"
@@ -350,7 +371,7 @@ proc mdvalidator::validateDiv {node} {
 
 # --- Inline Nodes ---
 
-proc mdvalidator::validateInlineList {inlines context} {
+proc mdstack::validator::validateInlineList {inlines context} {
     variable path
     set saved $path
     set idx 0
@@ -362,7 +383,7 @@ proc mdvalidator::validateInlineList {inlines context} {
     set path $saved
 }
 
-proc mdvalidator::validateInline {node} {
+proc mdstack::validator::validateInline {node} {
     variable path
     set saved $path
 
@@ -389,7 +410,7 @@ proc mdvalidator::validateInline {node} {
     set path $saved
 }
 
-proc mdvalidator::validateText {node} {
+proc mdstack::validator::validateText {node} {
     variable path
     append path "/text"
     requireField $node value
@@ -398,7 +419,7 @@ proc mdvalidator::validateText {node} {
     }
 }
 
-proc mdvalidator::validateEmphasis {node} {
+proc mdstack::validator::validateEmphasis {node} {
     variable path
     append path "/emphasis"
     if {[requireList $node content]} {
@@ -406,7 +427,7 @@ proc mdvalidator::validateEmphasis {node} {
     }
 }
 
-proc mdvalidator::validateStrong {node} {
+proc mdstack::validator::validateStrong {node} {
     variable path
     append path "/strong"
     if {[requireList $node content]} {
@@ -414,13 +435,13 @@ proc mdvalidator::validateStrong {node} {
     }
 }
 
-proc mdvalidator::validateInlineCode {node} {
+proc mdstack::validator::validateInlineCode {node} {
     variable path
     append path "/inline_code"
     requireField $node value
 }
 
-proc mdvalidator::validateLink {node} {
+proc mdstack::validator::validateLink {node} {
     variable path
     append path "/link"
 
@@ -431,7 +452,7 @@ proc mdvalidator::validateLink {node} {
     # title ist optional
 }
 
-proc mdvalidator::validateImage {node context} {
+proc mdstack::validator::validateImage {node context} {
     variable path
     append path "/image"
     requireString $node alt
@@ -439,7 +460,7 @@ proc mdvalidator::validateImage {node context} {
     # title ist optional
 }
 
-proc mdvalidator::validateStrike {node} {
+proc mdstack::validator::validateStrike {node} {
     variable path
     append path "/strike"
     if {[requireList $node content]} {
@@ -447,7 +468,7 @@ proc mdvalidator::validateStrike {node} {
     }
 }
 
-proc mdvalidator::validateSpan {node} {
+proc mdstack::validator::validateSpan {node} {
     variable path
     append path "/span"
 

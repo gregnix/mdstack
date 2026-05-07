@@ -1,8 +1,8 @@
-# mdcontextmenu
+# mdstack::contextmenu
 
 ## Purpose
 
-`mdcontextmenu` provides **right-click menus** for Markdown editors.
+`mdstack::contextmenu` provides **right-click menus** for Markdown editors.
 
 The module:
 - is **editor-local** (no application logic)
@@ -15,23 +15,23 @@ The module:
 ## Dependencies
 
 - Tcl/Tk ≥ 8.6
-- `uicontextmenu 0.1`
+- `mdstack::uicontextmenu 0.1`
 
 ---
 
 ## Public API
 
-### `mdcontextmenu::attachToEditor editor`
+### `mdstack::contextmenu::attachToEditor editor`
 
-Attaches the context menu to an mdtext editor.
+Attaches the context menu to an mdstack::text editor.
 
 ```tcl
-package require mdtext        0.1
-package require uicontextmenu 0.1
-package require mdcontextmenu 0.1
+package require mdstack::text        0.1
+package require mdstack::mdstack::uicontextmenu 0.1
+package require mdstack::contextmenu 0.1
 
-set editor [mdtext::create .editor]
-mdcontextmenu::attachToEditor $editor
+set editor [mdstack::text::create .editor]
+mdstack::contextmenu::attachToEditor $editor
 ```
 
 After this, **right-click** in the editor opens the menu.

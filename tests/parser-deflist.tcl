@@ -2,8 +2,14 @@
 # test/parser-deflist.tcl
 # Tests for Definition Lists
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
-package require mdparser 0.2
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
+package require mdstack::parser 0.2
 
 set total 0; set passed 0; set failed 0; set skipped 0
 
@@ -39,7 +45,7 @@ proc defText {item defIdx} {
 # 1. Simple definition list
 # ============================================================
 
-set ast [mdparser::parse {Term Eins
+set ast [mdstack::parser::parse {Term Eins
 : Definition for term one.}]
 set dl [getBlock $ast 0]
 
@@ -52,7 +58,7 @@ assert "dl-simple-def"       {[defText [getDlItem $dl 0] 0] eq "Definition for t
 # 2. Two entries
 # ============================================================
 
-set ast [mdparser::parse {API
+set ast [mdstack::parser::parse {API
 : Application Programming Interface
 
 CLI
@@ -69,7 +75,7 @@ assert "dl-two-def2"   {[defText [getDlItem $dl 1] 0] eq "Command Line Interface
 # 3. Mehrere Definitionen pro Term
 # ============================================================
 
-set ast [mdparser::parse {Bank
+set ast [mdstack::parser::parse {Bank
 : Sitzgelegenheit
 : Finanzinstitut
 : Flussufer}]
@@ -85,7 +91,7 @@ assert "dl-multi-def-3"     {[defText $item 2] eq "Flussufer"}
 # 4. Contiguous without blank lines
 # ============================================================
 
-set ast [mdparser::parse {Alpha
+set ast [mdstack::parser::parse {Alpha
 : First letter
 Beta
 : Second letter
@@ -102,7 +108,7 @@ assert "dl-compact-term3"  {[termText [getDlItem $dl 2]] eq "Gamma"}
 # 5. Inline formatting in term
 # ============================================================
 
-set ast [mdparser::parse {**Bold Term**
+set ast [mdstack::parser::parse {**Bold Term**
 : Definition dazu.}]
 set dl [getBlock $ast 0]
 set item [getDlItem $dl 0]
@@ -117,7 +123,7 @@ assert "dl-inline-term-strong" {$hasStrong == 1}
 # 6. Inline formatting in definition
 # ============================================================
 
-set ast [mdparser::parse {Term
+set ast [mdstack::parser::parse {Term
 : Definition mit **bold** und *italic*.}]
 set dl [getBlock $ast 0]
 set def [lindex [dict get [getDlItem $dl 0] definitions] 0]
@@ -135,7 +141,7 @@ assert "dl-inline-def-em"     {$hasEm == 1}
 # 7. Paragraph vor und nach Deflist
 # ============================================================
 
-set ast [mdparser::parse {Paragraph davor.
+set ast [mdstack::parser::parse {Paragraph davor.
 
 Hund
 : Haustier
@@ -152,7 +158,7 @@ assert "dl-context-para2" {[dict get [lindex $blocks 2] type] eq "paragraph"}
 # 8. Kein Deflist – normaler Paragraph
 # ============================================================
 
-set ast [mdparser::parse {Normaler Text.
+set ast [mdstack::parser::parse {Normaler Text.
 Noch mehr Text.}]
 
 assert "dl-not-dl" {[dict get [getBlock $ast 0] type] eq "paragraph"}
@@ -161,7 +167,7 @@ assert "dl-not-dl" {[dict get [getBlock $ast 0] type] eq "paragraph"}
 # 9. Not a deflist – colon in the middle of text
 # ============================================================
 
-set ast [mdparser::parse {Hinweis: Das ist kein Deflist.}]
+set ast [mdstack::parser::parse {Hinweis: Das ist kein Deflist.}]
 
 assert "dl-colon-in-text" {[dict get [getBlock $ast 0] type] eq "paragraph"}
 
@@ -169,7 +175,7 @@ assert "dl-colon-in-text" {[dict get [getBlock $ast 0] type] eq "paragraph"}
 # 10. Blank lines between term and definition
 # ============================================================
 
-set ast [mdparser::parse {Hund
+set ast [mdstack::parser::parse {Hund
 : Bester Freund des Menschen
 
 Katze
@@ -187,7 +193,7 @@ assert "dl-spaced-def3"  {[defText [getDlItem $dl 2] 0] eq "Leise und pflegeleic
 # 11. Code in Definition
 # ============================================================
 
-set ast [mdparser::parse {Kommando
+set ast [mdstack::parser::parse {Kommando
 : Use `ls -la` for details.}]
 set dl [getBlock $ast 0]
 set def [lindex [dict get [getDlItem $dl 0] definitions] 0]
@@ -202,7 +208,7 @@ assert "dl-code-in-def" {$hasCode == 1}
 # 12. Link in Definition
 # ============================================================
 
-set ast [mdparser::parse {Webseite
+set ast [mdstack::parser::parse {Webseite
 : See [Tcl Wiki](https://wiki.tcl-lang.org) for details.}]
 set dl [getBlock $ast 0]
 set def [lindex [dict get [getDlItem $dl 0] definitions] 0]
@@ -217,7 +223,7 @@ assert "dl-link-in-def" {$hasLink == 1}
 # 13. termText Feld vorhanden
 # ============================================================
 
-set ast [mdparser::parse {Mein Term
+set ast [mdstack::parser::parse {Mein Term
 : Meine Def}]
 set item [getDlItem [getBlock $ast 0] 0]
 

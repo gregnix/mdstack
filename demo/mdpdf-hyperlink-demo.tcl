@@ -6,8 +6,14 @@
 # Links aus Markdown [Label](URL) werden als klickbare
 # PDF-Annotationen eingebettet (hyperlinkAdd).
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
-package require mdpdf 0.2
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
+package require mdstack::pdf 0.2
 
 set scriptDir [file dirname [file normalize [info script]]]
 set pdfDir    [file join $scriptDir pdf]
@@ -56,11 +62,11 @@ supports AES-128 encryption, PDF/A-1b/2b, and clickable hyperlinks.
 *Links are clickable in Adobe Reader, Evince, Okular, and most PDF viewers.*
 }
 
-package require mdparser 0.2
-set ast [mdparser::parse $markdown]
+package require mdstack::parser 0.2
+set ast [mdstack::parser::parse $markdown]
 
 set out [file join $pdfDir mdpdf-hyperlinks.pdf]
-mdpdf::export $ast $out \
+mdstack::pdf::export $ast $out \
     -title    "Hyperlinks Demo" \
     -header   "Clickable Hyperlinks -- Page %p" \
     -footer   "- %p -" \

@@ -1,15 +1,18 @@
 # mdparser-0.2.tm
-# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Markdown parser that produces a Tcl-friendly AST (Markdown-AST v1).
 #
 # Scope (v0.2):
-# - Blocks: heading, paragraph, list (ordered/unordered/task), code_block (``` + indented),
-#           hr (---), image (standalone), table (GFM), blockquote (>),
-#           deflist (Term + : Definition)
+# - Blocks: heading, paragraph, list (ordered/unordered), code_block (``` + indented),
+#           hr (---), image (standalone), table (GFM, recursive tableRow/tableCell), blockquote (>),
+#           deflist (Term + : Definition),
+#           div (::: {.class} ... :::),
+#           footnote_def, footnote_section
 # - Inlines: text, strong (**), emphasis (*), strike (~~), inline_code (` and ``),
-#            link [t](url "title"), image ![alt](url "title"), linebreak
+#            link [t](url "title"), image ![alt](url "title"), linebreak,
+#            span ([t]{.class}), footnote_ref ([^id])
 #            reference link [t][ref], reference image ![alt][ref]
+# - Input features: YAML frontmatter (---/---), reference links/images
 #
 # Architecture (v0.2.7 refactoring):
 # - parse: public API, Pass 1 (reflinks), delegates to parseBlocks
@@ -31,9 +34,9 @@
 # v0.2.8  Bracketed spans [t]{.c} (TIP 700), shortcut reference links [t]
 # v0.2.9  YAML frontmatter, fenced divs (::: {.class} ... :::)
 #
-package provide mdparser 0.2
+package provide mdstack::parser 0.2
 
-namespace eval mdparser {
+namespace eval mdstack::parser {
     namespace export parse validate supports anchorize
     variable reflinks [dict create]
 }
@@ -42,7 +45,7 @@ namespace eval mdparser {
 # Public API
 # ============================================================
 
-proc mdparser::parse {markdown} {
+proc mdstack::parser::parse {markdown} {
     variable reflinks
     set markdown [string map {"\r\n" "\n" "\r" "\n"} $markdown]
     set lines [split $markdown "\n"]
@@ -132,7 +135,7 @@ proc mdparser::parse {markdown} {
     }
 
     # --- Pass 2: Parse blocks ---
-    set blocks [mdparser::parseBlocks lines refDefLines]
+    set blocks [mdstack::parser::parseBlocks lines refDefLines]
 
     # --- Footnote-Bloecke anhaengen (wenn vorhanden) ---
     if {[llength $footnoteOrder] > 0} {
@@ -143,7 +146,7 @@ proc mdparser::parse {markdown} {
             set fnId [dict get $fn id]
             set fnText [dict get $fn text]
             lappend fnBlocks [dict create type footnote_def id $fnId \
-                num $fnNum content [mdparser::parseInlines $fnText]]
+                num $fnNum content [mdstack::parser::parseInlines $fnText]]
             incr fnNum
         }
         lappend blocks [dict create type footnote_section footnotes $fnBlocks]
@@ -156,27 +159,39 @@ proc mdparser::parse {markdown} {
         reflinks $docRefs]
 }
 
-proc mdparser::validate {ast} {
+proc mdstack::parser::validate {ast} {
     if {![dict exists $ast type] || [dict get $ast type] ne "document"} {
-        error "mdparser::validate: not a document AST"
+        error "mdstack::parser::validate: not a document AST"
     }
     if {![dict exists $ast version] || [dict get $ast version] != 1} {
-        error "mdparser::validate: unsupported AST version"
+        error "mdstack::parser::validate: unsupported AST version"
     }
     if {![dict exists $ast blocks]} {
-        error "mdparser::validate: missing blocks"
+        error "mdstack::parser::validate: missing blocks"
     }
     return 1
 }
 
-proc mdparser::supports {ast} {
+proc mdstack::parser::supports {ast} {
+    # Capability-Liste: was der Parser an Markdown-Konstrukten versteht.
+    # Stand: 2026-05-07.
+    #
+    # Hinweis zur Lesart: Die Tokens beschreiben Eingabe-Konstrukte,
+    # nicht zwangsweise eindeutige AST-Output-Types. So liefert sowohl
+    # `blocks:code_indented` als auch `blocks:code_block` (fenced) im
+    # AST einen Knoten vom Typ `code_block` — die Capability ist trotzdem
+    # getrennt aufgeführt, weil sie unabhängig erkannt werden.
     return {
-        blocks:heading blocks:paragraph blocks:list blocks:code_block
-        blocks:code_indented blocks:hr
+        blocks:heading blocks:paragraph blocks:list blocks:list_item
+        blocks:code_block blocks:code_indented blocks:hr
         blocks:image blocks:table blocks:blockquote blocks:deflist
+        blocks:div blocks:footnote_def blocks:footnote_section
+        blocks:yaml_frontmatter
+
         inline:text inline:strong inline:emphasis inline:strike
         inline:inline_code inline:link inline:image inline:linebreak
         inline:reflink inline:refimage
+        inline:span inline:footnote_ref
     }
 }
 
@@ -184,15 +199,15 @@ proc mdparser::supports {ast} {
 # Block recognition (isXxx) -- pure tests, no side effects
 # ============================================================
 
-proc mdparser::isFencedCode {line} {
+proc mdstack::parser::isFencedCode {line} {
     regexp {^(`{3,}|~{3,})\s*(\S*)\s*$} $line
 }
 
-proc mdparser::isHeading {line} {
+proc mdstack::parser::isHeading {line} {
     regexp {^(#{1,6})[[:space:]]+} $line
 }
 
-proc mdparser::isHr {line} {
+proc mdstack::parser::isHr {line} {
     set trimmed [string trim $line]
     # Mindestens 3 gleiche Zeichen (-, *, _), optional mit Spaces
     if {[regexp {^[-]{3,}$} $trimmed]} { return 1 }
@@ -205,41 +220,41 @@ proc mdparser::isHr {line} {
     return 0
 }
 
-proc mdparser::isStandaloneImage {line} {
+proc mdstack::parser::isStandaloneImage {line} {
     regexp {^!\[([^\]]*)\]\(([^)]+)\)[[:space:]]*$} [string trim $line]
 }
 
-proc mdparser::isTableStart {line} {
+proc mdstack::parser::isTableStart {line} {
     regexp {^\|.+\|[[:space:]]*$} $line
 }
 
-proc mdparser::isBlockquote {line} {
+proc mdstack::parser::isBlockquote {line} {
     regexp {^>[[:space:]]?} $line
 }
 
-proc mdparser::isListItem {line} {
+proc mdstack::parser::isListItem {line} {
     regexp {^([[:space:]]*)(\*|-|[0-9]+\.)[[:space:]]+} $line
 }
 
-proc mdparser::isIndentedCode {line} {
+proc mdstack::parser::isIndentedCode {line} {
     regexp {^(    |\t)} $line
 }
 
 # isDefList needs lookahead: current line is text, next starts with ": "
-proc mdparser::isDefList {line nextLine} {
+proc mdstack::parser::isDefList {line nextLine} {
     expr {[string trim $line] ne "" &&
           ![regexp {^:[[:space:]]+} $line] &&
           [regexp {^:[[:space:]]+} $nextLine]}
 }
 
-proc mdparser::isPandocDiv {line} {
+proc mdstack::parser::isPandocDiv {line} {
     regexp {^:{3,}} $line
 }
 
 # isPandocDivOpen --
 #   Returns class name if line opens a fenced div, empty string otherwise.
 #   Formats: ::: {.class}   ::: .class   ::: class   :::class
-proc mdparser::isPandocDivOpen {line} {
+proc mdstack::parser::isPandocDivOpen {line} {
     if {[regexp {^:{3,}\s+\{\.([A-Za-z][A-Za-z0-9_-]*)\}\s*$} $line -> cls]} {
         return $cls
     }
@@ -251,14 +266,14 @@ proc mdparser::isPandocDivOpen {line} {
 
 # isPandocDivClose --
 #   True if line is a bare ::: closing marker.
-proc mdparser::isPandocDivClose {line} {
+proc mdstack::parser::isPandocDivClose {line} {
     regexp {^:{3,}\s*$} $line
 }
 
-proc mdparser::parsePandocDiv {linesVar iVar} {
+proc mdstack::parser::parsePandocDiv {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set line [string trimright [lindex $lines $i]]
-    set cls [mdparser::isPandocDivOpen $line]
+    set cls [mdstack::parser::isPandocDivOpen $line]
     set n [llength $lines]
     incr i
 
@@ -266,9 +281,9 @@ proc mdparser::parsePandocDiv {linesVar iVar} {
     set depth 1
     while {$i < $n} {
         set cur [string trimright [lindex $lines $i]]
-        if {[mdparser::isPandocDivOpen $cur] ne ""} {
+        if {[mdstack::parser::isPandocDivOpen $cur] ne ""} {
             incr depth
-        } elseif {[mdparser::isPandocDivClose $cur]} {
+        } elseif {[mdstack::parser::isPandocDivClose $cur]} {
             incr depth -1
             if {$depth == 0} {
                 incr i
@@ -281,7 +296,7 @@ proc mdparser::parsePandocDiv {linesVar iVar} {
 
     # Recursively parse body as blocks
     set emptyRefDefs [dict create]
-    set innerBlocks [mdparser::parseBlocks body emptyRefDefs]
+    set innerBlocks [mdstack::parser::parseBlocks body emptyRefDefs]
 
     return [dict create type div class $cls blocks $innerBlocks]
 }
@@ -290,7 +305,7 @@ proc mdparser::parsePandocDiv {linesVar iVar} {
 # Block dispatcher
 # ============================================================
 
-proc mdparser::parseBlocks {linesVar refDefLinesVar} {
+proc mdstack::parser::parseBlocks {linesVar refDefLinesVar} {
     upvar $linesVar lines $refDefLinesVar refDefLines
     set blocks {}
     set i 0
@@ -314,9 +329,9 @@ proc mdparser::parseBlocks {linesVar refDefLinesVar} {
         }
 
         # Pandoc fenced divs (::: .class ... :::)
-        if {[mdparser::isPandocDiv $line]} {
-            if {[mdparser::isPandocDivOpen $line] ne ""} {
-                lappend blocks [mdparser::parsePandocDiv lines i]
+        if {[mdstack::parser::isPandocDiv $line]} {
+            if {[mdstack::parser::isPandocDivOpen $line] ne ""} {
+                lappend blocks [mdstack::parser::parsePandocDiv lines i]
             } else {
                 # Bare closing ::: without matching opener -- skip
                 incr i
@@ -326,43 +341,43 @@ proc mdparser::parseBlocks {linesVar refDefLinesVar} {
 
         # --- Block-Erkennung in Prioritaetsreihenfolge ---
 
-        if {[mdparser::isFencedCode $line]} {
-            lappend blocks [mdparser::parseFencedCode lines i]
+        if {[mdstack::parser::isFencedCode $line]} {
+            lappend blocks [mdstack::parser::parseFencedCode lines i]
             continue
         }
 
-        if {[mdparser::isHeading $line]} {
-            lappend blocks [mdparser::parseHeading lines i]
+        if {[mdstack::parser::isHeading $line]} {
+            lappend blocks [mdstack::parser::parseHeading lines i]
             continue
         }
 
-        if {[mdparser::isHr $line]} {
-            lappend blocks [mdparser::parseHr lines i]
+        if {[mdstack::parser::isHr $line]} {
+            lappend blocks [mdstack::parser::parseHr lines i]
             continue
         }
 
-        if {[mdparser::isStandaloneImage $line]} {
-            lappend blocks [mdparser::parseStandaloneImage lines i]
+        if {[mdstack::parser::isStandaloneImage $line]} {
+            lappend blocks [mdstack::parser::parseStandaloneImage lines i]
             continue
         }
 
-        if {[mdparser::isTableStart $line]} {
-            lappend blocks {*}[mdparser::parseTableBlock lines i]
+        if {[mdstack::parser::isTableStart $line]} {
+            lappend blocks {*}[mdstack::parser::parseTableBlock lines i]
             continue
         }
 
-        if {[mdparser::isBlockquote $line]} {
-            lappend blocks [mdparser::parseBlockquote lines i]
+        if {[mdstack::parser::isBlockquote $line]} {
+            lappend blocks [mdstack::parser::parseBlockquote lines i]
             continue
         }
 
-        if {[mdparser::isListItem $line]} {
-            lappend blocks [mdparser::parseListBlock lines i]
+        if {[mdstack::parser::isListItem $line]} {
+            lappend blocks [mdstack::parser::parseListBlock lines i]
             continue
         }
 
-        if {[mdparser::isIndentedCode $line]} {
-            set node [mdparser::parseIndentedCode lines i]
+        if {[mdstack::parser::isIndentedCode $line]} {
+            set node [mdstack::parser::parseIndentedCode lines i]
             if {$node ne ""} {
                 lappend blocks $node
                 continue
@@ -372,14 +387,14 @@ proc mdparser::parseBlocks {linesVar refDefLinesVar} {
         # DefList: lookahead to next line
         if {($i + 1) < $n} {
             set nextLine [string trimright [lindex $lines [expr {$i + 1}]]]
-            if {[mdparser::isDefList $line $nextLine]} {
-                lappend blocks [mdparser::parseDefList lines i]
+            if {[mdstack::parser::isDefList $line $nextLine]} {
+                lappend blocks [mdstack::parser::parseDefList lines i]
                 continue
             }
         }
 
         # Fallback: Paragraph
-        lappend blocks {*}[mdparser::parseParagraph lines i refDefLines]
+        lappend blocks {*}[mdstack::parser::parseParagraph lines i refDefLines]
     }
 
     return $blocks
@@ -389,7 +404,7 @@ proc mdparser::parseBlocks {linesVar refDefLinesVar} {
 # Block parsers (parseXxx) -- each advances i past consumed lines
 # ============================================================
 
-proc mdparser::parseFencedCode {linesVar iVar} {
+proc mdstack::parser::parseFencedCode {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set line [string trimright [lindex $lines $i]]
     set n [llength $lines]
@@ -415,7 +430,7 @@ proc mdparser::parseFencedCode {linesVar iVar} {
     return [dict create type code_block language $lang text [join $body "\n"]]
 }
 
-proc mdparser::parseHeading {linesVar iVar} {
+proc mdstack::parser::parseHeading {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set line [string trimright [lindex $lines $i]]
 
@@ -424,21 +439,21 @@ proc mdparser::parseHeading {linesVar iVar} {
     set title [string trim $title " \t"]
     # Strip optional closing hashes: "## Foo ##" -> "Foo"
     set title [regsub {\s+#+\s*$} $title ""]
-    set anchor [mdparser::anchorize $title]
+    set anchor [mdstack::parser::anchorize $title]
     incr i
 
     return [dict create type heading level $level \
         anchor $anchor \
-        content [mdparser::parseInlines $title]]
+        content [mdstack::parser::parseInlines $title]]
 }
 
-proc mdparser::parseHr {linesVar iVar} {
+proc mdstack::parser::parseHr {linesVar iVar} {
     upvar $iVar i
     incr i
     return [dict create type hr]
 }
 
-proc mdparser::parseStandaloneImage {linesVar iVar} {
+proc mdstack::parser::parseStandaloneImage {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set line [string trim [string trimright [lindex $lines $i]]]
 
@@ -448,7 +463,7 @@ proc mdparser::parseStandaloneImage {linesVar iVar} {
     return [dict create type image alt $alt url $url]
 }
 
-proc mdparser::parseTableBlock {linesVar iVar} {
+proc mdstack::parser::parseTableBlock {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set n [llength $lines]
 
@@ -463,7 +478,7 @@ proc mdparser::parseTableBlock {linesVar iVar} {
 
     # Parse table (needs at least 2 lines for header + separator)
     if {[llength $tableLines] >= 2} {
-        set table [mdparser::parseTable $tableLines]
+        set table [mdstack::parser::parseTable $tableLines]
         if {$table ne ""} {
             return [list $table]
         }
@@ -472,12 +487,12 @@ proc mdparser::parseTableBlock {linesVar iVar} {
     # Fallback: lines as paragraphs
     set result {}
     foreach tl $tableLines {
-        lappend result [dict create type paragraph content [mdparser::parseInlines $tl]]
+        lappend result [dict create type paragraph content [mdstack::parser::parseInlines $tl]]
     }
     return $result
 }
 
-proc mdparser::parseBlockquote {linesVar iVar} {
+proc mdstack::parser::parseBlockquote {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set n [llength $lines]
 
@@ -503,12 +518,12 @@ proc mdparser::parseBlockquote {linesVar iVar} {
 
     # Recursively parse inner content
     set innerMd [join $quoteLines "\n"]
-    set innerAst [mdparser::parse $innerMd]
+    set innerAst [mdstack::parser::parse $innerMd]
     return [dict create type blockquote \
         blocks [dict get $innerAst blocks]]
 }
 
-proc mdparser::parseListBlock {linesVar iVar} {
+proc mdstack::parser::parseListBlock {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set n [llength $lines]
 
@@ -565,11 +580,11 @@ proc mdparser::parseListBlock {linesVar iVar} {
         }
     }
 
-    return [mdparser::parseListLines $listLines]
+    return [mdstack::parser::parseListLines $listLines]
 }
 
 # parseIndentedCode returns "" if no real code was found
-proc mdparser::parseIndentedCode {linesVar iVar} {
+proc mdstack::parser::parseIndentedCode {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set n [llength $lines]
     set savedI $i
@@ -605,7 +620,7 @@ proc mdparser::parseIndentedCode {linesVar iVar} {
     return ""
 }
 
-proc mdparser::parseDefList {linesVar iVar} {
+proc mdstack::parser::parseDefList {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set n [llength $lines]
 
@@ -636,7 +651,7 @@ proc mdparser::parseDefList {linesVar iVar} {
                 set lastIdx [expr {[llength $dlItems] - 1}]
                 set lastItem [lindex $dlItems $lastIdx]
                 set defs [dict get $lastItem definitions]
-                lappend defs [mdparser::parseInlines [string trim $defText " \t"]]
+                lappend defs [mdstack::parser::parseInlines [string trim $defText " \t"]]
                 dict set lastItem definitions $defs
                 lset dlItems $lastIdx $lastItem
             }
@@ -645,7 +660,7 @@ proc mdparser::parseDefList {linesVar iVar} {
             # Term-Zeile
             set termText [string trim $cur " \t"]
             lappend dlItems [dict create \
-                term [mdparser::parseInlines $termText] \
+                term [mdstack::parser::parseInlines $termText] \
                 termText $termText \
                 definitions {}]
             incr i
@@ -657,7 +672,7 @@ proc mdparser::parseDefList {linesVar iVar} {
 
 # parseParagraph returns a list (0 or 1 elements) to handle the
 # safety-net case where no lines were consumed.
-proc mdparser::parseParagraph {linesVar iVar refDefLinesVar} {
+proc mdstack::parser::parseParagraph {linesVar iVar refDefLinesVar} {
     upvar $linesVar lines $iVar i $refDefLinesVar refDefLines
     set n [llength $lines]
 
@@ -668,13 +683,13 @@ proc mdparser::parseParagraph {linesVar iVar refDefLinesVar} {
         set cur [string trimright [lindex $lines $i]]
         if {[string trim $cur] eq ""} { break }
         if {[regexp {^```} $cur] ||
-            [mdparser::isPandocDiv $cur] ||
-            [mdparser::isHeading $cur] ||
-            [mdparser::isHr $cur] ||
-            [mdparser::isListItem $cur] ||
-            [mdparser::isStandaloneImage $cur] ||
-            [mdparser::isTableStart $cur] ||
-            [mdparser::isBlockquote $cur]} {
+            [mdstack::parser::isPandocDiv $cur] ||
+            [mdstack::parser::isHeading $cur] ||
+            [mdstack::parser::isHr $cur] ||
+            [mdstack::parser::isListItem $cur] ||
+            [mdstack::parser::isStandaloneImage $cur] ||
+            [mdstack::parser::isTableStart $cur] ||
+            [mdstack::parser::isBlockquote $cur]} {
             break
         }
         set trimmed [string trim $cur]
@@ -699,14 +714,14 @@ proc mdparser::parseParagraph {linesVar iVar refDefLinesVar} {
         return {}
     }
 
-    return [list [dict create type paragraph content [mdparser::parseInlines $joined]]]
+    return [list [dict create type paragraph content [mdstack::parser::parseInlines $joined]]]
 }
 
 # ============================================================
 # List parsing (nested) -- unchanged
 # ============================================================
 
-proc mdparser::parseListLines {lines} {
+proc mdstack::parser::parseListLines {lines} {
     variable reflinks
 
     if {[llength $lines] == 0} {
@@ -735,9 +750,9 @@ proc mdparser::parseListLines {lines} {
             [regexp {^[[:space:]]*(\*|-|[0-9]+\.)[[:space:]]+(.*)$} $line -> _m itemText]} {
             if {$hasItem} {
                 set itemBlocks [list [dict create type paragraph \
-                    content [mdparser::parseInlines [string trim $currentText " \t"]]]]
+                    content [mdstack::parser::parseInlines [string trim $currentText " \t"]]]]
                 if {[llength $subLines] > 0} {
-                    lappend itemBlocks [mdparser::parseListLines $subLines]
+                    lappend itemBlocks [mdstack::parser::parseListLines $subLines]
                 }
                 set item [dict create type list_item blocks $itemBlocks]
                 if {$currentChecked ne ""} { dict set item checked $currentChecked }
@@ -762,9 +777,9 @@ proc mdparser::parseListLines {lines} {
 
     if {$hasItem} {
         set itemBlocks [list [dict create type paragraph \
-            content [mdparser::parseInlines [string trim $currentText " \t"]]]]
+            content [mdstack::parser::parseInlines [string trim $currentText " \t"]]]]
         if {[llength $subLines] > 0} {
-            lappend itemBlocks [mdparser::parseListLines $subLines]
+            lappend itemBlocks [mdstack::parser::parseListLines $subLines]
         }
         set item [dict create type list_item blocks $itemBlocks]
         if {$currentChecked ne ""} { dict set item checked $currentChecked }
@@ -780,7 +795,7 @@ proc mdparser::parseListLines {lines} {
 # Table parsing -- unchanged
 # ============================================================
 
-proc mdparser::parseTable {lines} {
+proc mdstack::parser::parseTable {lines} {
     if {[llength $lines] < 1} { return "" }
 
     set hasSeparator 0
@@ -791,43 +806,79 @@ proc mdparser::parseTable {lines} {
     }
 
     if {$hasSeparator} {
-        set header [mdparser::parseTableRow [lindex $lines 0]]
-        if {[llength $header] == 0} { return "" }
-        set alignments [mdparser::parseTableAlignment [lindex $lines 1]]
+        set headerCells [mdstack::parser::parseTableRow [lindex $lines 0]]
+        if {[llength $headerCells] == 0} { return "" }
+        set alignments [mdstack::parser::parseTableAlignment [lindex $lines 1]]
         set startRow 2
+        set hasHeader 1
     } else {
-        set firstRow [mdparser::parseTableRow [lindex $lines 0]]
+        set firstRow [mdstack::parser::parseTableRow [lindex $lines 0]]
         set numCols [llength $firstRow]
         if {$numCols == 0} { return "" }
-        set header [lrepeat $numCols ""]
+        set headerCells {}
         set alignments [lrepeat $numCols left]
         set startRow 0
+        set hasHeader 0
     }
 
-    set headerInlines {}
-    foreach cell $header {
-        lappend headerInlines [mdparser::parseInlines $cell]
-    }
+    set columns [expr {$hasHeader ? [llength $headerCells] : [llength $firstRow]}]
 
-    set rows {}
-    set rowsInlines {}
-    for {set i $startRow} {$i < [llength $lines]} {incr i} {
-        set row [mdparser::parseTableRow [lindex $lines $i]]
-        while {[llength $row] < [llength $header]} { lappend row "" }
-        set row [lrange $row 0 [expr {[llength $header] - 1}]]
-        lappend rows $row
-        set rowInlines {}
-        foreach cell $row {
-            lappend rowInlines [mdparser::parseInlines $cell]
+    # ---------------------------------------------------------------
+    # AST-Schema (seit 2026-05-07 / A.3 Lesart 2):
+    #   {type table
+    #    content [list of tableRow]
+    #    meta {columns N alignments {...} hasHeader 0|1}}
+    # tableRow: {type tableRow content [list of tableCell] meta {kind header|body}}
+    # tableCell: {type tableCell content [inlines] meta {}}
+    #
+    # Diese Struktur ist identisch zur DocIR-Tabellen-Struktur (siehe
+    # docir-spec). Der mdparser-AST hat damit kein eigenes flaches
+    # Tabellen-Schema mehr — der docir-md-source-Mapper reicht die
+    # Knoten durch und mappt nur die Inlines.
+    # ---------------------------------------------------------------
+    set rowNodes {}
+
+    if {$hasHeader} {
+        set headerCellNodes {}
+        foreach cell $headerCells {
+            lappend headerCellNodes [dict create \
+                type    tableCell \
+                content [mdstack::parser::parseInlines $cell] \
+                meta    {}]
         }
-        lappend rowsInlines $rowInlines
+        lappend rowNodes [dict create \
+            type    tableRow \
+            content $headerCellNodes \
+            meta    [dict create kind header]]
     }
 
-    return [dict create type table header $header alignments $alignments \
-        rows $rows headerInlines $headerInlines rowsInlines $rowsInlines]
+    for {set i $startRow} {$i < [llength $lines]} {incr i} {
+        set rowCells [mdstack::parser::parseTableRow [lindex $lines $i]]
+        while {[llength $rowCells] < $columns} { lappend rowCells "" }
+        set rowCells [lrange $rowCells 0 [expr {$columns - 1}]]
+        set cellNodes {}
+        foreach cell $rowCells {
+            lappend cellNodes [dict create \
+                type    tableCell \
+                content [mdstack::parser::parseInlines $cell] \
+                meta    {}]
+        }
+        lappend rowNodes [dict create \
+            type    tableRow \
+            content $cellNodes \
+            meta    [dict create kind body]]
+    }
+
+    return [dict create \
+        type    table \
+        content $rowNodes \
+        meta    [dict create \
+            columns    $columns \
+            alignments $alignments \
+            hasHeader  $hasHeader]]
 }
 
-proc mdparser::parseTableRow {line} {
+proc mdstack::parser::parseTableRow {line} {
     set line [string trim $line]
     if {[string index $line 0] eq "|"} { set line [string range $line 1 end] }
     if {[string index $line end] eq "|"} { set line [string range $line 0 end-1] }
@@ -836,8 +887,8 @@ proc mdparser::parseTableRow {line} {
     return $cells
 }
 
-proc mdparser::parseTableAlignment {sepLine} {
-    set cells [mdparser::parseTableRow $sepLine]
+proc mdstack::parser::parseTableAlignment {sepLine} {
+    set cells [mdstack::parser::parseTableRow $sepLine]
     set alignments {}
     foreach cell $cells {
         set cell [string trim $cell]
@@ -861,7 +912,7 @@ proc mdparser::parseTableAlignment {sepLine} {
 # findMatchingBracket --
 #   Find the position of the closing ] that matches an opening [ at pos 0,
 #   accounting for nested [...] pairs. Returns -1 if unmatched.
-proc mdparser::findMatchingBracket {s} {
+proc mdstack::parser::findMatchingBracket {s} {
     set depth 0
     set len [string length $s]
     for {set i 0} {$i < $len} {incr i} {
@@ -885,9 +936,9 @@ proc mdparser::findMatchingBracket {s} {
 # ============================================================
 # Inline-Parser (Prio 15: aufgeteilt in Einzelprocs)
 # ============================================================
-# Konvention: mdparser::_tryX {s idx ...} -> {newIdx node} bei Match, {} sonst.
+# Konvention: mdstack::parser::_tryX {s idx ...} -> {newIdx node} bei Match, {} sonst.
 
-proc mdparser::_tryLineBreak {s idx} {
+proc mdstack::parser::_tryLineBreak {s idx} {
     if {[string range $s $idx [expr {$idx + 3}]] eq "\x00BR "} {
         return [list [expr {$idx + 4}] [dict create type linebreak]]
     }
@@ -897,7 +948,7 @@ proc mdparser::_tryLineBreak {s idx} {
     return {}
 }
 
-proc mdparser::_tryBackslash {s idx len} {
+proc mdstack::parser::_tryBackslash {s idx len} {
     if {[string index $s $idx] ne "\\"} { return {} }
     if {$idx + 1 >= $len} { return {} }
     set next [string index $s [expr {$idx + 1}]]
@@ -907,7 +958,7 @@ proc mdparser::_tryBackslash {s idx len} {
     return {}
 }
 
-proc mdparser::_tryImage {rest idx} {
+proc mdstack::parser::_tryImage {rest idx} {
     if {[regexp -indices {^!\[([^\]]*)\]\(([^)\s"]+)(?:\s+"([^"]*)")?\s*\)} $rest matchRange]} {
         regexp {^!\[([^\]]*)\]\(([^)\s"]+)(?:\s+"([^"]*)")?\s*\)} $rest -> alt url title
         set d [dict create type image alt $alt url $url]
@@ -917,17 +968,17 @@ proc mdparser::_tryImage {rest idx} {
     return {}
 }
 
-proc mdparser::_tryLink {rest idx} {
+proc mdstack::parser::_tryLink {rest idx} {
     if {[regexp -indices {^\[([^\]]+)\]\(([^)\s"]+)(?:\s+"([^"]*)")?\s*\)} $rest matchRange]} {
         regexp {^\[([^\]]+)\]\(([^)\s"]+)(?:\s+"([^"]*)")?\s*\)} $rest -> label url title
-        set d [dict create type link label [mdparser::parseInlines $label] url [string trim $url]]
+        set d [dict create type link label [mdstack::parser::parseInlines $label] url [string trim $url]]
         if {$title ne ""} { dict set d title $title }
         return [list [expr {$idx + [lindex $matchRange 1] + 1}] $d]
     }
     return {}
 }
 
-proc mdparser::_tryRefImage {rest idx} {
+proc mdstack::parser::_tryRefImage {rest idx} {
     variable reflinks
     if {[regexp -indices {^!\[([^\]]*)\]\[([^\]]*)\]} $rest matchRange]} {
         regexp {^!\[([^\]]*)\]\[([^\]]*)\]} $rest -> alt ref
@@ -943,7 +994,7 @@ proc mdparser::_tryRefImage {rest idx} {
     return {}
 }
 
-proc mdparser::_tryRefLink {rest idx} {
+proc mdstack::parser::_tryRefLink {rest idx} {
     variable reflinks
     if {[regexp -indices {^\[([^\]]+)\]\[([^\]]*)\]} $rest matchRange]} {
         regexp {^\[([^\]]+)\]\[([^\]]*)\]} $rest -> label ref
@@ -951,7 +1002,7 @@ proc mdparser::_tryRefLink {rest idx} {
         set key [string tolower $ref]
         if {[dict exists $reflinks $key]} {
             set def [dict get $reflinks $key]
-            set d [dict create type link label [mdparser::parseInlines $label] url [dict get $def url]]
+            set d [dict create type link label [mdstack::parser::parseInlines $label] url [dict get $def url]]
             if {[dict get $def title] ne ""} { dict set d title [dict get $def title] }
             return [list [expr {$idx + [lindex $matchRange 1] + 1}] $d]
         }
@@ -959,22 +1010,22 @@ proc mdparser::_tryRefLink {rest idx} {
     return {}
 }
 
-proc mdparser::_trySpan {s rest idx} {
+proc mdstack::parser::_trySpan {s rest idx} {
     if {[string index $s $idx] ne "\["} { return {} }
-    set closePos [mdparser::findMatchingBracket $rest]
+    set closePos [mdstack::parser::findMatchingBracket $rest]
     if {$closePos < 0} { return {} }
     set afterClose [string range $rest [expr {$closePos + 1}] end]
     if {[regexp {^\{\.([A-Za-z][A-Za-z0-9_-]*)\}} $afterClose -> cls]} {
         set inner [string range $rest 1 [expr {$closePos - 1}]]
         set spanLen [expr {$closePos + 1 + [string length $cls] + 3}]
         set d [dict create type span class $cls \
-            content [mdparser::parseInlines $inner]]
+            content [mdstack::parser::parseInlines $inner]]
         return [list [expr {$idx + $spanLen}] $d]
     }
     return {}
 }
 
-proc mdparser::_tryShortcutRef {s rest idx} {
+proc mdstack::parser::_tryShortcutRef {s rest idx} {
     variable reflinks
     if {[regexp -indices {^\[([^\]\[]+)\]} $rest matchRange]} {
         set afterMatch [string index $s [expr {$idx + [lindex $matchRange 1] + 1}]]
@@ -983,7 +1034,7 @@ proc mdparser::_tryShortcutRef {s rest idx} {
             set key [string tolower $label]
             if {[dict exists $reflinks $key]} {
                 set def [dict get $reflinks $key]
-                set d [dict create type link label [mdparser::parseInlines $label] \
+                set d [dict create type link label [mdstack::parser::parseInlines $label] \
                     url [dict get $def url]]
                 if {[dict get $def title] ne ""} { dict set d title [dict get $def title] }
                 return [list [expr {$idx + [lindex $matchRange 1] + 1}] $d]
@@ -993,7 +1044,7 @@ proc mdparser::_tryShortcutRef {s rest idx} {
     return {}
 }
 
-proc mdparser::_tryCode {s rest idx} {
+proc mdstack::parser::_tryCode {s rest idx} {
     # Double-backtick
     if {[string range $s $idx [expr {$idx + 1}]] eq "``"} {
         set closePos [string first "``" $s [expr {$idx + 2}]]
@@ -1010,35 +1061,35 @@ proc mdparser::_tryCode {s rest idx} {
     return {}
 }
 
-proc mdparser::_tryEmphasis {rest idx} {
+proc mdstack::parser::_tryEmphasis {rest idx} {
     # Bold+Italic
     if {[regexp {^\*\*\*(.+?)\*\*\*} $rest -> inner]} {
         set d [dict create type strong content [list \
-            [dict create type emphasis content [mdparser::parseInlines $inner]]]]
+            [dict create type emphasis content [mdstack::parser::parseInlines $inner]]]]
         return [list [expr {$idx + [string length $inner] + 6}] $d]
     }
     # Strong
     if {[regexp {^\*\*(.+?)\*\*} $rest -> inner]} {
-        set d [dict create type strong content [mdparser::parseInlines $inner]]
+        set d [dict create type strong content [mdstack::parser::parseInlines $inner]]
         return [list [expr {$idx + [string length $inner] + 4}] $d]
     }
     # Emphasis
     if {[regexp {^\*(.+?)\*} $rest -> inner]} {
-        set d [dict create type emphasis content [mdparser::parseInlines $inner]]
+        set d [dict create type emphasis content [mdstack::parser::parseInlines $inner]]
         return [list [expr {$idx + [string length $inner] + 2}] $d]
     }
     return {}
 }
 
-proc mdparser::_tryStrike {rest idx} {
+proc mdstack::parser::_tryStrike {rest idx} {
     if {[regexp {^~~(.+?)~~} $rest -> inner]} {
-        set d [dict create type strike content [mdparser::parseInlines $inner]]
+        set d [dict create type strike content [mdstack::parser::parseInlines $inner]]
         return [list [expr {$idx + [string length $inner] + 4}] $d]
     }
     return {}
 }
 
-proc mdparser::_tryFootnoteRef {rest idx} {
+proc mdstack::parser::_tryFootnoteRef {rest idx} {
     variable footnotes
     if {![info exists footnotes]} { return {} }
     if {[regexp -indices {^\[\^([A-Za-z0-9_-]+)\]} $rest matchRange]} {
@@ -1055,7 +1106,7 @@ proc mdparser::_tryFootnoteRef {rest idx} {
     return {}
 }
 
-proc mdparser::_tryAutolink {s rest idx} {
+proc mdstack::parser::_tryAutolink {s rest idx} {
     # Angle-bracket URL
     if {[regexp -indices {^<(https?://[^>\s]+)>} $rest matchRange]} {
         regexp {^<(https?://[^>\s]+)>} $rest -> url
@@ -1082,7 +1133,7 @@ proc mdparser::_tryAutolink {s rest idx} {
 
 # -- Dispatcher --
 
-proc mdparser::parseInlines {s} {
+proc mdstack::parser::parseInlines {s} {
     variable reflinks
     if {![info exists reflinks]} { set reflinks [dict create] }
     set s [string trim $s]
@@ -1098,36 +1149,36 @@ proc mdparser::parseInlines {s} {
         set match {}
 
         if {$c eq "\x00"} {
-            set match [mdparser::_tryLineBreak $s $idx]
+            set match [mdstack::parser::_tryLineBreak $s $idx]
         }
         if {$match eq {} && $c eq "\\"} {
-            set match [mdparser::_tryBackslash $s $idx $len]
+            set match [mdstack::parser::_tryBackslash $s $idx $len]
         }
         if {$match eq {} && $c eq "!"} {
-            set match [mdparser::_tryImage $rest $idx]
-            if {$match eq {}} { set match [mdparser::_tryRefImage $rest $idx] }
+            set match [mdstack::parser::_tryImage $rest $idx]
+            if {$match eq {}} { set match [mdstack::parser::_tryRefImage $rest $idx] }
         }
         if {$match eq {} && $c eq "\["} {
-            set match [mdparser::_tryFootnoteRef $rest $idx]
-            if {$match eq {}} { set match [mdparser::_tryLink $rest $idx] }
-            if {$match eq {}} { set match [mdparser::_tryRefLink $rest $idx] }
-            if {$match eq {}} { set match [mdparser::_trySpan $s $rest $idx] }
-            if {$match eq {}} { set match [mdparser::_tryShortcutRef $s $rest $idx] }
+            set match [mdstack::parser::_tryFootnoteRef $rest $idx]
+            if {$match eq {}} { set match [mdstack::parser::_tryLink $rest $idx] }
+            if {$match eq {}} { set match [mdstack::parser::_tryRefLink $rest $idx] }
+            if {$match eq {}} { set match [mdstack::parser::_trySpan $s $rest $idx] }
+            if {$match eq {}} { set match [mdstack::parser::_tryShortcutRef $s $rest $idx] }
         }
         if {$match eq {} && $c eq "`"} {
-            set match [mdparser::_tryCode $s $rest $idx]
+            set match [mdstack::parser::_tryCode $s $rest $idx]
         }
         if {$match eq {} && $c eq "*"} {
-            set match [mdparser::_tryEmphasis $rest $idx]
+            set match [mdstack::parser::_tryEmphasis $rest $idx]
         }
         if {$match eq {} && $c eq "~"} {
-            set match [mdparser::_tryStrike $rest $idx]
+            set match [mdstack::parser::_tryStrike $rest $idx]
         }
         if {$match eq {} && $c eq "<"} {
-            set match [mdparser::_tryAutolink $s $rest $idx]
+            set match [mdstack::parser::_tryAutolink $s $rest $idx]
         }
         if {$match eq {} && $c eq "h"} {
-            set match [mdparser::_tryAutolink $s $rest $idx]
+            set match [mdstack::parser::_tryAutolink $s $rest $idx]
         }
 
         if {$match ne {}} {
@@ -1161,7 +1212,7 @@ proc mdparser::parseInlines {s} {
 # Utilities
 # ============================================================
 
-proc mdparser::anchorize {s} {
+proc mdstack::parser::anchorize {s} {
     set a [string tolower $s]
     regsub -all {[^a-z0-9]+} $a "-" a
     set a [string trim $a "-"]

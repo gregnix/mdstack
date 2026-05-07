@@ -2,8 +2,14 @@
 # test/parser-reflinks.tcl
 # Tests for Reference Links und Reference Images
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
-package require mdparser 0.2
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
+package require mdstack::parser 0.2
 
 set total 0; set passed 0; set failed 0; set skipped 0
 
@@ -43,7 +49,7 @@ proc linkLabelText {para idx} {
 set md {Text with [Example][ex] link.
 
 [ex]: https://example.com}
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set p [lindex [dict get $ast blocks] 0]
 
 assert "reflink-simple-type" {[getInline $p 1 type] eq "link"}
@@ -54,7 +60,7 @@ assert "reflink-simple-url"  {[getInline $p 1 url] eq "https://example.com"}
 set md2 {Ein [Link][ref1] hier.
 
 [ref1]: https://ref.com "Ref Title"}
-set ast2 [mdparser::parse $md2]
+set ast2 [mdstack::parser::parse $md2]
 set p2 [lindex [dict get $ast2 blocks] 0]
 
 assert "reflink-title-url"   {[getInline $p2 1 url] eq "https://ref.com"}
@@ -67,7 +73,7 @@ assert "reflink-title-title" {[getInline $p2 1 title] eq "Ref Title"}
 set md3 {Klick [Google][] jetzt.
 
 [google]: https://google.com}
-set ast3 [mdparser::parse $md3]
+set ast3 [mdstack::parser::parse $md3]
 set p3 [lindex [dict get $ast3 blocks] 0]
 
 assert "reflink-collapsed-type" {[getInline $p3 1 type] eq "link"}
@@ -81,7 +87,7 @@ assert "reflink-collapsed-url"  {[getInline $p3 1 url] eq "https://google.com"}
 set md4 {Ein [Link][REF] hier.
 
 [ref]: https://case.com}
-set ast4 [mdparser::parse $md4]
+set ast4 [mdstack::parser::parse $md4]
 set p4 [lindex [dict get $ast4 blocks] 0]
 
 assert "reflink-case-insensitive" {[getInline $p4 1 url] eq "https://case.com"}
@@ -90,7 +96,7 @@ assert "reflink-case-insensitive" {[getInline $p4 1 url] eq "https://case.com"}
 set md5 {Ein [MyRef][] hier.
 
 [myref]: https://myref.com}
-set ast5 [mdparser::parse $md5]
+set ast5 [mdstack::parser::parse $md5]
 set p5 [lindex [dict get $ast5 blocks] 0]
 
 assert "reflink-case-collapsed" {[getInline $p5 1 url] eq "https://myref.com"}
@@ -100,7 +106,7 @@ assert "reflink-case-collapsed" {[getInline $p5 1 url] eq "https://myref.com"}
 # ============================================================
 
 set md6 {Hier [unknown][nope] Text.}
-set ast6 [mdparser::parse $md6]
+set ast6 [mdstack::parser::parse $md6]
 set p6 [lindex [dict get $ast6 blocks] 0]
 
 # Sollte als plain text durchfallen, kein link-Node
@@ -117,7 +123,7 @@ assert "reflink-undefined-no-link" {$hasLink == 0}
 set md7 {Image: ![Alt Text][img1]
 
 [img1]: https://example.com/photo.jpg "Photo"}
-set ast7 [mdparser::parse $md7]
+set ast7 [mdstack::parser::parse $md7]
 set p7 [lindex [dict get $ast7 blocks] 0]
 
 assert "refimage-type"  {[getInline $p7 1 type] eq "image"}
@@ -129,7 +135,7 @@ assert "refimage-title" {[getInline $p7 1 title] eq "Photo"}
 set md8 {Image: ![logo][]
 
 [logo]: https://example.com/logo.png}
-set ast8 [mdparser::parse $md8]
+set ast8 [mdstack::parser::parse $md8]
 set p8 [lindex [dict get $ast8 blocks] 0]
 
 assert "refimage-collapsed-type" {[getInline $p8 1 type] eq "image"}
@@ -144,7 +150,7 @@ set md9 {Hier [A][a], [B][b] und [C][].
 [a]: https://a.com
 [b]: https://b.com "B"
 [c]: https://c.com}
-set ast9 [mdparser::parse $md9]
+set ast9 [mdstack::parser::parse $md9]
 set p9 [lindex [dict get $ast9 blocks] 0]
 
 assert "reflink-multi-a-url" {[getInline $p9 1 url] eq "https://a.com"}
@@ -161,7 +167,7 @@ set md10 {Paragraph eins.
 [ref]: https://ref.com
 
 Paragraph zwei.}
-set ast10 [mdparser::parse $md10]
+set ast10 [mdstack::parser::parse $md10]
 set blocks10 [dict get $ast10 blocks]
 
 assert "refdef-not-in-blocks" {[llength $blocks10] == 2}
@@ -175,7 +181,7 @@ assert "refdef-para2" {[dict get [lindex $blocks10 1] type] eq "paragraph"}
 set md11 {[Klick hier][end]
 
 [end]: https://end.com}
-set ast11 [mdparser::parse $md11]
+set ast11 [mdstack::parser::parse $md11]
 set p11 [lindex [dict get $ast11 blocks] 0]
 
 assert "refdef-at-end" {[getInline $p11 0 url] eq "https://end.com"}
@@ -188,7 +194,7 @@ set md12 {[Link][dup] hier.
 
 [dup]: https://first.com
 [dup]: https://second.com}
-set ast12 [mdparser::parse $md12]
+set ast12 [mdstack::parser::parse $md12]
 set p12 [lindex [dict get $ast12 blocks] 0]
 
 assert "refdef-first-wins" {[getInline $p12 0 url] eq "https://first.com"}
@@ -200,7 +206,7 @@ assert "refdef-first-wins" {[getInline $p12 0 url] eq "https://first.com"}
 set md13 {Ein [normaler](https://normal.com) Link und [ref][r].
 
 [r]: https://ref.com}
-set ast13 [mdparser::parse $md13]
+set ast13 [mdstack::parser::parse $md13]
 set p13 [lindex [dict get $ast13 blocks] 0]
 
 assert "reflink-normal-preserved-type" {[getInline $p13 1 type] eq "link"}
@@ -214,7 +220,7 @@ assert "reflink-ref-resolved"          {[getInline $p13 3 url] eq "https://ref.c
 set md14 {## Heading mit [Link][h]
 
 [h]: https://heading.com}
-set ast14 [mdparser::parse $md14]
+set ast14 [mdstack::parser::parse $md14]
 set h [lindex [dict get $ast14 blocks] 0]
 
 assert "reflink-in-heading-type" {[dict get $h type] eq "heading"}
@@ -236,11 +242,14 @@ set md15 {| Header |
 | [Klick][t] |
 
 [t]: https://table.com}
-set ast15 [mdparser::parse $md15]
+set ast15 [mdstack::parser::parse $md15]
 set tbl [lindex [dict get $ast15 blocks] 0]
 
 assert "reflink-in-table-type" {[dict get $tbl type] eq "table"}
-set cellInlines [lindex [lindex [dict get $tbl rowsInlines] 0] 0]
+# Seit A.3 Lesart 2: tabellen-content[1].content[0].content = Inline-Liste der ersten Body-Cell.
+set bodyRow [lindex [dict get $tbl content] 1]
+set firstCell [lindex [dict get $bodyRow content] 0]
+set cellInlines [dict get $firstCell content]
 set hasTableLink 0
 foreach i $cellInlines {
     if {[dict get $i type] eq "link" && [dict get $i url] eq "https://table.com"} {
@@ -256,7 +265,7 @@ assert "reflink-in-table-resolved" {$hasTableLink == 1}
 set md16 {> Zitat mit [Link][q]
 
 [q]: https://quote.com}
-set ast16 [mdparser::parse $md16]
+set ast16 [mdstack::parser::parse $md16]
 set bq [lindex [dict get $ast16 blocks] 0]
 
 assert "reflink-in-blockquote-type" {[dict get $bq type] eq "blockquote"}
@@ -277,7 +286,7 @@ assert "reflink-in-blockquote-resolved" {$hasQuoteLink == 1}
 set md17 {- Item mit [Link][l]
 
 [l]: https://list.com}
-set ast17 [mdparser::parse $md17]
+set ast17 [mdstack::parser::parse $md17]
 set lst [lindex [dict get $ast17 blocks] 0]
 
 assert "reflink-in-list-type" {[dict get $lst type] eq "list"}
@@ -298,7 +307,7 @@ set md18 {Text.
 
 [a]: https://a.com
 [b]: https://b.com "Title B"}
-set ast18 [mdparser::parse $md18]
+set ast18 [mdstack::parser::parse $md18]
 
 assert "reflinks-in-ast" {[dict exists $ast18 reflinks]}
 assert "reflinks-has-a"  {[dict exists [dict get $ast18 reflinks] a]}
@@ -310,7 +319,7 @@ assert "reflinks-b-title" {[dict get [dict get [dict get $ast18 reflinks] b] tit
 # ============================================================
 
 set md19 {Simple text without references.}
-set ast19 [mdparser::parse $md19]
+set ast19 [mdstack::parser::parse $md19]
 
 assert "no-refs-empty-dict" {[dict size [dict get $ast19 reflinks]] == 0}
 

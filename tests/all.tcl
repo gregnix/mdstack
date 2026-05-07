@@ -13,7 +13,6 @@
 #   tclsh tests/all.tcl --gui      -- nur C
 #   tclsh tests/all.tcl --pdf      -- nur D
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
 set dir [file dirname [info script]]
 
 # --- Flags auswerten ---
@@ -35,9 +34,13 @@ set errorFiles   {}
 
 # --- Hilfsprozeduren ---
 
-# runTcltest: exec-basiert (tcltest braucht eigenen Interpreter)
+# runTcltest: exec-basiert (tcltest braucht eigenen Interpreter).
+# Parst tcltest-Output am Ende ("Total N Passed N Skipped N Failed N")
+# und aggregiert die Counter ins Grand-Total. Vorher wurden Failures
+# innerhalb von tcltest-Suites nur ausgegeben, aber nicht im Endstand
+# gezählt — gemeldet 2026-05-07 via dritten externen Prüfbericht.
 proc runTcltest {dir files} {
-    global grandFailed errorFiles
+    global grandTotal grandPassed grandFailed grandSkipped errorFiles
     foreach f $files {
         set path [file join $dir $f]
         if {![file exists $path]} { puts "  SKIP: $f (not found)"; continue }
@@ -45,6 +48,17 @@ proc runTcltest {dir files} {
             append out ""
         }
         if {$out ne ""} { puts $out }
+        # tcltest-Format: ".../basic.tcl:	Total	17	Passed	17	Skipped	0	Failed	0"
+        if {[regexp {Total\s+(\d+)\s+Passed\s+(\d+)\s+Skipped\s+(\d+)\s+Failed\s+(\d+)} \
+                $out -> tot pas skp fld]} {
+            incr grandTotal   $tot
+            incr grandPassed  $pas
+            incr grandSkipped $skp
+            incr grandFailed  $fld
+            if {$fld > 0} {
+                lappend errorFiles "$f ($fld failed)"
+            }
+        }
     }
 }
 
@@ -92,19 +106,19 @@ if {$runCore} {
         basic.tcl
         extended.tcl
         mdstack.tcl
+        parser-blockquote.tcl
+        parser-hardbreak.tcl
+        parser-indented.tcl
+        parser-oratcl-style.tcl
     }
 
     # assert-basiert
     runAssert $dir {
-        parser-blockquote.tcl
         parser-deflist.tcl
-        parser-hardbreak.tcl
-        parser-indented.tcl
         parser-inline-features.tcl
         parser-inline-fixes.tcl
         parser-multiline-list.tcl
         parser-nested-lists.tcl
-        parser-oratcl-style.tcl
         parser-phase2.tcl
         parser-reflinks.tcl
         parser-tip700.tcl
@@ -175,8 +189,11 @@ if {$runPdf} {
 
 puts ""
 puts "=========================================="
-puts "GESAMT (assert-Tests):\tTotal\t$grandTotal\tPassed\t$grandPassed\tSkipped\t$grandSkipped\tFailed\t$grandFailed"
+puts "GESAMT:\tTotal\t$grandTotal\tPassed\t$grandPassed\tSkipped\t$grandSkipped\tFailed\t$grandFailed"
 if {[llength $errorFiles] > 0} {
     puts "ERRORS in: [join $errorFiles {, }]"
 }
 puts "=========================================="
+
+# Exit-Code so setzen, dass CI / Skripte den Erfolg erkennen können.
+exit [expr {$grandFailed > 0 || [llength $errorFiles] > 0 ? 1 : 0}]

@@ -1,6 +1,12 @@
 #!/usr/bin/env tclsh
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
-package require mdparser 0.2
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
+package require mdstack::parser 0.2
 
 set md {## Title
 
@@ -11,7 +17,7 @@ puts "hi"
 ```
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 
 # Check document type
 puts "doc-type: [dict get $ast type]"

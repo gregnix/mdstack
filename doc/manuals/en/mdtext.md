@@ -1,8 +1,8 @@
-# mdtext
+# mdstack::text
 
 ## Purpose
 
-`mdtext` is a **Markdown editor widget** for Tcl/Tk.
+`mdstack::text` is a **Markdown editor widget** for Tcl/Tk.
 
 The module:
 - is a **pure editor widget** (no preview)
@@ -21,19 +21,19 @@ The module:
 
 ## Public API
 
-### `mdtext::create path ?options?`
+### `mdstack::text::create path ?options?`
 
 Creates an editor widget.
 
 ```tcl
-set editor [mdtext::create .editor]
+set editor [mdstack::text::create .editor]
 pack $editor -fill both -expand 1
 ```
 
 All Tk text widget options are passed through:
 
 ```tcl
-set editor [mdtext::create .editor \
+set editor [mdstack::text::create .editor \
     -width 80 -height 30 \
     -font "Consolas 12" -wrap word]
 ```
@@ -129,21 +129,21 @@ When `indent` is enabled:
 ## Example: editor with live preview
 
 ```tcl
-package require mdtext   0.1
-package require mdparser 0.2
-package require mdmodel  0.1
-package require mdviewer 0.3
+package require mdstack::text   0.1
+package require mdstack::parser 0.2
+package require mdstack::model  0.1
+package require mdstack::viewer 0.3
 
-set editor  [mdtext::create   .editor]
-set preview [mdviewer::create .preview]
+set editor  [mdstack::text::create   .editor]
+set preview [mdstack::viewer::create .preview]
 
 $editor enableFeature smartReturn
 $editor enableFeature indent
 
 $editor onchange {
-    set ast [mdparser::parse [$editor get]]
-    set doc [mdmodel::new $ast]
-    mdviewer::renderModel .preview $doc
+    set ast [mdstack::parser::parse [$editor get]]
+    set doc [mdstack::model::new $ast]
+    mdstack::viewer::renderModel .preview $doc
 }
 ```
 
@@ -151,7 +151,7 @@ $editor onchange {
 
 ## Non-goals
 
-- No preview (→ mdviewer)
-- No parsing (→ mdparser)
+- No preview (→ mdstack::viewer)
+- No parsing (→ mdstack::parser)
 - No save/open (→ application)
 - No toolbar (→ application)

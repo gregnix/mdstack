@@ -19,15 +19,15 @@ package require Tcl 8.6
 # Module laden
 # ============================================================
 
-if {[catch {package require mdparser 0.2} err]} {
+if {[catch {package require mdstack::parser 0.2} err]} {
     puts stderr "ERROR: mdparser 0.2 not found: $err"
     exit 1
 }
-if {[catch {package require mdhtml 0.1} err]} {
+if {[catch {package require mdstack::html 0.1} err]} {
     puts stderr "ERROR: mdhtml 0.1 not found: $err"
     exit 1
 }
-catch {package require mdtheme 0.1}
+catch {package require mdstack::theme 0.1}
 
 # ============================================================
 # MIME-Types (global, unveraenderlich)
@@ -155,8 +155,8 @@ oo::class create mdserver::Renderer {
 
     method markdown {path theme toc} {
         set md [my _readFile $path]
-        set ast [mdparser::parse $md]
-        return [mdhtml::render $ast \
+        set ast [mdstack::parser::parse $md]
+        return [mdstack::html::render $ast \
             -theme $theme \
             -toc   $toc   \
             -lang  de]
@@ -176,12 +176,12 @@ oo::class create mdserver::Renderer {
 
         # CSS
         set css ""
-        catch {set css [mdtheme::toCSS $theme]} ;# intentional: mdtheme optional
-        if {$css eq ""} { set css [mdhtml::_defaultCss] }
+        catch {set css [mdstack::theme::toCSS $theme]} ;# intentional: mdtheme optional
+        if {$css eq ""} { set css [mdstack::html::_defaultCss] }
 
         set title "$_title -- [string trimright $urlPath /]/"
-        set esc   [mdhtml::escapeHtml $title]
-        set body  "<h1>Index: [mdhtml::escapeHtml $urlPath]</h1>\n"
+        set esc   [mdstack::html::escapeHtml $title]
+        set body  "<h1>Index: [mdstack::html::escapeHtml $urlPath]</h1>\n"
 
         # Parent-Link
         if {$urlPath ne "/"} {
@@ -216,7 +216,7 @@ oo::class create mdserver::Renderer {
                         }
                     }
                 }
-                append body "<li><a href=\"$href\">[mdhtml::escapeHtml $ftitle]</a> "
+                append body "<li><a href=\"$href\">[mdstack::html::escapeHtml $ftitle]</a> "
                 append body "<small>($f)</small></li>\n"
             }
             append body "</ul>\n"

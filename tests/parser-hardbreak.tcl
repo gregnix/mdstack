@@ -1,12 +1,17 @@
 #!/usr/bin/env tclsh
 # parser-hardbreak.tcl - Tests for hard line break support (mdparser 0.2)
 
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
 package require tcltest
 namespace import ::tcltest::*
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
-
-package require mdparser 0.2
+package require mdstack::parser 0.2
 
 # ============================================================
 # Hard break via two trailing spaces
@@ -15,7 +20,7 @@ package require mdparser 0.2
 test hardbreak-spaces-1 "two trailing spaces produce linebreak node" -body {
     # Build markdown with explicit trailing spaces
     set md "line one  \nline two"
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 0]
     set inlines [dict get $block content]
     # Should contain: text "line one" + linebreak + text "line two"
@@ -28,7 +33,7 @@ test hardbreak-spaces-1 "two trailing spaces produce linebreak node" -body {
 
 test hardbreak-spaces-2 "text before linebreak is trimmed" -body {
     set md "hello world  \nnext line"
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 0]
     set inlines [dict get $block content]
     set firstText ""
@@ -44,7 +49,7 @@ test hardbreak-spaces-2 "text before linebreak is trimmed" -body {
 
 test hardbreak-spaces-3 "without trailing spaces no linebreak" -body {
     set md "line one\nline two"
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 0]
     set inlines [dict get $block content]
     set types {}
@@ -60,7 +65,7 @@ test hardbreak-spaces-3 "without trailing spaces no linebreak" -body {
 
 test hardbreak-backslash-1 "trailing backslash produces linebreak" -body {
     set md "line one\\\nline two"
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 0]
     set inlines [dict get $block content]
     set types {}
@@ -72,7 +77,7 @@ test hardbreak-backslash-1 "trailing backslash produces linebreak" -body {
 
 test hardbreak-backslash-2 "backslash itself is stripped" -body {
     set md "hello\\\nnext"
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 0]
     set inlines [dict get $block content]
     set firstText ""
@@ -92,7 +97,7 @@ test hardbreak-backslash-2 "backslash itself is stripped" -body {
 
 test hardbreak-multi-1 "multiple hard breaks in one paragraph" -body {
     set md "line one  \nline two  \nline three"
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 0]
     set inlines [dict get $block content]
     set breakCount 0
@@ -110,7 +115,7 @@ test hardbreak-multi-1 "multiple hard breaks in one paragraph" -body {
 
 test hardbreak-with-bold "hard break after bold text" -body {
     set md "**bold text**  \nnext line"
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 0]
     set inlines [dict get $block content]
     set types {}
@@ -125,7 +130,7 @@ test hardbreak-with-bold "hard break after bold text" -body {
 # ============================================================
 
 test supports-linebreak-1 "supports lists inline:linebreak" -body {
-    expr {"inline:linebreak" in [mdparser::supports {}]}
+    expr {"inline:linebreak" in [mdstack::parser::supports {}]}
 } -result {1}
 
 cleanupTests

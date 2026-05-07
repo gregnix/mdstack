@@ -12,11 +12,16 @@
 # Requires: mdparser 0.2, mdtheme 0.1, mdhtml 0.1
 
 set scriptDir [file dirname [file normalize [info script]]]
-tcl::tm::path add [file normalize [file join $scriptDir .. lib]]
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
 
-package require mdparser 0.2
-package require mdtheme  0.1
-package require mdhtml   0.1
+
+package require mdstack::parser 0.2
+package require mdstack::theme  0.1
+package require mdstack::html   0.1
 
 set outdir [file join $scriptDir html]
 file mkdir $outdir
@@ -44,10 +49,10 @@ another [link to GitHub](https://github.com/gregnix/pdf4tcl).
 
 ```tcl
 # Theme only
-mdhtml::export $ast output.html -theme hell
+mdstack::html::export $ast output.html -theme hell
 
 # Theme + CSS overrides (combined)
-mdhtml::export $ast output.html -theme hell -css custom.css
+mdstack::html::export $ast output.html -theme hell -css custom.css
 ```
 
 ## Table
@@ -89,12 +94,12 @@ mdtheme
 *Generated with mdhtml 0.1 + mdtheme 0.1*
 }
 
-set ast [mdparser::parse $markdown]
+set ast [mdstack::parser::parse $markdown]
 
 # --- 1. Alle Themes ---
-foreach theme [mdtheme::names] {
+foreach theme [mdstack::theme::names] {
     set outfile [file join $outdir "mdhtml-theme-${theme}.html"]
-    mdhtml::export $ast $outfile \
+    mdstack::html::export $ast $outfile \
         -title "mdhtml -- Theme: $theme" \
         -theme $theme \
         -toc   1 \
@@ -127,7 +132,7 @@ table th { background: #8b0000; color: white; }
 close $fh
 
 set outfile [file join $outdir "mdhtml-theme-custom.html"]
-mdhtml::export $ast $outfile \
+mdstack::html::export $ast $outfile \
     -title "mdhtml -- Theme hell + custom overrides" \
     -theme hell \
     -css   $cssFile \
@@ -136,7 +141,7 @@ mdhtml::export $ast $outfile \
 puts "Written: $outfile  (theme: hell + custom.css)"
 
 puts "\nOpen in browser:"
-foreach theme [mdtheme::names] {
+foreach theme [mdstack::theme::names] {
     puts "  [file join $outdir mdhtml-theme-${theme}.html]"
 }
 puts "  [file join $outdir mdhtml-theme-custom.html]  (with overrides)"

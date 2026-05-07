@@ -1,10 +1,15 @@
 #!/usr/bin/env tclsh
 # Test TOC-Problem
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
 
-package require mdparser 0.2
-package require mdpdf 0.2
+
+package require mdstack::parser 0.2
+package require mdstack::pdf 0.2
 
 set markdown {
 # Heading 1
@@ -18,7 +23,7 @@ Text hier.
 Mehr Text.
 }
 
-set ast [mdparser::parse $markdown]
+set ast [mdstack::parser::parse $markdown]
 
 # Check AST structure
 puts "=== AST-Struktur ==="
@@ -45,4 +50,4 @@ if {[dict exists $ast blocks]} {
 
 # TOC testen
 puts "\n=== TOC-Test ==="
-mdpdf::export $ast "test-toc.pdf" -toc 1 -debug 1
+mdstack::pdf::export $ast "test-toc.pdf" -toc 1 -debug 1

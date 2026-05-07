@@ -8,9 +8,14 @@
 # - PDF/A und Verschluesselung als Export-Varianten
 
 # Tcl Module Pfad setzen (lib/ relativ zu demo/)
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
 
-package require mdpdf 0.2
+
+package require mdstack::pdf 0.2
 
 set scriptDir [file dirname [file normalize [info script]]]
 set mdFile    [file join $scriptDir mdpdf-features-demo.md]
@@ -19,7 +24,7 @@ if {![file exists $pdfDir]} { file mkdir $pdfDir }
 
 # --- 1. Standard-Export ---
 set outFile [file join $pdfDir mdpdf-features-demo.pdf]
-mdpdf::exportFile $mdFile $outFile \
+mdstack::pdf::exportFile $mdFile $outFile \
     -title   "mdpdf Features Demo" \
     -header  "mdpdf 0.2 / pdf4tcl 0.9.4.11 -- Page %p" \
     -footer  "- %p -" \
@@ -30,7 +35,7 @@ puts "Written: $outFile"
 
 # --- 2. PDF/A-1b Export ---
 set outPdfa [file join $pdfDir mdpdf-features-demo-pdfa.pdf]
-mdpdf::exportFile $mdFile $outPdfa \
+mdstack::pdf::exportFile $mdFile $outPdfa \
     -title   "mdpdf Features Demo (PDF/A-1b)" \
     -header  "PDF/A-1b -- Page %p" \
     -footer  "- %p -" \
@@ -42,7 +47,7 @@ puts "Written: $outPdfa"
 
 # --- 3. Verschluesselter Export ---
 set outEnc [file join $pdfDir mdpdf-features-demo-encrypted.pdf]
-mdpdf::exportFile $mdFile $outEnc \
+mdstack::pdf::exportFile $mdFile $outEnc \
     -title         "mdpdf Features Demo (Encrypted)" \
     -header        "Protected -- Page %p" \
     -footer        "- %p -" \
@@ -55,7 +60,7 @@ puts ""
 puts "Done. PDFs in: $pdfDir"
 
 # --- 4. Theme-Export (hell / dunkel / solarized) ---
-package require mdtheme 0.1
+package require mdstack::theme 0.1
 
 set md2 {# mdpdf Theme Demo
 
@@ -74,8 +79,8 @@ A paragraph with a [clickable link](https://www.tcl.tk).
 ## Code Block
 
 ```tcl
-mdpdf::export $ast output.pdf -theme hell
-mdpdf::export $ast output.pdf -theme dunkel
+mdstack::pdf::export $ast output.pdf -theme hell
+mdstack::pdf::export $ast output.pdf -theme dunkel
 ```
 
 ## Table
@@ -86,10 +91,10 @@ mdpdf::export $ast output.pdf -theme dunkel
 | colorLink | yes  | yes    | yes       |
 }
 
-set ast2 [mdparser::parse $md2]
-foreach theme [mdtheme::names] {
+set ast2 [mdstack::parser::parse $md2]
+foreach theme [mdstack::theme::names] {
     set outTheme [file join $pdfDir "mdpdf-theme-${theme}.pdf"]
-    mdpdf::export $ast2 $outTheme \
+    mdstack::pdf::export $ast2 $outTheme \
         -title  "mdpdf -- Theme: $theme" \
         -theme  $theme \
         -toc    1 \

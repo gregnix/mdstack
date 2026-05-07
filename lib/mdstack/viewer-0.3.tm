@@ -1,5 +1,4 @@
 # mdviewer-0.3.tm
-# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Tk widget to render Markdown-AST v1.
 #
@@ -48,21 +47,21 @@
 # -fontsize int         base font size (default 10), scales all tags
 #
 # API:
-#   mdviewer::gotoAnchor $path $anchor  → scrolls to heading anchor (1/0)
-#   mdviewer::anchors $path             → list of all anchor names
-#   mdviewer::setFontSize $path $size   → reconfigure all tag fonts
+#   mdstack::viewer::gotoAnchor $path $anchor  → scrolls to heading anchor (1/0)
+#   mdstack::viewer::anchors $path             → list of all anchor names
+#   mdstack::viewer::setFontSize $path $size   → reconfigure all tag fonts
 #
 package require Tk
-package provide mdviewer 0.3
+package provide mdstack::viewer 0.3
 
-namespace eval mdviewer {
+namespace eval mdstack::viewer {
     namespace export create widget clear render renderModel configure cget \
         gotoAnchor anchors setFontSize
     variable state
     array set state {}
 }
 
-proc mdviewer::create {path args} {
+proc mdstack::viewer::create {path args} {
     variable state
 
     ttk::frame $path
@@ -92,34 +91,34 @@ proc mdviewer::create {path args} {
     set state($path,tableCounter) 0
 
     # Create named fonts (per instance, for independent font size)
-    set fp [mdviewer::fontPrefix $path]
+    set fp [mdstack::viewer::fontPrefix $path]
     set state($path,fontPrefix) $fp
-    mdviewer::initFonts $path 10
+    mdstack::viewer::initFonts $path 10
 
-    mdviewer::initTags $path.t $fp
+    mdstack::viewer::initTags $path.t $fp
     
     # Clickable tag for onclick callback
     # ButtonRelease-1 so link handlers (Button-1) can fire first
     $path.t tag configure clickable
-    $path.t tag bind clickable <ButtonRelease-1> [list mdviewer::dispatchClick $path %x %y]
+    $path.t tag bind clickable <ButtonRelease-1> [list mdstack::viewer::dispatchClick $path %x %y]
     
-    mdviewer::configure $path {*}$args
+    mdstack::viewer::configure $path {*}$args
 
     # Font cleanup when widget is destroyed
-    bind $path <Destroy> [list mdviewer::deleteFonts $path]
+    bind $path <Destroy> [list mdstack::viewer::deleteFonts $path]
 
     return $path
 }
 
-proc mdviewer::widget {path} {
+proc mdstack::viewer::widget {path} {
     variable state
     return $state($path,text)
 }
 
-proc mdviewer::configure {path args} {
+proc mdstack::viewer::configure {path args} {
     variable state
     if {[llength $args] == 0} { return }
-    if {[llength $args] % 2 != 0} { error "mdviewer::configure: expected key value pairs" }
+    if {[llength $args] % 2 != 0} { error "mdstack::viewer::configure: expected key value pairs" }
 
     foreach {k v} $args {
         switch -- $k {
@@ -128,14 +127,14 @@ proc mdviewer::configure {path args} {
             -onpdf    { set state($path,onpdf) $v }
             -onclick  { set state($path,onclick) $v }
             -root     { set state($path,root) $v }
-            -fontsize  { mdviewer::setFontSize $path $v }
+            -fontsize  { mdstack::viewer::setFontSize $path $v }
             -tablemode { set state($path,tablemode) $v }
-            default    { error "mdviewer::configure: unknown option $k" }
+            default    { error "mdstack::viewer::configure: unknown option $k" }
         }
     }
 }
 
-proc mdviewer::cget {path option} {
+proc mdstack::viewer::cget {path option} {
     variable state
     switch -- $option {
         -onlink   { return $state($path,onlink) }
@@ -145,13 +144,13 @@ proc mdviewer::cget {path option} {
         -root     { return $state($path,root) }
         -fontsize  { return $state($path,fontsize) }
         -tablemode { return $state($path,tablemode) }
-        default    { error "mdviewer::cget: unknown option $option" }
+        default    { error "mdstack::viewer::cget: unknown option $option" }
     }
 }
 
-proc mdviewer::clear {path} {
+proc mdstack::viewer::clear {path} {
     variable state
-    set t [mdviewer::widget $path]
+    set t [mdstack::viewer::widget $path]
     $t configure -state normal
     # Remove anchor marks (otherwise remain after delete)
     foreach m [$t mark names] {
@@ -161,7 +160,7 @@ proc mdviewer::clear {path} {
     }
     $t delete 1.0 end
     $t configure -state disabled
-    mdviewer::clearDynamicLinkTags $path
+    mdstack::viewer::clearDynamicLinkTags $path
     # Image cleanup — delete all Tk images of this instance
     foreach img $state($path,images) {
         catch {image delete $img}
@@ -170,15 +169,15 @@ proc mdviewer::clear {path} {
     set state($path,quoteDepth) 0
 }
 
-proc mdviewer::render {path ast} {
-    mdviewer::assertAst $ast
-    mdviewer::clear $path
+proc mdstack::viewer::render {path ast} {
+    mdstack::viewer::assertAst $ast
+    mdstack::viewer::clear $path
 
-    set t [mdviewer::widget $path]
+    set t [mdstack::viewer::widget $path]
     $t configure -state normal
 
     foreach block [dict get $ast blocks] {
-        mdviewer::renderBlock $path $block
+        mdstack::viewer::renderBlock $path $block
         $t insert end "\n"
     }
 
@@ -192,12 +191,12 @@ proc mdviewer::render {path ast} {
     $t yview moveto 0
 }
 
-proc mdviewer::renderModel {path doc} {
-    mdviewer::render $path [dict get $doc ast]
+proc mdstack::viewer::renderModel {path doc} {
+    mdstack::viewer::render $path [dict get $doc ast]
 }
 
-proc mdviewer::renderBlock {path block} {
-    set t [mdviewer::widget $path]
+proc mdstack::viewer::renderBlock {path block} {
+    set t [mdstack::viewer::widget $path]
     set type [dict get $block type]
 
     switch -- $type {
@@ -212,13 +211,13 @@ proc mdviewer::renderBlock {path block} {
             }
             # Inline-Formatierung in Headings (bold, italic, code etc.)
             set start [$t index "end -1 chars"]
-            mdviewer::renderInlines $path [dict get $block content]
+            mdstack::viewer::renderInlines $path [dict get $block content]
             $t insert end "\n"
             $t tag add $tag $start "end -1 chars"
         }
         paragraph {
             set paraStart [$t index "end -1 chars"]
-            mdviewer::renderInlines $path [dict get $block content]
+            mdstack::viewer::renderInlines $path [dict get $block content]
             $t insert end "\n"
             $t tag add para $paraStart "end -1 chars"
         }
@@ -246,11 +245,11 @@ proc mdviewer::renderBlock {path block} {
                 foreach subBlock [dict get $item blocks] {
                     set subType [dict get $subBlock type]
                     if {$first && $subType eq "paragraph"} {
-                        mdviewer::renderInlines $path [dict get $subBlock content]
+                        mdstack::viewer::renderInlines $path [dict get $subBlock content]
                         set first 0
                     } else {
                         $t insert end "\n"
-                        mdviewer::renderBlock $path $subBlock
+                        mdstack::viewer::renderBlock $path $subBlock
                         set first 0
                     }
                 }
@@ -276,7 +275,7 @@ proc mdviewer::renderBlock {path block} {
                 set lang [dict get $block language]
             }
             if {$lang ne ""} {
-                mdviewer::highlightCode $t $codeStart $codeEnd $lang
+                mdstack::viewer::highlightCode $t $codeStart $codeEnd $lang
             }
         }
         hr {
@@ -316,7 +315,7 @@ proc mdviewer::renderBlock {path block} {
                     # of whatever renderBlock inserts after it.
                     $t mark set _bqSub end
 
-                    mdviewer::renderBlock $path $subBlock
+                    mdstack::viewer::renderBlock $path $subBlock
 
                     # _bqSub → first char of new content (mark didn't move)
                     # end-1c → last char of new content (the trailing \n)
@@ -372,7 +371,7 @@ proc mdviewer::renderBlock {path block} {
             set url [dict get $block url]
             set imgStart [$t index "end -1 chars"]
             # Versuche Bild zu laden
-            if {[mdviewer::loadImage $path $url img]} {
+            if {[mdstack::viewer::loadImage $path $url img]} {
                 $t image create end -image $img -padx 5 -pady 5
                 if {$alt ne ""} {
                     $t insert end "\n"
@@ -387,10 +386,10 @@ proc mdviewer::renderBlock {path block} {
         table {
             variable state
             if {$state($path,tablemode) eq "frame"} {
-                mdviewer::renderTableFrame $path $block
+                mdstack::viewer::renderTableFrame $path $block
             } else {
                 set tableStart [$t index "end -1 chars"]
-                mdviewer::renderTable $path $block
+                mdstack::viewer::renderTable $path $block
                 $t tag add tableblock $tableStart "end -1 chars"
             }
         }
@@ -398,7 +397,7 @@ proc mdviewer::renderBlock {path block} {
             foreach item [dict get $block items] {
                 # Term (bold)
                 set termStart [$t index end]
-                mdviewer::renderInlines $path [dict get $item term]
+                mdstack::viewer::renderInlines $path [dict get $item term]
                 set termEnd [$t index end]
                 $t tag add defterm $termStart $termEnd
                 $t insert end "\n"
@@ -406,7 +405,7 @@ proc mdviewer::renderBlock {path block} {
                 # Definitions (indented)
                 foreach def [dict get $item definitions] {
                     set defStart [$t index end]
-                    mdviewer::renderInlines $path $def
+                    mdstack::viewer::renderInlines $path $def
                     set defEnd [$t index end]
                     $t tag add defdef $defStart $defEnd
                     $t insert end "\n"
@@ -419,7 +418,7 @@ proc mdviewer::renderBlock {path block} {
             set divTag "div_${cls}"
             set divStart [$t index "end -1 chars"]
             foreach subBlock [dict get $block blocks] {
-                mdviewer::renderBlock $path $subBlock
+                mdstack::viewer::renderBlock $path $subBlock
             }
             set divEnd [$t index "end -1 chars"]
             $t tag add $divTag $divStart $divEnd
@@ -441,7 +440,7 @@ proc mdviewer::renderBlock {path block} {
                 $t mark gravity $markName left
 
                 $t insert end "$fnNum. " "footnote_num"
-                mdviewer::renderInlines $path $fnContent
+                mdstack::viewer::renderInlines $path $fnContent
                 $t insert end "\n"
             }
         }
@@ -451,18 +450,18 @@ proc mdviewer::renderBlock {path block} {
     }
 }
 
-proc mdviewer::renderInlines {path inlines {parentFormatTag ""}} {
+proc mdstack::viewer::renderInlines {path inlines {parentFormatTag ""}} {
     # parentFormatTag: When we are inside a strong/em/strike,
     # this tag name is passed so text nodes know they
     # should not get a quote_d0 tag (the format tag handles that)
     foreach node $inlines {
-        mdviewer::renderInline $path $node $parentFormatTag
+        mdstack::viewer::renderInline $path $node $parentFormatTag
     }
 }
 
-proc mdviewer::renderInline {path node {parentFormatTag ""}} {
+proc mdstack::viewer::renderInline {path node {parentFormatTag ""}} {
     variable state
-    set t [mdviewer::widget $path]
+    set t [mdstack::viewer::widget $path]
     set type [dict get $node type]
     set ctx $state($path,renderContext)
     
@@ -528,7 +527,7 @@ proc mdviewer::renderInline {path node {parentFormatTag ""}} {
             }
             set start [$t index end]
             # Pass parentFormatTag so text nodes know they don't need quote_d0 tag
-            mdviewer::renderInlines $path [dict get $node content] $tagName
+            mdstack::viewer::renderInlines $path [dict get $node content] $tagName
             set end [$t index end]
             # Add tag (also in tables, to ensure it covers the entire range)
             $t tag add $tagName $start $end
@@ -543,15 +542,15 @@ proc mdviewer::renderInline {path node {parentFormatTag ""}} {
             set start [$t index end]
             # Render content; cmd/sub/lit/optlit -> bold, arg/optarg/optdot/ins -> italic
             if {$cls in {cmd sub lit optlit ccmd}} {
-                mdviewer::renderInlines $path [dict get $node content] "strong"
+                mdstack::viewer::renderInlines $path [dict get $node content] "strong"
                 set end [$t index end]
                 $t tag add strong $start $end
             } elseif {$cls in {arg optarg optdot ins cargs}} {
-                mdviewer::renderInlines $path [dict get $node content] "em"
+                mdstack::viewer::renderInlines $path [dict get $node content] "em"
                 set end [$t index end]
                 $t tag add em $start $end
             } else {
-                mdviewer::renderInlines $path [dict get $node content] $parentFormatTag
+                mdstack::viewer::renderInlines $path [dict get $node content] $parentFormatTag
                 set end [$t index end]
             }
             # Class-specific tag for custom styling
@@ -561,35 +560,35 @@ proc mdviewer::renderInline {path node {parentFormatTag ""}} {
             incr state($path,linkCounter)
             set ltag "link$state($path,linkCounter)"
             set url   [dict get $node url]
-            set resolved [mdviewer::resolveUrl $path $url]
+            set resolved [mdstack::viewer::resolveUrl $path $url]
 
             # PDF-Links: eigener Tag + [PDF] Prefix
-            if {[mdviewer::isPdf $resolved]} {
+            if {[mdstack::viewer::isPdf $resolved]} {
                 set start [$t index "end -1 chars"]
                 $t insert end "\[PDF\] "
-                mdviewer::renderInlines $path [dict get $node label]
+                mdstack::viewer::renderInlines $path [dict get $node label]
                 set end [$t index "end -1 chars"]
                 $t tag add pdflink $start $end
                 $t tag add $ltag $start $end
-                $t tag bind $ltag <Button-1> [list mdviewer::dispatchPdf $path $resolved]
+                $t tag bind $ltag <Button-1> [list mdstack::viewer::dispatchPdf $path $resolved]
             } else {
                 set start [$t index "end -1 chars"]
-                mdviewer::renderInlines $path [dict get $node label]
+                mdstack::viewer::renderInlines $path [dict get $node label]
                 set end [$t index "end -1 chars"]
                 $t tag add link $start $end
                 $t tag add $ltag $start $end
-                $t tag bind $ltag <Button-1> [list mdviewer::dispatchLink $path $resolved]
+                $t tag bind $ltag <Button-1> [list mdstack::viewer::dispatchLink $path $resolved]
             }
             $t tag bind $ltag <Enter> [list apply {{t ltag path resolved} {
                 $t configure -cursor hand2
                 $t tag configure $ltag -underline 1
-                set cb [mdviewer::cget $path -onhover]
+                set cb [mdstack::viewer::cget $path -onhover]
                 if {$cb ne ""} { uplevel #0 [list {*}$cb $resolved] }
             }} $t $ltag $path $resolved]
             $t tag bind $ltag <Leave> [list apply {{t ltag path} {
                 $t configure -cursor {}
                 $t tag configure $ltag -underline 0
-                set cb [mdviewer::cget $path -onhover]
+                set cb [mdstack::viewer::cget $path -onhover]
                 if {$cb ne ""} { uplevel #0 [list {*}$cb ""] }
             }} $t $ltag $path]
         }
@@ -597,7 +596,7 @@ proc mdviewer::renderInline {path node {parentFormatTag ""}} {
             set alt [dict get $node alt]
             set url [dict get $node url]
             # Try to load image (small for inline)
-            if {[mdviewer::loadImage $path $url img 60]} {
+            if {[mdstack::viewer::loadImage $path $url img 60]} {
                 $t image create end -image $img -padx 2
             } else {
                 $t insert end "\[$alt\]" imageinline
@@ -619,20 +618,20 @@ proc mdviewer::renderInline {path node {parentFormatTag ""}} {
     }
 }
 
-proc mdviewer::isAbsUrl {url} {
+proc mdstack::viewer::isAbsUrl {url} {
     # Erkennt absolute URLs: http://, https://, mailto:, ftp:// etc.
     return [regexp {^[a-zA-Z][a-zA-Z0-9+.-]+:} $url]
 }
 
-proc mdviewer::isPdf {url} {
+proc mdstack::viewer::isPdf {url} {
     return [expr {[string tolower [file extension $url]] eq ".pdf"}]
 }
 
-proc mdviewer::resolveUrl {path url} {
+proc mdstack::viewer::resolveUrl {path url} {
     # Resolves relative URLs against -root.
     # Absolute URLs and anchors are returned unchanged.
     variable state
-    if {[mdviewer::isAbsUrl $url]} { return $url }
+    if {[mdstack::viewer::isAbsUrl $url]} { return $url }
     if {[string index $url 0] eq "#"} { return $url }
     set root ""
     if {[info exists state($path,root)]} {
@@ -642,12 +641,12 @@ proc mdviewer::resolveUrl {path url} {
     return [file join $root $url]
 }
 
-proc mdviewer::dispatchLink {path url} {
+proc mdstack::viewer::dispatchLink {path url} {
     variable state
     # Interne Anchor-Links (#section) direkt navigieren
     if {[string index $url 0] eq "#"} {
         set anchor [string range $url 1 end]
-        mdviewer::gotoAnchor $path $anchor
+        mdstack::viewer::gotoAnchor $path $anchor
         return
     }
     set cb $state($path,onlink)
@@ -657,7 +656,7 @@ proc mdviewer::dispatchLink {path url} {
     uplevel #0 [list {*}$cb $url]
 }
 
-proc mdviewer::dispatchPdf {path url} {
+proc mdstack::viewer::dispatchPdf {path url} {
     variable state
     set cb $state($path,onpdf)
     if {$cb ne ""} {
@@ -665,10 +664,10 @@ proc mdviewer::dispatchPdf {path url} {
         return
     }
     # Fallback: wie normaler Link behandeln
-    mdviewer::dispatchLink $path $url
+    mdstack::viewer::dispatchLink $path $url
 }
 
-proc mdviewer::dispatchClick {path x y} {
+proc mdstack::viewer::dispatchClick {path x y} {
     variable state
     set cb $state($path,onclick)
     
@@ -699,10 +698,10 @@ proc mdviewer::dispatchClick {path x y} {
 # Anchor-Navigation
 # ============================================================
 
-proc mdviewer::gotoAnchor {path anchor} {
+proc mdstack::viewer::gotoAnchor {path anchor} {
     # Scrolls to anchor mark (set by heading).
     # Returns 1 on success, 0 if anchor not found.
-    set t [mdviewer::widget $path]
+    set t [mdstack::viewer::widget $path]
     set mark "anchor_$anchor"
     if {$mark in [$t mark names]} {
         $t see $mark
@@ -711,9 +710,9 @@ proc mdviewer::gotoAnchor {path anchor} {
     return 0
 }
 
-proc mdviewer::anchors {path} {
+proc mdstack::viewer::anchors {path} {
     # Returns list of all anchor names.
-    set t [mdviewer::widget $path]
+    set t [mdstack::viewer::widget $path]
     set result {}
     foreach m [$t mark names] {
         if {[string match "anchor_*" $m]} {
@@ -727,13 +726,13 @@ proc mdviewer::anchors {path} {
 # Fontsize-Steuerung
 # ============================================================
 
-proc mdviewer::setFontSize {path size} {
+proc mdstack::viewer::setFontSize {path size} {
     # Sets base font size. Named fonts propagate automatically
     # to all tags and widgets that reference them.
     variable state
     set state($path,fontsize) $size
     set fp $state($path,fontPrefix)
-    set t [mdviewer::widget $path]
+    set t [mdstack::viewer::widget $path]
 
     # Body-Font (Widget-Default)
     $t configure -font ${fp}_body
@@ -761,13 +760,13 @@ proc mdviewer::setFontSize {path size} {
 # Named Fonts
 # ============================================================
 
-proc mdviewer::fontPrefix {path} {
+proc mdstack::viewer::fontPrefix {path} {
     # Creates a unique, font-safe prefix from the widget path.
     # z.B. ".nb.tab.viewer" → "mdv_nb_tab_viewer"
     return "mdv[string map {. _} $path]"
 }
 
-proc mdviewer::initFonts {path size} {
+proc mdstack::viewer::initFonts {path size} {
     # Creates named fonts for a viewer instance.
     # All tags reference these fonts; setFontSize only changes the fonts.
     variable state
@@ -796,7 +795,7 @@ proc mdviewer::initFonts {path size} {
     font create ${fp}_small       -family $family -size [expr {$size - 2}]
 }
 
-proc mdviewer::deleteFonts {path} {
+proc mdstack::viewer::deleteFonts {path} {
     # Cleans up named fonts when the viewer is destroyed.
     variable state
     if {![info exists state($path,fontPrefix)]} return
@@ -808,7 +807,7 @@ proc mdviewer::deleteFonts {path} {
     }
 }
 
-proc mdviewer::initTags {t fp} {
+proc mdstack::viewer::initTags {t fp} {
     # Configure tags – all font assignments via named fonts.
     # fp = font prefix of the instance.
     #
@@ -905,9 +904,9 @@ proc mdviewer::initTags {t fp} {
     # Creation order guarantees priority.
 }
 
-proc mdviewer::clearDynamicLinkTags {path} {
+proc mdstack::viewer::clearDynamicLinkTags {path} {
     variable state
-    set t [mdviewer::widget $path]
+    set t [mdstack::viewer::widget $path]
     for {set i 1} {$i <= $state($path,linkCounter)} {incr i} {
         set ltag "link$i"
         catch {$t tag bind $ltag <Button-1> {}}
@@ -918,115 +917,121 @@ proc mdviewer::clearDynamicLinkTags {path} {
     set state($path,linkCounter) 0
 }
 
-proc mdviewer::renderTable {path block} {
-    set t [mdviewer::widget $path]
-    set header [dict get $block header]
-    set rows [dict get $block rows]
-    set alignments [dict get $block alignments]
-    set hasInlines [dict exists $block headerInlines]
-    
-    # Calculate column widths (based on plain text length)
-    set cols [llength $header]
-    set widths [lrepeat $cols 0]
-    
-    # Header widths (from inlines or fallback)
-    for {set c 0} {$c < $cols} {incr c} {
-        if {$hasInlines} {
-            set w [string length [mdviewer::inlinesToText [lindex [dict get $block headerInlines] $c]]]
-        } else {
-            set w [string length [lindex $header $c]]
+proc mdstack::viewer::renderTable {path block} {
+    # Seit A.3 Lesart 2 (2026-05-07):
+    # Block-Schema = {type table content {tableRow*} meta {columns N alignments {...} hasHeader 0|1}}
+    # tableRow.content = [tableCell-Liste]; tableCell.content = [Inlines].
+    set t [mdstack::viewer::widget $path]
+    set meta [dict get $block meta]
+    set cols [dict get $meta columns]
+    set alignments [dict get $meta alignments]
+    set hasHeader  [dict get $meta hasHeader]
+    set rowNodes [dict get $block content]
+
+    if {$cols == 0 || [llength $rowNodes] == 0} return
+
+    # Cell-Texte als Helfer extrahieren (Plain-Text aus Inlines)
+    # cellTexts: Liste von Listen. cellTexts[r][c] = plain-text der Zelle
+    set cellTexts {}
+    foreach row $rowNodes {
+        set rowTexts {}
+        foreach cell [dict get $row content] {
+            lappend rowTexts [mdstack::viewer::inlinesToText [dict get $cell content]]
         }
-        if {$w > [lindex $widths $c]} { lset widths $c $w }
+        lappend cellTexts $rowTexts
     }
-    
-    # Row widths
-    set ri 0
-    foreach row $rows {
+
+    # Header- und Body-Rows trennen
+    set headerRowText {}
+    set bodyRowsText  $cellTexts
+    set bodyRowNodes  $rowNodes
+    if {$hasHeader && [llength $rowNodes] > 0} {
+        set headerRowText [lindex $cellTexts 0]
+        set bodyRowsText  [lrange $cellTexts 1 end]
+        set bodyRowNodes  [lrange $rowNodes 1 end]
+    }
+
+    # Spaltenbreiten berechnen
+    set widths [lrepeat $cols 0]
+    if {[llength $headerRowText] > 0} {
         for {set c 0} {$c < $cols} {incr c} {
-            if {$hasInlines} {
-                set cell [mdviewer::inlinesToText [lindex [lindex [dict get $block rowsInlines] $ri] $c]]
-            } else {
-                set cell [lindex $row $c]
-            }
-            set w [string length $cell]
+            set w [string length [lindex $headerRowText $c]]
             if {$w > [lindex $widths $c]} { lset widths $c $w }
         }
-        incr ri
     }
-    
-    # Minimum 3, maximum 40 characters per column
+    foreach rowText $bodyRowsText {
+        for {set c 0} {$c < $cols} {incr c} {
+            set w [string length [lindex $rowText $c]]
+            if {$w > [lindex $widths $c]} { lset widths $c $w }
+        }
+    }
+
+    # Min 3, Max 40 Zeichen pro Spalte
     set maxColWidth 40
     for {set c 0} {$c < $cols} {incr c} {
         set w [lindex $widths $c]
-        if {$w < 3} { set w 3 }
-        if {$w > $maxColWidth} { set w $maxColWidth }
+        if {$w < 3}             { set w 3 }
+        if {$w > $maxColWidth}  { set w $maxColWidth }
         lset widths $c $w
     }
-    
-    # Render header (only if not empty)
-    set hasHeader 0
-    foreach h $header {
-        if {$h ne ""} { set hasHeader 1; break }
-    }
-    
+
+    # Header rendern
     if {$hasHeader} {
+        set headerRow [lindex $rowNodes 0]
         $t insert end "│" tableheader
         for {set c 0} {$c < $cols} {incr c} {
             set w [lindex $widths $c]
             set align [lindex $alignments $c]
             $t insert end " " tableheader
-            if {$hasInlines} {
-                mdviewer::renderTableCell $path \
-                    [lindex [dict get $block headerInlines] $c] \
-                    [lindex $header $c] $w $align tableheader
-            } else {
-                $t insert end [mdviewer::alignText [lindex $header $c] $w $align] tableheader
-            }
+            set cellInlines [dict get [lindex [dict get $headerRow content] $c] content]
+            mdstack::viewer::renderTableCell $path \
+                $cellInlines \
+                [lindex $headerRowText $c] $w $align tableheader
             $t insert end " │" tableheader
         }
         $t insert end "\n"
-        
+
         # Separator
         $t insert end "├" hr
         for {set c 0} {$c < $cols} {incr c} {
             set w [lindex $widths $c]
             $t insert end [string repeat "─" [expr {$w + 2}]] hr
-            if {$c < $cols - 1} {
-                $t insert end "┼" hr
-            }
+            if {$c < $cols - 1} { $t insert end "┼" hr }
         }
         $t insert end "┤\n" hr
     }
-    
-    # Rows rendern
-    set rowIdx 0
-    foreach row $rows {
+
+    # Body-Rows rendern
+    set ri 0
+    foreach row $bodyRowNodes {
+        set rowText [lindex $bodyRowsText $ri]
         $t insert end "│" tablecell
         for {set c 0} {$c < $cols} {incr c} {
             set w [lindex $widths $c]
-            set rawCell [string trim [lindex $row $c]]
             set align [lindex $alignments $c]
             $t insert end " " tablecell
-            
-            # Image-Zelle?
-            if {[regexp {^!\[([^\]]*)\]\(([^)]+)\)$} $rawCell -> alt url]} {
-                if {[mdviewer::loadImage $path $url img 40]} {
+            set cellInlines [dict get [lindex [dict get $row content] $c] content]
+            set rawCell [string trim [lindex $rowText $c]]
+
+            # Image-Cell direkt rendern (1 Inline vom Typ image)
+            if {[llength $cellInlines] == 1 \
+                    && [dict get [lindex $cellInlines 0] type] eq "image"} {
+                set img0 [lindex $cellInlines 0]
+                set url [dict get $img0 url]
+                set alt [expr {[dict exists $img0 alt] ? [dict get $img0 alt] : ""}]
+                if {[mdstack::viewer::loadImage $path $url img 40]} {
                     $t image create end -image $img
                 } else {
-                    $t insert end [mdviewer::alignText "\[$alt\]" $w $align] tablecell
+                    $t insert end [mdstack::viewer::alignText "\[$alt\]" $w $align] tablecell
                 }
-            } elseif {$hasInlines} {
-                mdviewer::renderTableCell $path \
-                    [lindex [lindex [dict get $block rowsInlines] $rowIdx] $c] \
-                    $rawCell $w $align tablecell
             } else {
-                set cell [mdviewer::inlinesToText [list [dict create type text value $rawCell]]]
-                $t insert end [mdviewer::alignText $cell $w $align] tablecell
+                mdstack::viewer::renderTableCell $path \
+                    $cellInlines $rawCell $w $align tablecell
             }
             $t insert end " │" tablecell
         }
         $t insert end "\n"
-        incr rowIdx
+        incr ri
     }
 }
 
@@ -1034,38 +1039,42 @@ proc mdviewer::renderTable {path block} {
 # Embedded frame + label widgets instead of monospace text.
 # Advantages: proportional fonts, zebra stripes, real backgrounds.
 # Disadvantage: no copy-paste of table contents.
-# Activated via:  mdviewer::configure $path -tablemode frame
+# Activated via:  mdstack::viewer::configure $path -tablemode frame
 
-proc mdviewer::renderTableFrame {path block} {
+proc mdstack::viewer::renderTableFrame {path block} {
+    # Seit A.3 Lesart 2 (2026-05-07):
+    # Block-Schema = {type table content {tableRow*} meta {columns N alignments {...} hasHeader 0|1}}
     variable state
-    set t [mdviewer::widget $path]
-    set header [dict get $block header]
-    set rows [dict get $block rows]
-    set alignments [dict get $block alignments]
-    set cols [llength $header]
-    set fp [mdviewer::fontPrefix $path]
+    set t [mdstack::viewer::widget $path]
+    set meta [dict get $block meta]
+    set cols [dict get $meta columns]
+    set alignments [dict get $meta alignments]
+    set hasHeader  [dict get $meta hasHeader]
+    set rowNodes [dict get $block content]
+    set fp [mdstack::viewer::fontPrefix $path]
+
+    if {$cols == 0} return
 
     incr state($path,tableCounter)
     set tf $t.tbl$state($path,tableCounter)
 
-    # Outer frame as border (1px gray border via padx/pady + bg)
+    # Outer frame as border
     frame $tf -bg #cccccc -padx 1 -pady 1
 
-    # ── Header ──
-    set hasHeader 0
-    foreach h $header {
-        if {$h ne ""} { set hasHeader 1; break }
+    # Header- und Body-Rows trennen
+    set headerRow {}
+    set bodyRows  $rowNodes
+    if {$hasHeader && [llength $rowNodes] > 0} {
+        set headerRow [lindex $rowNodes 0]
+        set bodyRows  [lrange $rowNodes 1 end]
     }
+
     set startRow 0
-    set hasInlines [dict exists $block headerInlines]
-    if {$hasHeader} {
+    if {$headerRow ne ""} {
         for {set c 0} {$c < $cols} {incr c} {
-            if {$hasInlines} {
-                set text [mdviewer::inlinesToText [lindex [dict get $block headerInlines] $c]]
-            } else {
-                set text [lindex $header $c]
-            }
-            set anchor [mdviewer::alignToAnchorFrame [lindex $alignments $c]]
+            set cellInlines [dict get [lindex [dict get $headerRow content] $c] content]
+            set text [mdstack::viewer::inlinesToText $cellInlines]
+            set anchor [mdstack::viewer::alignToAnchorFrame [lindex $alignments $c]]
             label $tf.h$c -text $text \
                 -font ${fp}_bold -bg #e0e0e0 \
                 -padx 8 -pady 4 -anchor $anchor
@@ -1074,68 +1083,54 @@ proc mdviewer::renderTableFrame {path block} {
         set startRow 1
     }
 
-    # ── Data rows ──
+    # Data rows
     set r $startRow
-    set rowIdx 0
-    foreach row $rows {
+    foreach row $bodyRows {
         set c 0
-        foreach cell $row {
+        foreach cell [dict get $row content] {
+            set cellInlines [dict get $cell content]
             set align [lindex $alignments $c]
-            set anchor [mdviewer::alignToAnchorFrame $align]
-            # Zebrastreifen
+            set anchor [mdstack::viewer::alignToAnchorFrame $align]
             set bg [expr {($r - $startRow) % 2 == 0 ? "white" : "#f8f8f8"}]
+            set text [mdstack::viewer::inlinesToText $cellInlines]
 
-            # Plain text from inlines (if present)
-            if {$hasInlines && [dict exists $block rowsInlines]} {
-                set cellInlines [lindex [lindex [dict get $block rowsInlines] $rowIdx] $c]
-                set text [mdviewer::inlinesToText $cellInlines]
-            } else {
-                set text $cell
-            }
-
-            # Image in cell? (check inline type or fallback to regexp)
+            # Image / Link in Zelle? (1 Inline, type image oder link)
             set isImage 0
-            set isLink 0
-            if {$hasInlines && [dict exists $block rowsInlines]} {
+            set isLink  0
+            if {[llength $cellInlines] == 1} {
                 set firstInline [lindex $cellInlines 0]
-                if {[llength $cellInlines] == 1 && [dict get $firstInline type] eq "image"} {
+                set itype [dict get $firstInline type]
+                if {$itype eq "image"} {
                     set isImage 1
-                    set altText [dict get $firstInline alt]
-                    set imgUrl [dict get $firstInline url]
-                } elseif {[llength $cellInlines] == 1 && [dict get $firstInline type] eq "link"} {
+                    set altText [expr {[dict exists $firstInline alt] ? [dict get $firstInline alt] : ""}]
+                    set imgUrl  [dict get $firstInline url]
+                } elseif {$itype eq "link"} {
                     set isLink 1
-                    set linkText [mdviewer::inlinesToText [dict get $firstInline label]]
-                    set linkUrl [dict get $firstInline url]
-                }
-            } else {
-                if {[regexp {^!\[([^\]]*)\]\(([^)]+)\)$} $cell -> altText imgUrl]} {
-                    set isImage 1
-                } elseif {[regexp {\[([^\]]+)\]\(([^)]+)\)} $cell -> linkText linkUrl]} {
-                    set isLink 1
+                    set linkText [mdstack::viewer::inlinesToText [dict get $firstInline label]]
+                    set linkUrl  [dict get $firstInline url]
                 }
             }
 
             if {$isImage} {
-                set resolved [mdviewer::resolveUrl $path $imgUrl]
-                if {[mdviewer::loadImage $path $imgUrl img 120]} {
+                set resolved [mdstack::viewer::resolveUrl $path $imgUrl]
+                if {[mdstack::viewer::loadImage $path $imgUrl img 120]} {
                     label $tf.c${r}_$c -image $img -bg $bg -padx 4 -pady 4
                 } else {
                     set disp [expr {$altText ne "" ? $altText : "(Bild)"}]
                     label $tf.c${r}_$c -text $disp -font ${fp}_italic \
                         -bg $bg -fg #999999 -padx 8 -pady 3 -anchor $anchor
                 }
-            # Link in Zelle?
             } elseif {$isLink} {
-                set resolved [mdviewer::resolveUrl $path $linkUrl]
+                set resolved [mdstack::viewer::resolveUrl $path $linkUrl]
                 label $tf.c${r}_$c -text $linkText -font ${fp}_body \
                     -bg $bg -fg #0066cc -padx 8 -pady 3 -anchor $anchor \
                     -cursor hand2
-                if {[mdviewer::isPdf $resolved]} {
+                if {[mdstack::viewer::isPdf $resolved]} {
                     bind $tf.c${r}_$c <Button-1> \
-                        [list mdviewer::dispatchPdf $path $resolved]
+                        [list mdstack::viewer::dispatchPdf $path $resolved]
                 } else {
                     bind $tf.c${r}_$c <Button-1> \
-                        [list mdviewer::dispatchLink $path $resolved]
+                        [list mdstack::viewer::dispatchLink $path $resolved]
                 }
                 bind $tf.c${r}_$c <Enter> \
                     [list $tf.c${r}_$c configure -font ${fp}_body]
@@ -1150,7 +1145,6 @@ proc mdviewer::renderTableFrame {path block} {
             incr c
         }
         incr r
-        incr rowIdx
     }
 
     # Distribute columns equally
@@ -1158,12 +1152,11 @@ proc mdviewer::renderTableFrame {path block} {
         grid columnconfigure $tf $c -weight 1
     }
 
-    # Frame in Text-Widget einbetten
     $t window create end -window $tf -padx 5 -pady 5
     $t insert end "\n"
 }
 
-proc mdviewer::alignToAnchorFrame {align} {
+proc mdstack::viewer::alignToAnchorFrame {align} {
     switch -- $align {
         center { return center }
         right  { return e }
@@ -1173,15 +1166,15 @@ proc mdviewer::alignToAnchorFrame {align} {
 
 # Render table cell with inline formatting
 # Calculates padding based on plain text length, renders inlines between
-proc mdviewer::renderTableCell {path inlines rawText colWidth align baseTag} {
+proc mdstack::viewer::renderTableCell {path inlines rawText colWidth align baseTag} {
     variable state
-    set t [mdviewer::widget $path]
-    set plainText [mdviewer::inlinesToText $inlines]
+    set t [mdstack::viewer::widget $path]
+    set plainText [mdstack::viewer::inlinesToText $inlines]
     set textLen [string length $plainText]
     
     # Truncation: if text too long, fallback to alignText
     if {$textLen > $colWidth} {
-        $t insert end [mdviewer::alignText $plainText $colWidth $align] $baseTag
+        $t insert end [mdstack::viewer::alignText $plainText $colWidth $align] $baseTag
         return
     }
     
@@ -1206,7 +1199,7 @@ proc mdviewer::renderTableCell {path inlines rawText colWidth align baseTag} {
     set state($path,tableBaseTag) $baseTag
     
     # Inlines rendern
-    mdviewer::renderInlines $path $inlines
+    mdstack::viewer::renderInlines $path $inlines
     
     # Reset context
     set state($path,renderContext) $prevCtx
@@ -1228,7 +1221,7 @@ proc mdviewer::renderTableCell {path inlines rawText colWidth align baseTag} {
 }
 
 # Align text (left, center, right) – with truncation on overflow
-proc mdviewer::alignText {text width align} {
+proc mdstack::viewer::alignText {text width align} {
     set len [string length $text]
     if {$len > $width} {
         # Truncate with ellipsis
@@ -1258,7 +1251,7 @@ proc mdviewer::alignText {text width align} {
 # DEPRECATED: Ersetzt durch inlinesToText (Prio 17).
 # Only as fallback for ASTs without headerInlines/rowsInlines.
 # DEPRECATED: use inlinesToText instead.
-proc mdviewer::stripMarkdown {text} {
+proc mdstack::viewer::stripMarkdown {text} {
     # ![alt](url) -> [alt]
     regsub -all {!\[([^\]]*)\]\([^)]+\)} $text {[\1]} text
     # **bold** -> bold
@@ -1273,7 +1266,7 @@ proc mdviewer::stripMarkdown {text} {
 }
 
 # Convert inlines to plain text (for blockquotes)
-proc mdviewer::inlinesToText {inlines} {
+proc mdstack::viewer::inlinesToText {inlines} {
     set result ""
     foreach inline $inlines {
         set type [dict get $inline type]
@@ -1281,9 +1274,9 @@ proc mdviewer::inlinesToText {inlines} {
             text { append result [dict get $inline value] }
             inline_code { append result [dict get $inline value] }
             strong - emphasis - strike - span {
-                append result [mdviewer::inlinesToText [dict get $inline content]]
+                append result [mdstack::viewer::inlinesToText [dict get $inline content]]
             }
-            link { append result [mdviewer::inlinesToText [dict get $inline label]] }
+            link { append result [mdstack::viewer::inlinesToText [dict get $inline label]] }
             image { append result [dict get $inline alt] }
             footnote_ref { append result "\[[dict get $inline id]\]" }
         }
@@ -1294,7 +1287,7 @@ proc mdviewer::inlinesToText {inlines} {
 # Load image and optionally scale
 # Returns 1 on success, 0 on failure
 # imgVar contains the image name
-proc mdviewer::loadImage {path url imgVar {maxSize 200}} {
+proc mdstack::viewer::loadImage {path url imgVar {maxSize 200}} {
     variable state
     upvar $imgVar img
     
@@ -1366,7 +1359,7 @@ proc mdviewer::loadImage {path url imgVar {maxSize 200}} {
     return 1
 }
 
-proc mdviewer::highlightCode {t startIdx endIdx lang} {
+proc mdstack::viewer::highlightCode {t startIdx endIdx lang} {
     # Einfaches Keyword-basiertes Syntax-Highlighting for Tcl.
     # Andere Sprachen: nur Kommentare und Strings.
 
@@ -1490,12 +1483,12 @@ proc mdviewer::highlightCode {t startIdx endIdx lang} {
     }
 }
 
-proc mdviewer::assertAst {ast} {
+proc mdstack::viewer::assertAst {ast} {
     if {![dict exists $ast type] || [dict get $ast type] ne "document"} {
-        error "mdviewer::render: not a document AST"
+        error "mdstack::viewer::render: not a document AST"
     }
     if {![dict exists $ast version] || [dict get $ast version] != 1} {
-        error "mdviewer::render: unsupported AST version"
+        error "mdstack::viewer::render: unsupported AST version"
     }
     return 1
 }

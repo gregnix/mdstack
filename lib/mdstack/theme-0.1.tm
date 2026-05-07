@@ -1,21 +1,20 @@
 # mdtheme-0.1.tm
-# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 #
 # Color scheme system for mdviewer und mdhelp.
 # Defines theme dicts with all colors for viewer, editor, TIP-700.
 #
 # API:
-#   mdtheme::names               -> Liste aller Themes
-#   mdtheme::current              -> Name des aktiven Themes
-#   mdtheme::get key              -> Color value from active theme
-#   mdtheme::set name             -> Activate theme
-#   mdtheme::theme name           -> Ganzes Theme-Dict
-#   mdtheme::applyToViewer path   -> Apply colors to mdviewer
-#   mdtheme::applyToText widget   -> Apply colors to text widget
+#   mdstack::theme::names               -> Liste aller Themes
+#   mdstack::theme::current              -> Name des aktiven Themes
+#   mdstack::theme::get key              -> Color value from active theme
+#   mdstack::theme::set name             -> Activate theme
+#   mdstack::theme::theme name           -> Ganzes Theme-Dict
+#   mdstack::theme::applyToViewer path   -> Apply colors to mdviewer
+#   mdstack::theme::applyToText widget   -> Apply colors to text widget
 
-package provide mdtheme 0.1
+package provide mdstack::theme 0.1
 
-namespace eval mdtheme {
+namespace eval mdstack::theme {
     namespace export names current activate color theme applyToViewer applyToText applyToViewer applyToText
     variable currentTheme "hell"
     variable themes
@@ -27,7 +26,7 @@ namespace eval mdtheme {
 # ============================================================
 
 # --- Hell (Standard) ---
-set mdtheme::themes(hell) {
+set mdstack::theme::themes(hell) {
     name            "Hell"
     bg              "#ffffff"
     fg              "#000000"
@@ -82,7 +81,7 @@ set mdtheme::themes(hell) {
 }
 
 # --- Dunkel ---
-set mdtheme::themes(dunkel) {
+set mdstack::theme::themes(dunkel) {
     name            "Dunkel"
     bg              "#1e1e2e"
     fg              "#cdd6f4"
@@ -137,7 +136,7 @@ set mdtheme::themes(dunkel) {
 }
 
 # --- Solarized ---
-set mdtheme::themes(solarized) {
+set mdstack::theme::themes(solarized) {
     name            "Solarized"
     bg              "#fdf6e3"
     fg              "#657b83"
@@ -195,26 +194,26 @@ set mdtheme::themes(solarized) {
 # API
 # ============================================================
 
-proc mdtheme::names {} {
+proc mdstack::theme::names {} {
     variable themes
     return [lsort [array names themes]]
 }
 
-proc mdtheme::current {} {
+proc mdstack::theme::current {} {
     variable currentTheme
     return $currentTheme
 }
 
-proc mdtheme::activate {name} {
+proc mdstack::theme::activate {name} {
     variable themes
     variable currentTheme
     if {![info exists themes($name)]} {
-        error "mdtheme: unknown theme '$name' (available: [mdtheme::names])"
+        error "mdtheme: unknown theme '$name' (available: [mdstack::theme::names])"
     }
     set currentTheme $name
 }
 
-proc mdtheme::color {key} {
+proc mdstack::theme::color {key} {
     variable themes
     variable currentTheme
     set t $themes($currentTheme)
@@ -224,7 +223,7 @@ proc mdtheme::color {key} {
     error "mdtheme: unknown key '$key' in theme '$currentTheme'"
 }
 
-proc mdtheme::theme {name} {
+proc mdstack::theme::theme {name} {
     variable themes
     if {![info exists themes($name)]} {
         error "mdtheme: unknown theme '$name'"
@@ -233,10 +232,10 @@ proc mdtheme::theme {name} {
 }
 
 # Apply colors to mdviewer text widget
-proc mdtheme::applyToViewer {path} {
+proc mdstack::theme::applyToViewer {path} {
     variable currentTheme
     variable themes
-    set t [mdviewer::widget $path]
+    set t [mdstack::viewer::widget $path]
     set th $themes($currentTheme)
 
     # Text-Widget Hintergrund + Vordergrund
@@ -288,7 +287,7 @@ proc mdtheme::applyToViewer {path} {
 }
 
 # Apply colors to any text widget (editor)
-proc mdtheme::applyToText {t} {
+proc mdstack::theme::applyToText {t} {
     variable currentTheme
     variable themes
     set th $themes($currentTheme)
@@ -315,7 +314,7 @@ proc mdtheme::applyToText {t} {
 #   space_after     Abstand nach H1-H6 in pt
 #   max_width_px    Maximale Breite fuer HTML in px
 
-namespace eval mdtheme {
+namespace eval mdstack::theme {
     variable _typographyDefaults {
         font_body       "Georgia, 'Times New Roman', serif"
         font_heading    "Helvetica, Arial, sans-serif"
@@ -331,7 +330,7 @@ namespace eval mdtheme {
 }
 
 # Liefert Wert aus Theme (Farbe oder Typography), mit Fallback auf Default
-proc mdtheme::get {name key} {
+proc mdstack::theme::get {name key} {
     variable themes
     variable _typographyDefaults
     if {![info exists themes($name)]} {
@@ -348,7 +347,7 @@ proc mdtheme::get {name key} {
 }
 
 # Konvertiert Theme -> vollstaendiges CSS fuer mdhtml
-proc mdtheme::toCSS {{name ""}} {
+proc mdstack::theme::toCSS {{name ""}} {
     variable currentTheme
     variable themes
     variable _typographyDefaults
@@ -476,7 +475,7 @@ span.opt  { opacity: 0.75; }
 }
 
 # Liefert PDF-Optionen als Dict fuer mdpdf
-proc mdtheme::toPdfOpts {{name ""}} {
+proc mdstack::theme::toPdfOpts {{name ""}} {
     variable currentTheme
     variable themes
     variable _typographyDefaults

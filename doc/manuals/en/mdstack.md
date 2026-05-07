@@ -34,7 +34,7 @@ Editor      Preview     Data source
 
 - Tcl ≥ 8.6
 - No Tk dependency
-- No hard coupling to mdtext, mdviewer, or noteskit
+- No hard coupling to mdstack::text, mdstack::viewer, or noteskit
 
 ---
 
@@ -59,10 +59,10 @@ mdstack::setEditorAPI \
 | `-onchange` | optional | Registers change callback → live preview |
 | `-isModified` | optional | Returns 0/1 |
 
-**Example with mdtext:**
+**Example with mdstack::text:**
 
 ```tcl
-set editor [mdtext::create .editor]
+set editor [mdstack::text::create .editor]
 
 mdstack::setEditorAPI \
     -getText    [list $editor get] \
@@ -95,9 +95,9 @@ The script receives the text as argument.
 mdstack::setPreviewAPI -render {renderMarkdown}
 
 proc renderMarkdown {text} {
-    set ast [mdparser::parse $text]
-    set doc [mdmodel::new $ast]
-    mdviewer::renderModel .preview $doc
+    set ast [mdstack::parser::parse $text]
+    set doc [mdstack::model::new $ast]
+    mdstack::viewer::renderModel .preview $doc
 }
 ```
 
@@ -165,13 +165,13 @@ mdstack::onsave {
 
 ```tcl
 package require mdstack  0.1
-package require mdtext   0.1
-package require mdviewer 0.3
-package require mdparser 0.2
-package require mdmodel  0.1
+package require mdstack::text   0.1
+package require mdstack::viewer 0.3
+package require mdstack::parser 0.2
+package require mdstack::model  0.1
 
-set editor  [mdtext::create   .editor]
-set preview [mdviewer::create .preview]
+set editor  [mdstack::text::create   .editor]
+set preview [mdstack::viewer::create .preview]
 
 mdstack::setEditorAPI \
     -getText  [list $editor get] \
@@ -182,9 +182,9 @@ mdstack::setEditorAPI \
 mdstack::setPreviewAPI -render {renderPreview}
 
 proc renderPreview {text} {
-    set ast [mdparser::parse $text]
-    set doc [mdmodel::new $ast]
-    mdviewer::renderModel .preview $doc
+    set ast [mdstack::parser::parse $text]
+    set doc [mdstack::model::new $ast]
+    mdstack::viewer::renderModel .preview $doc
 }
 
 mdstack::onsave {
@@ -198,8 +198,8 @@ mdstack::push -id "note1" -text $markdown -source "noteskit"
 
 ## Non-goals
 
-- No rendering (→ mdviewer)
-- No editing (→ mdtext)
+- No rendering (→ mdstack::viewer)
+- No editing (→ mdstack::text)
 - No file management (→ application)
 - No GUI (→ application)
 - **No widget references** — callbacks only

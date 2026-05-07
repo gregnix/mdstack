@@ -6,8 +6,14 @@
 # Hinweis: Fuer vollstaendige PDF/A-Konformitaet CIDFonts verwenden
 # (Standard-Fonts wie Helvetica sind nicht eingebettet).
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
-package require mdpdf 0.2
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
+package require mdstack::pdf 0.2
 
 set scriptDir [file dirname [file normalize [info script]]]
 set pdfDir    [file join $scriptDir pdf]
@@ -50,12 +56,12 @@ verapdf --flavour 1b mdpdf-pdfa-1b.pdf
 *Created with mdpdf 0.2 / pdf4tcl 0.9.4.11*
 }
 
-package require mdparser 0.2
-set ast [mdparser::parse $markdown]
+package require mdstack::parser 0.2
+set ast [mdstack::parser::parse $markdown]
 
 # --- PDF/A-1b ---
 set out [file join $pdfDir mdpdf-pdfa-1b.pdf]
-mdpdf::export $ast $out \
+mdstack::pdf::export $ast $out \
     -title    "PDF/A-1b Demo" \
     -pdfa     1b \
     -fontsize 11 \
@@ -65,7 +71,7 @@ puts "Validate: verapdf --flavour 1b $out"
 
 # --- PDF/A-2b ---
 set out [file join $pdfDir mdpdf-pdfa-2b.pdf]
-mdpdf::export $ast $out \
+mdstack::pdf::export $ast $out \
     -title    "PDF/A-2b Demo" \
     -pdfa     2b \
     -fontsize 11 \

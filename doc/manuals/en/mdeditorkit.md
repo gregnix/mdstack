@@ -1,12 +1,12 @@
-# mdeditorkit
+# mdstack::editorkit
 
-> ⚠️ **Legacy module** — use `mdstack` + `mdtext` + `mdviewer` for new projects.
+> ⚠️ **Legacy module** — use `mdstack` + `mdstack::text` + `mdstack::viewer` for new projects.
 
 ## Purpose
 
-`mdeditorkit` is an **editor subsystem** for Markdown with live preview.
+`mdstack::editorkit` is an **editor subsystem** for Markdown with live preview.
 
-It combines `mdeditor`, `mdparser`, `mdmodel`, and `mdviewer` into a
+It combines `mdeditor`, `mdstack::parser`, `mdstack::model`, and `mdstack::viewer` into a
 consistent edit/preview pipeline.
 
 ---
@@ -14,21 +14,21 @@ consistent edit/preview pipeline.
 ## Dependencies
 
 - Tcl/Tk ≥ 8.6
-- mdparser 0.2
-- mdmodel 0.1
-- mdviewer 0.3
+- mdstack::parser 0.2
+- mdstack::model 0.1
+- mdstack::viewer 0.3
 - mdeditor 0.1
 
 ---
 
 ## Public API
 
-### `mdeditorkit::create path ?options?`
+### `mdstack::editorkit::create path ?options?`
 
 Creates an editor subsystem (split view).
 
 ```tcl
-set kit [mdeditorkit::create .kit]
+set kit [mdstack::editorkit::create .kit]
 pack $kit -fill both -expand 1
 ```
 
@@ -38,38 +38,38 @@ pack $kit -fill both -expand 1
 | `-mode` | `split` | `edit`, `preview`, or `split` |
 | `-onerror cmdPrefix` | — | Error callback |
 | `-onchange cmdPrefix` | — | Change callback |
-| `-onlink cmdPrefix` | — | Link click callback (passed to mdviewer) |
+| `-onlink cmdPrefix` | — | Link click callback (passed to mdstack::viewer) |
 
 ---
 
-### `mdeditorkit::settext path markdown`
+### `mdstack::editorkit::settext path markdown`
 
 Sets the Markdown text and triggers immediate parsing.
 
-### `mdeditorkit::gettext path`
+### `mdstack::editorkit::gettext path`
 
 Returns the current Markdown text.
 
-### `mdeditorkit::setmode path edit|preview|split`
+### `mdstack::editorkit::setmode path edit|preview|split`
 
 Switches the display mode.
 
-### `mdeditorkit::model path`
+### `mdstack::editorkit::model path`
 
 Returns the edit model v1 dict (text, dirty, cursor, selection).
 
-### `mdeditorkit::setmodel path editModelDict`
+### `mdstack::editorkit::setmodel path editModelDict`
 
 Sets the editor state (for undo/restore).
 
-### `mdeditorkit::getdocmodel path`
+### `mdstack::editorkit::getdocmodel path`
 
-Returns the mdmodel document model.
+Returns the mdstack::model document model.
 
 ```tcl
-set doc [mdeditorkit::getdocmodel $kit]
-set toc [mdmodel::toc $doc]
-set hits [mdmodel::find $doc "search term"]
+set doc [mdstack::editorkit::getdocmodel $kit]
+set toc [mdstack::model::toc $doc]
+set hits [mdstack::model::find $doc "search term"]
 ```
 
 ---

@@ -1,21 +1,21 @@
-# mdhtml
+# mdstack::html
 
 > Version 0.1
 
 ## Purpose
 
-`mdhtml` converts a Markdown AST (from `mdparser`) into clean HTML.
+`mdstack::html` converts a Markdown AST (from `mdstack::parser`) into clean HTML.
 It is the HTML renderer in the mdstack ecosystem, complementing
-`mdpdf` (PDF) and `mdviewer` (Tk widget).
+`mdstack::pdf` (PDF) and `mdstack::viewer` (Tk widget).
 
 ```
 Markdown
    |
-mdparser  -->  AST
+mdstack::parser  -->  AST
                 |
       +---------+---------+
       |         |         |
-   mdhtml     mdpdf    mdviewer
+   mdstack::html     mdstack::pdf    mdstack::viewer
     HTML       PDF        Tk
 ```
 
@@ -23,45 +23,45 @@ mdparser  -->  AST
 
 ## Public API
 
-### `mdhtml::render ast ?options?`
+### `mdstack::html::render ast ?options?`
 
 Converts an AST into a complete HTML string.
 
 ```tcl
-package require mdparser 0.2
-package require mdhtml   0.1
+package require mdstack::parser 0.2
+package require mdstack::html   0.1
 
-set ast  [mdparser::parse $markdownText]
-set html [mdhtml::render $ast -title "My Document" -toc 1]
+set ast  [mdstack::parser::parse $markdownText]
+set html [mdstack::html::render $ast -title "My Document" -toc 1]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-title` | `""` | Document title (fallback: first H1 or YAML frontmatter) |
 | `-toc` | `0` | Generate table of contents (0\|1) |
-| `-theme` | `""` | mdtheme name: `hell`, `dunkel`, `solarized` |
+| `-theme` | `""` | mdstack::theme name: `hell`, `dunkel`, `solarized` |
 | `-css` | `""` | Path to external CSS file |
 | `-lang` | `de` | HTML `lang` attribute |
 | `-encoding` | `utf-8` | Output encoding |
 
 ---
 
-### `mdhtml::export ast outFile ?options?`
+### `mdstack::html::export ast outFile ?options?`
 
 Like `render`, but writes directly to a file.
 
 ```tcl
-mdhtml::export $ast output.html -title "Document" -toc 1
+mdstack::html::export $ast output.html -title "Document" -toc 1
 ```
 
 ---
 
-### `mdhtml::exportFile mdFile outFile ?options?`
+### `mdstack::html::exportFile mdFile outFile ?options?`
 
 Reads a Markdown file, parses it, and writes HTML to the output file.
 
 ```tcl
-mdhtml::exportFile input.md output.html -title "Title" -toc 1
+mdstack::html::exportFile input.md output.html -title "Title" -toc 1
 ```
 
 ---
@@ -121,14 +121,14 @@ Four combinations are supported:
 
 | Combination | Result |
 |-------------|--------|
-| `-theme only` | Full CSS from `mdtheme::toCSS` |
+| `-theme only` | Full CSS from `mdstack::theme::toCSS` |
 | `-theme` + `-css` | Theme CSS as base + external overrides (recommended) |
 | `-css only` | External file only |
 | neither | Built-in responsive default CSS |
 
 ```tcl
 # Theme as base, custom overrides:
-set html [mdhtml::render $ast -theme hell -css custom.css]
+set html [mdstack::html::render $ast -theme hell -css custom.css]
 ```
 
 ```css
@@ -152,8 +152,8 @@ title: My Document
 ```
 
 ```tcl
-set ast  [mdparser::parse $md]
-set html [mdhtml::render $ast]   ;# title from frontmatter
+set ast  [mdstack::parser::parse $md]
+set html [mdstack::html::render $ast]   ;# title from frontmatter
 ```
 
 ---

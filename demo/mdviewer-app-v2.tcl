@@ -15,18 +15,23 @@
 #   wish mdviewer-app-v2.tcl [file.md]
 #
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
 
 package require Tk
-package require mdparser 0.2
-package require mdmodel 0.1
-package require mdviewer 0.3
-package require mdsearch 0.1
+package require mdstack::parser 0.2
+package require mdstack::model 0.1
+package require mdstack::viewer 0.3
+package require mdstack::search 0.1
 
 # PDF-Export optional
-set ::hasPdf  [expr {![catch {package require mdpdf  0.2}]}]
+set ::hasPdf  [expr {![catch {package require mdstack::pdf  0.2}]}]
 # HTML-Export optional
-set ::hasHtml [expr {![catch {package require mdhtml 0.1}]}]
+set ::hasHtml [expr {![catch {package require mdstack::html 0.1}]}]
 
 # ============================================================
 # Globale Variablen
@@ -155,7 +160,7 @@ pack .pw.toc.sb -side right -fill y
 ttk::frame .pw.viewer
 .pw add .pw.viewer -weight 1
 
-mdviewer::create .pw.viewer.v \
+mdstack::viewer::create .pw.viewer.v \
     -onlink cmd::handleLink \
     -onclick cmd::handleClick \
     -tablemode frame
@@ -214,8 +219,8 @@ proc cmd::loadFile {file} {
     }
 
     if {[catch {
-        set ast [mdparser::parse $content]
-        set ::currentDoc [mdmodel::new $ast]
+        set ast [mdstack::parser::parse $content]
+        set ::currentDoc [mdstack::model::new $ast]
     } err]} {
         tk_messageBox -icon error -message "Parse error:\n$err"
         set ::statusText "Parse error"
@@ -223,9 +228,9 @@ proc cmd::loadFile {file} {
     }
 
     # Configure viewer: root = file directory (for images)
-    mdviewer::configure .pw.viewer.v -root [file dirname $file]
-    mdviewer::renderModel .pw.viewer.v $::currentDoc
-    mdsearch::clearHighlight .pw.viewer.v
+    mdstack::viewer::configure .pw.viewer.v -root [file dirname $file]
+    mdstack::viewer::renderModel .pw.viewer.v $::currentDoc
+    mdstack::search::clearHighlight .pw.viewer.v
 
     cmd::updateTOC
     set ::statusText "[file tail $file]"
@@ -255,7 +260,7 @@ proc cmd::exportPdf {} {
 
     if {[catch {
         set ast [dict get $::currentDoc ast]
-        mdpdf::export $ast $outFile \
+        mdstack::pdf::export $ast $outFile \
             -title [file rootname [file tail $::currentFile]] \
             -toc 1 \
             -footer "- Page %p -" \
@@ -293,7 +298,7 @@ proc cmd::exportHtml {} {
 
     if {[catch {
         set ast [dict get $::currentDoc ast]
-        mdhtml::export $ast $outFile \
+        mdstack::html::export $ast $outFile \
             -title [file rootname [file tail $::currentFile]] \
             -toc 1
     } err]} {
@@ -324,7 +329,7 @@ proc cmd::updateTOC {} {
     $w tag configure toc3 -font "TkDefaultFont 9" -foreground #555555
     $w tag configure tochover -underline 1
 
-    set headings [mdmodel::headings $::currentDoc]
+    set headings [mdstack::model::headings $::currentDoc]
     set lineNum 1
     foreach h $headings {
         set level  [dict get $h level]
@@ -343,7 +348,7 @@ proc cmd::updateTOC {} {
         $w tag add $ctag "$lineNum.0" "$lineNum.end"
         $w tag configure $ctag -foreground #0066cc
         $w tag bind $ctag <Button-1> [list apply {{vp anchor} {
-            mdviewer::gotoAnchor $vp $anchor
+            mdstack::viewer::gotoAnchor $vp $anchor
         }} .pw.viewer.v $anchor]
         $w tag bind $ctag <Enter> [list $w tag add tochover "$lineNum.0" "$lineNum.end"]
         $w tag bind $ctag <Leave> [list $w tag remove tochover "$lineNum.0" "$lineNum.end"]
@@ -376,45 +381,45 @@ proc cmd::toggleSearch {} {
 
 proc cmd::hideSearch {} {
     pack forget .searchbar
-    mdsearch::clearHighlight .pw.viewer.v
+    mdstack::search::clearHighlight .pw.viewer.v
     set ::searchInfo ""
     set ::searchTerm ""
 }
 
 proc cmd::doSearch {} {
     if {$::searchTerm eq ""} {
-        mdsearch::clearHighlight .pw.viewer.v
+        mdstack::search::clearHighlight .pw.viewer.v
         set ::searchInfo ""
         return
     }
-    set matches [mdsearch::find .pw.viewer.v $::searchTerm]
+    set matches [mdstack::search::find .pw.viewer.v $::searchTerm]
     if {[llength $matches] > 0} {
-        mdsearch::next .pw.viewer.v
+        mdstack::search::next .pw.viewer.v
     }
     cmd::updateSearchInfo
 }
 
 proc cmd::searchNext {} {
-    if {[mdsearch::count .pw.viewer.v] == 0 && $::searchTerm ne ""} {
+    if {[mdstack::search::count .pw.viewer.v] == 0 && $::searchTerm ne ""} {
         cmd::doSearch
         return
     }
-    mdsearch::next .pw.viewer.v
+    mdstack::search::next .pw.viewer.v
     cmd::updateSearchInfo
 }
 
 proc cmd::searchPrev {} {
-    if {[mdsearch::count .pw.viewer.v] == 0 && $::searchTerm ne ""} {
+    if {[mdstack::search::count .pw.viewer.v] == 0 && $::searchTerm ne ""} {
         cmd::doSearch
         return
     }
-    mdsearch::prev .pw.viewer.v
+    mdstack::search::prev .pw.viewer.v
     cmd::updateSearchInfo
 }
 
 proc cmd::updateSearchInfo {} {
-    set total [mdsearch::count .pw.viewer.v]
-    set cur   [mdsearch::current .pw.viewer.v]
+    set total [mdstack::search::count .pw.viewer.v]
+    set cur   [mdstack::search::current .pw.viewer.v]
     if {$total > 0} {
         set ::searchInfo "$cur / $total"
     } elseif {$::searchTerm ne ""} {
@@ -437,13 +442,13 @@ proc cmd::setFontSize {size} {
 }
 
 proc cmd::applyFontSize {} {
-    mdviewer::setFontSize .pw.viewer.v $::fontSize
+    mdstack::viewer::setFontSize .pw.viewer.v $::fontSize
 }
 
 # --- Link-Handler ---
 
 proc cmd::handleLink {url} {
-    # Anchor-Links werden schon von mdviewer::dispatchLink behandelt.
+    # Anchor-Links werden schon von mdstack::viewer::dispatchLink behandelt.
     # Hier nur externe und relative Links.
     if {[string match "http*" $url]} {
         # Externer Link
@@ -569,17 +574,17 @@ Use ↑ and ↓ to navigate through matches.
 
 ### Inline
 
-Use `mdparser::parse` to parse and `mdviewer::render` to display.
+Use `mdstack::parser::parse` to parse and `mdstack::viewer::render` to display.
 
 ### Block
 
 ```tcl
-package require mdparser 0.2
-package require mdviewer 0.3
+package require mdstack::parser 0.2
+package require mdstack::viewer 0.3
 
-set ast [mdparser::parse $markdown]
-mdviewer::create .v -onlink myHandler
-mdviewer::render .v $ast
+set ast [mdstack::parser::parse $markdown]
+mdstack::viewer::create .v -onlink myHandler
+mdstack::viewer::render .v $ast
 ```
 
 ---
@@ -645,9 +650,9 @@ if {$argc > 0} {
     }
 } else {
     # Willkommensdokument anzeigen
-    set ast [mdparser::parse $::welcomeMd]
-    set ::currentDoc [mdmodel::new $ast]
-    mdviewer::renderModel .pw.viewer.v $::currentDoc
+    set ast [mdstack::parser::parse $::welcomeMd]
+    set ::currentDoc [mdstack::model::new $ast]
+    mdstack::viewer::renderModel .pw.viewer.v $::currentDoc
     cmd::updateTOC
     set ::statusText "Welcome – Ctrl+O to open"
 }

@@ -1,5 +1,4 @@
 # mdstacknoteskit-0.1.tm
-# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 # Adapter zwischen noteskit und mdstack
 #
 # Connects noteskit (Note management) mit mdstack (Editor-Orchestrator).
@@ -12,20 +11,20 @@
 # Usage:
 #   package require noteskit 0.1       ;# or source noteskit-minimal.tcl
 #   package require mdstack 0.1
-#   package require mdstacknoteskit 0.1
+#   package require mdstack::stacknoteskit 0.1
 #
 #   # Notiz laden → in mdstack pushen
-#   mdstacknoteskit::loadNote $noteId
+#   mdstack::stacknoteskit::loadNote $noteId
 #
 #   # Save changes
-#   mdstacknoteskit::saveCurrent
+#   mdstack::stacknoteskit::saveCurrent
 
-package provide mdstacknoteskit 0.1
+package provide mdstack::stacknoteskit 0.1
 
 package require mdstack 0.1
 # noteskit wird separat geladen (package oder source)
 
-namespace eval ::mdstacknoteskit {
+namespace eval ::mdstack::stacknoteskit {
     variable onSaveCallback ""
     variable onLoadCallback ""
     
@@ -37,7 +36,7 @@ namespace eval ::mdstacknoteskit {
 # Load Note → mdstack
 # =========================================================================
 
-proc ::mdstacknoteskit::loadNote {id} {
+proc ::mdstack::stacknoteskit::loadNote {id} {
     variable onLoadCallback
     
     # Notiz von noteskit laden
@@ -63,7 +62,7 @@ proc ::mdstacknoteskit::loadNote {id} {
     return $note
 }
 
-proc ::mdstacknoteskit::loadCurrent {} {
+proc ::mdstack::stacknoteskit::loadCurrent {} {
     if {![::noteskit::hasCurrentNote]} {
         return
     }
@@ -78,7 +77,7 @@ proc ::mdstacknoteskit::loadCurrent {} {
 # Save mdstack → noteskit
 # =========================================================================
 
-proc ::mdstacknoteskit::saveCurrent {} {
+proc ::mdstack::stacknoteskit::saveCurrent {} {
     variable onSaveCallback
     
     if {![::noteskit::hasCurrentNote]} {
@@ -108,7 +107,7 @@ proc ::mdstacknoteskit::saveCurrent {} {
     return $note
 }
 
-proc ::mdstacknoteskit::syncFromEditor {} {
+proc ::mdstack::stacknoteskit::syncFromEditor {} {
     # Gets current text from mdstack and updates noteskit::currentNote
     # (ohne zu speichern)
     
@@ -129,7 +128,7 @@ proc ::mdstacknoteskit::syncFromEditor {} {
 # New Note
 # =========================================================================
 
-proc ::mdstacknoteskit::newNote {{title "Neue Notiz"}} {
+proc ::mdstack::stacknoteskit::newNote {{title "Neue Notiz"}} {
     variable onLoadCallback
     
     # Create new note in noteskit
@@ -154,7 +153,7 @@ proc ::mdstacknoteskit::newNote {{title "Neue Notiz"}} {
 # Delete Note
 # =========================================================================
 
-proc ::mdstacknoteskit::deleteCurrent {} {
+proc ::mdstack::stacknoteskit::deleteCurrent {} {
     if {![::noteskit::hasCurrentNote]} {
         return
     }
@@ -173,12 +172,12 @@ proc ::mdstacknoteskit::deleteCurrent {} {
 # Callbacks
 # =========================================================================
 
-proc ::mdstacknoteskit::onSave {callback} {
+proc ::mdstack::stacknoteskit::onSave {callback} {
     variable onSaveCallback
     set onSaveCallback $callback
 }
 
-proc ::mdstacknoteskit::onLoad {callback} {
+proc ::mdstack::stacknoteskit::onLoad {callback} {
     variable onLoadCallback
     set onLoadCallback $callback
 }
@@ -187,10 +186,10 @@ proc ::mdstacknoteskit::onLoad {callback} {
 # mdstack Callback Integration
 # =========================================================================
 
-proc ::mdstacknoteskit::setupCallbacks {} {
+proc ::mdstack::stacknoteskit::setupCallbacks {} {
     # mdstack onsave Callback → noteskit speichern
     ::mdstack::onsave {
-        ::mdstacknoteskit::saveCurrent
+        ::mdstack::stacknoteskit::saveCurrent
     }
 }
 
@@ -198,7 +197,7 @@ proc ::mdstacknoteskit::setupCallbacks {} {
 # Convenience: list of all notes for UI
 # =========================================================================
 
-proc ::mdstacknoteskit::listNotes {{filter ""}} {
+proc ::mdstack::stacknoteskit::listNotes {{filter ""}} {
     set notes [::noteskit::list $filter]
     set result {}
     
@@ -221,15 +220,15 @@ proc ::mdstacknoteskit::listNotes {{filter ""}} {
 # Stack-Status
 # =========================================================================
 
-proc ::mdstacknoteskit::isCurrentModified {} {
+proc ::mdstack::stacknoteskit::isCurrentModified {} {
     return [::mdstack::modified]
 }
 
-proc ::mdstacknoteskit::currentNoteId {} {
+proc ::mdstack::stacknoteskit::currentNoteId {} {
     return [::mdstack::currentId]
 }
 
-proc ::mdstacknoteskit::currentNoteTitle {} {
+proc ::mdstack::stacknoteskit::currentNoteTitle {} {
     if {![::noteskit::hasCurrentNote]} {
         return ""
     }

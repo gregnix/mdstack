@@ -1,15 +1,15 @@
-# mdparser
+# mdstack::parser
 
 ## Purpose
 
-`mdparser` converts Markdown text into an **abstract syntax tree (AST)**.
+`mdstack::parser` converts Markdown text into an **abstract syntax tree (AST)**.
 
 The module:
 - is **stateless**
 - has **no GUI dependency**
 - produces **pure data**
 
-`mdparser` is the **only place** where Markdown syntax is interpreted.
+`mdstack::parser` is the **only place** where Markdown syntax is interpreted.
 
 ---
 
@@ -61,7 +61,7 @@ set md {1. First
    - Sub B
 2. Second}
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set lst [lindex [dict get $ast blocks] 0]
 # -> type=list style=ordered  items=2
 # -> item 0: blocks=[paragraph, list(unordered)]
@@ -120,12 +120,12 @@ This is a note block.
 
 ## Public API
 
-### `mdparser::parse markdown`
+### `mdstack::parser::parse markdown`
 
 Parses Markdown text and returns an AST.
 
 ```tcl
-set ast [mdparser::parse "# Title\n\nText."]
+set ast [mdstack::parser::parse "# Title\n\nText."]
 ```
 
 **Return value:** `dict` with keys `version`, `meta`, `reflinks`, `blocks`
@@ -137,7 +137,7 @@ set fd [open README.md r]
 fconfigure $fd -encoding utf-8
 set content [read $fd]
 close $fd
-set ast [mdparser::parse $content]
+set ast [mdstack::parser::parse $content]
 ```
 
 ---

@@ -93,25 +93,25 @@ with pdf4tcl 0.9.4.11 and the hyperlinkAdd support).
 
 ## PDF Export Options (mdpdf 0.2 / pdf4tcl 0.9.4.11)
 
-New options available via `mdpdf::export` and `mdpdf::exportFile`:
+New options available via `mdstack::pdf::export` and `mdstack::pdf::exportFile`:
 
 PDF/A archiving mode:
 
 ```tcl
-mdpdf::exportFile input.md output.pdf -pdfa 1b
+mdstack::pdf::exportFile input.md output.pdf -pdfa 1b
 ```
 
 Password protection (AES-128):
 
 ```tcl
-mdpdf::exportFile input.md output.pdf -userpassword "secret"
-mdpdf::exportFile input.md output.pdf -ownerpassword "admin"
+mdstack::pdf::exportFile input.md output.pdf -userpassword "secret"
+mdstack::pdf::exportFile input.md output.pdf -ownerpassword "admin"
 ```
 
 Compression control:
 
 ```tcl
-mdpdf::exportFile input.md output.pdf -compress 0
+mdstack::pdf::exportFile input.md output.pdf -compress 0
 ```
 
 ## Images

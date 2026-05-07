@@ -10,10 +10,7 @@
 # ============================================================
 
 set scriptDir [file dirname [file normalize [info script]]]
-set libDir [file normalize [file join $scriptDir .. lib]]
-set vendorDir [file normalize [file join $scriptDir .. vendors tm]]
-tcl::tm::path add $libDir
-tcl::tm::path add $vendorDir
+source [file join $scriptDir _paths.tcl]
 package require pdf4tcllib 0.1
 
 catch {::pdf4tcllib::fonts::init}

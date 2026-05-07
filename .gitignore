@@ -5,3 +5,5 @@ demo/pdf
 test-toc.pdf
 test-emoji.pdf
 demo/html/
+# nogit -- local-only, not for repository
+nogit/

@@ -1,7 +1,7 @@
 #!/usr/bin/env tclsh
 # test-emoji-pdf.tcl
 # ============================================================
-# Testet Emoji-Darstellung in PDF via mdpdf::exportFile.
+# Testet Emoji-Darstellung in PDF via mdstack::pdf::exportFile.
 #
 # exportFile liest die .md Datei binaer und ersetzt Emoji-Bytes
 # BEVOR Tcl sie zu U+FFFD zerstoert.
@@ -11,12 +11,9 @@
 # ============================================================
 
 set scriptDir [file dirname [file normalize [info script]]]
-set libDir [file normalize [file join $scriptDir .. lib]]
-set vendorDir [file normalize [file join $scriptDir .. vendors tm]]
-tcl::tm::path add $libDir
-tcl::tm::path add $vendorDir
+source [file join $scriptDir _paths.tcl]
 
-package require mdpdf 0.2
+package require mdstack::pdf 0.2
 
 set mdFile [file join $scriptDir test-emoji.md]
 set outFile [file join $scriptDir test-emoji.pdf]
@@ -26,7 +23,7 @@ if {![file exists $mdFile]} {
     exit 1
 }
 
-mdpdf::exportFile $mdFile $outFile \
+mdstack::pdf::exportFile $mdFile $outFile \
     -title "Emoji/Unicode Test" \
     -header "Emoji-Test - Seite %p" \
     -footer "- %p -" \

@@ -21,9 +21,9 @@ It serves Markdown files as HTML on the fly.
 
 | Package | Version | Required |
 |---------|---------|----------|
-| `mdparser` | 0.2 | yes |
-| `mdhtml` | 0.1 | yes |
-| `mdtheme` | 0.1 | recommended |
+| `mdstack::parser` | 0.2 | yes |
+| `mdstack::html` | 0.1 | yes |
+| `mdstack::theme` | 0.1 | recommended |
 | `tls` | — | HTTPS only |
 
 ```bash

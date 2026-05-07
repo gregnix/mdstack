@@ -1,8 +1,8 @@
-# mdvalidator
+# mdstack::validator
 
 ## Purpose
 
-`mdvalidator` checks an AST produced by `mdparser` for structural
+`mdstack::validator` checks an AST produced by `mdstack::parser` for structural
 correctness. The module is **headless** (no Tk) and has no side effects.
 
 ---
@@ -16,28 +16,28 @@ correctness. The module is **headless** (no Tk) and has no side effects.
 
 ## Public API
 
-### `mdvalidator::validate ast ?-strict bool?`
+### `mdstack::validator::validate ast ?-strict bool?`
 
 Validates the AST and returns a list of error messages.
 Empty list = valid.
 
 ```tcl
-set errs [mdvalidator::validate $ast]
+set errs [mdstack::validator::validate $ast]
 if {[llength $errs] > 0} {
     puts "Errors:\n[join $errs \n]"
 }
 
 # Strict mode: unknown block types are errors (not warnings)
-set errs [mdvalidator::validate $ast -strict 1]
+set errs [mdstack::validator::validate $ast -strict 1]
 ```
 
-### `mdvalidator::report ast ?-strict bool?`
+### `mdstack::validator::report ast ?-strict bool?`
 
 Returns a formatted validation report as a string.
 
 ```tcl
-set ast [mdparser::parse "# Title\n\nText."]
-puts [mdvalidator::report $ast]
+set ast [mdstack::parser::parse "# Title\n\nText."]
+puts [mdstack::validator::report $ast]
 # -> "AST validation: ok (N nodes)"
 ```
 

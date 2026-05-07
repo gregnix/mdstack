@@ -3,7 +3,7 @@
 ## Purpose
 
 `mdhelp_pdf` exports the content of a rendered Tk text widget as PDF.
-Unlike `mdpdf` (AST-based), it works with the rendered widget content —
+Unlike `mdstack::pdf` (AST-based), it works with the rendered widget content —
 capturing frame tables, embedded images, and heading formatting from the viewer.
 
 Version 0.3 delegates PDF generation to pdf4tcllib.

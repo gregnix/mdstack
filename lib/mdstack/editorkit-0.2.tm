@@ -1,20 +1,19 @@
-# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 package require Tk
-package require mdtext   0.1
-package require mdparser 0.2
-package require mdmodel  0.1
-package require mdviewer 0.3
+package require mdstack::text   0.1
+package require mdstack::parser 0.2
+package require mdstack::model  0.1
+package require mdstack::viewer 0.3
 
-package provide mdeditorkit 0.2
+package provide mdstack::editorkit 0.2
 
-namespace eval mdeditorkit {
+namespace eval mdstack::editorkit {
     namespace export create settext gettext setmode mode model setmodel \
         getdocmodel configure cget widgets editor viewer ast
     variable state
     array set state {}
 }
 
-proc mdeditorkit::create {path args} {
+proc mdstack::editorkit::create {path args} {
     variable state
 
     ttk::frame $path
@@ -29,12 +28,12 @@ proc mdeditorkit::create {path args} {
     $pw add $left  -weight 1
     $pw add $right -weight 1
 
-    set ed [mdtext::create $left.ed]
+    set ed [mdstack::text::create $left.ed]
     pack $ed -fill both -expand 1
 
     # Right: preview + status
     set status [ttk::label $right.status -text "" -anchor w]
-    set view   [mdviewer::create $right.view -tablemode frame]
+    set view   [mdstack::viewer::create $right.view -tablemode frame]
     pack $status -side top -fill x
     pack $view   -side top -fill both -expand 1
 
@@ -53,34 +52,34 @@ proc mdeditorkit::create {path args} {
     set state($path,onchange) ""
 
     set state($path,ast) [dict create type document version 1 meta {} blocks {} reflinks {}]
-    set state($path,doc) [mdmodel::new $state($path,ast)]
+    set state($path,doc) [mdstack::model::new $state($path,ast)]
     set state($path,lasterror) ""
     set state($path,syncscroll) 1
 
     # Connect editor onchange
-    $ed onchange [list mdeditorkit::_onEditorChange $path]
+    $ed onchange [list mdstack::editorkit::_onEditorChange $path]
 
     # Sync-Scroll: Editor scrollt -> Preview scrollt proportional
-    set edText [mdtext::_t $ed]
-    set viewText [mdviewer::widget $view]
-    bind $edText <ButtonRelease-1> [list mdeditorkit::_syncScroll $path]
-    bind $edText <KeyRelease>      [list mdeditorkit::_syncScroll $path]
-    bind $edText <MouseWheel>      [list after 50 [list mdeditorkit::_syncScroll $path]]
+    set edText [mdstack::text::_t $ed]
+    set viewText [mdstack::viewer::widget $view]
+    bind $edText <ButtonRelease-1> [list mdstack::editorkit::_syncScroll $path]
+    bind $edText <KeyRelease>      [list mdstack::editorkit::_syncScroll $path]
+    bind $edText <MouseWheel>      [list after 50 [list mdstack::editorkit::_syncScroll $path]]
     # Linux: Button-4/5 for Scroll
-    bind $edText <Button-4>        [list after 50 [list mdeditorkit::_syncScroll $path]]
-    bind $edText <Button-5>        [list after 50 [list mdeditorkit::_syncScroll $path]]
+    bind $edText <Button-4>        [list after 50 [list mdstack::editorkit::_syncScroll $path]]
+    bind $edText <Button-5>        [list after 50 [list mdstack::editorkit::_syncScroll $path]]
 
     # Apply options
-    mdeditorkit::configure $path {*}$args
-    mdeditorkit::setmode $path $state($path,mode)
+    mdstack::editorkit::configure $path {*}$args
+    mdstack::editorkit::setmode $path $state($path,mode)
 
     # initial render
-    mdeditorkit::_reparseNow $path [mdtext::gettext $ed]
+    mdstack::editorkit::_reparseNow $path [mdstack::text::gettext $ed]
     return $path
 }
 
 # Return widget paths dict
-proc mdeditorkit::widgets {path} {
+proc mdstack::editorkit::widgets {path} {
     variable state
     return [dict create \
         panedwindow $state($path,pw) \
@@ -92,21 +91,21 @@ proc mdeditorkit::widgets {path} {
 }
 
 # Shortcut: editor widget path (mdtext instance)
-proc mdeditorkit::editor {path} {
+proc mdstack::editorkit::editor {path} {
     variable state
     return $state($path,editor)
 }
 
 # Shortcut: viewer widget path
-proc mdeditorkit::viewer {path} {
+proc mdstack::editorkit::viewer {path} {
     variable state
     return $state($path,viewer)
 }
 
-proc mdeditorkit::configure {path args} {
+proc mdstack::editorkit::configure {path args} {
     variable state
     if {[llength $args] == 0} { return }
-    if {[llength $args] % 2 != 0} { error "mdeditorkit::configure: expected key value pairs" }
+    if {[llength $args] % 2 != 0} { error "mdstack::editorkit::configure: expected key value pairs" }
 
     foreach {k v} $args {
         switch -- $k {
@@ -124,56 +123,56 @@ proc mdeditorkit::configure {path args} {
                 set state($path,onchange) $v
             }
             -onlink {
-                mdviewer::configure $state($path,viewer) -onlink $v
+                mdstack::viewer::configure $state($path,viewer) -onlink $v
             }
             -fontsize {
-                mdviewer::setFontSize $state($path,viewer) $v
+                mdstack::viewer::setFontSize $state($path,viewer) $v
             }
             -root {
-                mdviewer::configure $state($path,viewer) -root $v
+                mdstack::viewer::configure $state($path,viewer) -root $v
             }
             -syncscroll {
                 set state($path,syncscroll) [expr {!!$v}]
             }
             default {
-                error "mdeditorkit::configure: unknown option $k"
+                error "mdstack::editorkit::configure: unknown option $k"
             }
         }
     }
 }
 
-proc mdeditorkit::cget {path option} {
+proc mdstack::editorkit::cget {path option} {
     variable state
     switch -- $option {
         -debounce { return $state($path,debounce) }
         -mode     { return $state($path,mode) }
         -onerror  { return $state($path,onerror) }
         -onchange { return $state($path,onchange) }
-        default { error "mdeditorkit::cget: unknown option $option" }
+        default { error "mdstack::editorkit::cget: unknown option $option" }
     }
 }
 
-proc mdeditorkit::settext {path markdown} {
+proc mdstack::editorkit::settext {path markdown} {
     variable state
-    mdtext::settext $state($path,editor) $markdown
-    mdeditorkit::_reparseNow $path $markdown
+    mdstack::text::settext $state($path,editor) $markdown
+    mdstack::editorkit::_reparseNow $path $markdown
 }
 
-proc mdeditorkit::gettext {path} {
+proc mdstack::editorkit::gettext {path} {
     variable state
-    return [mdtext::gettext $state($path,editor)]
+    return [mdstack::text::gettext $state($path,editor)]
 }
 
-proc mdeditorkit::mode {path} {
+proc mdstack::editorkit::mode {path} {
     variable state
     return $state($path,mode)
 }
 
-proc mdeditorkit::setmode {path newMode} {
+proc mdstack::editorkit::setmode {path newMode} {
     variable state
     set newMode [string tolower $newMode]
     if {$newMode ni {edit preview split}} {
-        error "mdeditorkit::setmode: expected edit|preview|split"
+        error "mdstack::editorkit::setmode: expected edit|preview|split"
     }
     set state($path,mode) $newMode
 
@@ -199,37 +198,37 @@ proc mdeditorkit::setmode {path newMode} {
     }
 }
 
-proc mdeditorkit::model {path} {
+proc mdstack::editorkit::model {path} {
     variable state
     set ed $state($path,editor)
-    set t [mdtext::_t $ed]
+    set t [mdstack::text::_t $ed]
     return [dict create \
-        text      [mdtext::gettext $ed] \
+        text      [mdstack::text::gettext $ed] \
         dirty     [$ed modified] \
         cursor    [$t index insert] \
         selection [expr {[$t tag ranges sel] eq "" ? {} : [$t tag ranges sel]}]]
 }
 
-proc mdeditorkit::setmodel {path m} {
+proc mdstack::editorkit::setmodel {path m} {
     variable state
-    mdtext::settext $state($path,editor) [dict get $m text]
-    mdeditorkit::_reparseNow $path [dict get $m text]
+    mdstack::text::settext $state($path,editor) [dict get $m text]
+    mdstack::editorkit::_reparseNow $path [dict get $m text]
 }
 
-proc mdeditorkit::getdocmodel {path} {
+proc mdstack::editorkit::getdocmodel {path} {
     variable state
     return $state($path,doc)
 }
 
 # Return current AST
-proc mdeditorkit::ast {path} {
+proc mdstack::editorkit::ast {path} {
     variable state
     return $state($path,ast)
 }
 
 # --- Internal: editor changes ---
 
-proc mdeditorkit::_onEditorChange {path markdown} {
+proc mdstack::editorkit::_onEditorChange {path markdown} {
     variable state
 
     set cb $state($path,onchange)
@@ -246,20 +245,20 @@ proc mdeditorkit::_onEditorChange {path markdown} {
     }
 
     if {$state($path,debounce) == 0} {
-        mdeditorkit::_reparseNow $path $markdown
+        mdstack::editorkit::_reparseNow $path $markdown
         return
     }
 
-    set state($path,afterid) [after $state($path,debounce) [list mdeditorkit::_reparseNow $path $markdown]]
+    set state($path,afterid) [after $state($path,debounce) [list mdstack::editorkit::_reparseNow $path $markdown]]
 }
 
-proc mdeditorkit::_syncScroll {path} {
+proc mdstack::editorkit::_syncScroll {path} {
     variable state
     if {!$state($path,syncscroll)} return
     if {$state($path,mode) eq "edit"} return
 
-    set edText [mdtext::_t $state($path,editor)]
-    set viewText [mdviewer::widget $state($path,viewer)]
+    set edText [mdstack::text::_t $state($path,editor)]
+    set viewText [mdstack::viewer::widget $state($path,viewer)]
 
     # Proportionale Position im Editor
     set fraction [lindex [$edText yview] 0]
@@ -268,15 +267,15 @@ proc mdeditorkit::_syncScroll {path} {
     $viewText yview moveto $fraction
 }
 
-proc mdeditorkit::_reparseNow {path markdown} {
+proc mdstack::editorkit::_reparseNow {path markdown} {
     variable state
     set state($path,afterid) ""
 
     set ok 1
     set err ""
     if {[catch {
-        set ast [mdparser::parse $markdown]
-        set doc [mdmodel::new $ast]
+        set ast [mdstack::parser::parse $markdown]
+        set doc [mdstack::model::new $ast]
     } msg opts]} {
         set ok 0
         set err $msg
@@ -287,7 +286,7 @@ proc mdeditorkit::_reparseNow {path markdown} {
         set state($path,doc) $doc
         set state($path,lasterror) ""
         $state($path,status) configure -text ""
-        mdviewer::renderModel $state($path,viewer) $doc
+        mdstack::viewer::renderModel $state($path,viewer) $doc
     } else {
         set state($path,lasterror) $err
         $state($path,status) configure -text "Parse error: $err"

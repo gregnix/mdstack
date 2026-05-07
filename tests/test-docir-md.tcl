@@ -1,9 +1,20 @@
-# test-docir-md.tcl -- Tests for docir-md-0.1.tm
+# test-docir-md.tcl -- Tests for docir-md-source (DocIR-Quelle für Markdown)
+#
+# Lädt das docir-md-source-Modul aus dem separaten docir-Repo (per Loader).
+# Das Modul stellt ::docir::md::fromAst zur Verfügung — die mdstack-eigene
+# Kopie wurde gelöscht, das Modul kommt jetzt aus dem docir-Repo.
+#
 # Runs with tclsh (no Tk needed)
 
 set dir [file dirname [file normalize [info script]]]
-source [file join $dir .. lib mdparser-0.2.tm]
-source [file join $dir .. lib docir-md-0.1.tm]
+set projectRoot [file dirname $dir]
+
+# Pfade zu mdstack + docir konfigurieren
+source [file join $dir _paths.tcl]
+
+# Module via Standard Tcl Module System laden
+package require mdstack::parser
+package require docir::mdSource
 
 # Minimales Test-Framework
 set passed 0; set failed 0; set total 0
@@ -18,7 +29,7 @@ proc test {name body} {
 proc assert {cond msg} { if {![uplevel 1 [list expr $cond]]} { error $msg } }
 proc eq {a b msg} { if {$a ne $b} { error "$msg: got [list $a] expected [list $b]" } }
 
-proc ir {md} { docir::md::fromAst [mdparser::parse $md] }
+proc ir {md} { docir::md::fromAst [mdstack::parser::parse $md] }
 proc types {ir} {
     set t {}
     foreach n $ir { lappend t [dict get $n type] }
@@ -32,8 +43,12 @@ proc findFirst {ir type} {
 # ============================================================
 test "basic.doc_header" {
     set r [ir "# Hello"]
-    set h [lindex $r 0]
-    eq "doc_header" [dict get $h type] "erstes Node = doc_header"
+    # Seit irSchemaVersion: erster Block ist doc_meta, dann doc_header.
+    set m [lindex $r 0]
+    eq "doc_meta" [dict get $m type] "erstes Node = doc_meta"
+    eq 1 [dict get [dict get $m meta] irSchemaVersion] "irSchemaVersion=1"
+    set h [lindex $r 1]
+    eq "doc_header" [dict get $h type] "zweites Node = doc_header"
 }
 
 test "basic.heading_level" {
@@ -181,8 +196,11 @@ test "validate.all_nodes_have_type_content_meta" {
 test "yaml.frontmatter_title" {
     set md "---\ntitle: Mein Dokument\n---\n\n# Inhalt"
     set r [ir $md]
-    set h [lindex $r 0]
-    eq "doc_header" [dict get $h type] "doc_header"
+    # Seit irSchemaVersion: erster Block ist doc_meta, dann doc_header.
+    set m [lindex $r 0]
+    eq "doc_meta" [dict get $m type] "erstes Node = doc_meta"
+    set h [lindex $r 1]
+    eq "doc_header" [dict get $h type] "zweites Node = doc_header"
     set name [dict get [dict get $h meta] name]
     eq "Mein Dokument" $name "title aus frontmatter"
 }

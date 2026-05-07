@@ -1,4 +1,49 @@
-# Changelog
+## 2026-05-07 — Tcl module namespace refactor, pkgIndex convention, doc sync
+
+### What changed
+
+- **Big-bang namespace refactor**: all 14 sub-modules converted from
+  `::mdparser` etc. to the `::mdstack::*` scheme (`mdstack::parser`,
+  `mdstack::pdf`, `mdstack::viewer`, `mdstack::theme`, `mdstack::text`,
+  `mdstack::model`, `mdstack::validator`, `mdstack::outline`,
+  `mdstack::search`, `mdstack::contextmenu`, `mdstack::html`,
+  `mdstack::editorkit`, `mdstack::stacknoteskit`, `mdstack::uicontextmenu`).
+  Module name and Tcl namespace now match.
+- **Sub-directory layout**: `lib/mdparser-0.2.tm` →
+  `lib/mdstack/parser-0.2.tm`. Standard Tcl module mechanism via
+  `auto_path`. One `pkgIndex.tcl` per sub-directory.
+- **Makefile convention**: `install`, `install-user`, `pkgindex`, `test`.
+  `make install` installs modules to `/usr/local/lib/tcltk/mdstack/`.
+- **Table AST recursively structured** (Phase 4/A.3 with docir 0.5):
+  `mdparser` now produces the canonical `tableRow > tableCell` form,
+  consistent with the DocIR spec.
+- **Vendoring cleanup**: no more vendored dependencies; `docir`,
+  `pdf4tcllib`, `pdf4tcl` are loaded via standard `package require`.
+- **Doc sync after namespace refactor**: H1 titles, backticks and
+  `package require` lines in all manuals converted to the `mdstack::*`
+  scheme. Bug fix: triple prefix in `mdcontextmenu.md`
+  (`mdstack::mdstack::mdstack::uicontextmenu`) caused by `\b` regex greedy.
+
+### Tests
+532 ✓ unchanged.
+
+---
+
+## 2026-05-06 — Phase 2+3: DocIR cutover, mdhtml + mdpdf as adapters
+
+`mdhtml` and `mdpdf` have been thin adapters to the DocIR pipeline since
+this day (~600+1786 lines of legacy saved together). The DocIR modules
+were extracted into the separate `docir` repository; `mdstack` loads
+them via `docir-loader.tcl` (7 search strategies). Asset copy for images
+now also works inside tables. The `-root` option is forwarded for
+relative path resolution.
+
+### Bug fixes
+- `mdstack::pdf::_renderBlock`: missing heading case
+- mdhtml: asset copy for images inside table cells
+- mdpdf: `-root` forwarded for relative path resolution
+
+---
 
 ## Version 0.3.4 (2026-04-12)
 

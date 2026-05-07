@@ -1,5 +1,4 @@
 # mdcontextmenu-0.1.tm
-# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 # ------------------------------------------------------------
 # Context menus for Markdown editor
 # ------------------------------------------------------------
@@ -9,11 +8,11 @@
 #
 
 package require Tk
-package require uicontextmenu 0.1
+package require mdstack::uicontextmenu 0.1
 
-package provide mdcontextmenu 0.1
+package provide mdstack::contextmenu 0.1
 
-namespace eval mdcontextmenu {
+namespace eval mdstack::contextmenu {
     # Public API
     namespace export createEditorMenu createOutlineMenu attachToEditor attachToOutline
     # Exported for tests
@@ -28,22 +27,22 @@ namespace eval mdcontextmenu {
 # Editor context menu
 # ============================================================
 
-proc mdcontextmenu::createEditorMenu {} {
+proc mdstack::contextmenu::createEditorMenu {} {
     variable editorMenu
     
     if {$editorMenu ne "" && [winfo exists $editorMenu]} {
         return $editorMenu
     }
     
-    set editorMenu [uicontextmenu::create .mdEditorContextMenu -dynamic 1]
+    set editorMenu [mdstack::uicontextmenu::create .mdEditorContextMenu -dynamic 1]
     
     # Update handler for dynamic entries
-    uicontextmenu::setUpdateHandler $editorMenu [list mdcontextmenu::_updateEditorMenu]
+    mdstack::uicontextmenu::setUpdateHandler $editorMenu [list mdstack::contextmenu::_updateEditorMenu]
     
     return $editorMenu
 }
 
-proc mdcontextmenu::_updateEditorMenu {} {
+proc mdstack::contextmenu::_updateEditorMenu {} {
     variable editorMenu
     variable currentEditor
     
@@ -62,39 +61,39 @@ proc mdcontextmenu::_updateEditorMenu {} {
     set hasSelection [expr {[catch {$t index sel.first}] == 0}]
     
     # Edit group
-    uicontextmenu::addItem $editorMenu "Cut" \
-        -command [list mdcontextmenu::_cut $currentEditor] \
+    mdstack::uicontextmenu::addItem $editorMenu "Cut" \
+        -command [list mdstack::contextmenu::_cut $currentEditor] \
         -accelerator "Ctrl+X" \
         -state [expr {$hasSelection ? "normal" : "disabled"}]
     
-    uicontextmenu::addItem $editorMenu "Copy" \
-        -command [list mdcontextmenu::_copy $currentEditor] \
+    mdstack::uicontextmenu::addItem $editorMenu "Copy" \
+        -command [list mdstack::contextmenu::_copy $currentEditor] \
         -accelerator "Ctrl+C" \
         -state [expr {$hasSelection ? "normal" : "disabled"}]
     
-    uicontextmenu::addItem $editorMenu "Insert" \
-        -command [list mdcontextmenu::_paste $currentEditor] \
+    mdstack::uicontextmenu::addItem $editorMenu "Insert" \
+        -command [list mdstack::contextmenu::_paste $currentEditor] \
         -accelerator "Ctrl+V"
     
-    uicontextmenu::addSeparator $editorMenu
+    mdstack::uicontextmenu::addSeparator $editorMenu
     
     # Format group
-    uicontextmenu::addItem $editorMenu "Fett" \
+    mdstack::uicontextmenu::addItem $editorMenu "Fett" \
         -command [list $currentEditor wrap "**"] \
         -accelerator "Ctrl+B"
     
-    uicontextmenu::addItem $editorMenu "Kursiv" \
+    mdstack::uicontextmenu::addItem $editorMenu "Kursiv" \
         -command [list $currentEditor wrap "*"] \
         -accelerator "Ctrl+I"
     
-    uicontextmenu::addItem $editorMenu "Code" \
+    mdstack::uicontextmenu::addItem $editorMenu "Code" \
         -command [list $currentEditor wrap "`"] \
         -accelerator "Ctrl+`"
     
-    uicontextmenu::addItem $editorMenu "Durchgestrichen" \
+    mdstack::uicontextmenu::addItem $editorMenu "Durchgestrichen" \
         -command [list $currentEditor wrap "~~"]
     
-    uicontextmenu::addSeparator $editorMenu
+    mdstack::uicontextmenu::addSeparator $editorMenu
     
     # Headings submenu
     set headingMenu [menu $editorMenu.heading -tearoff 0]
@@ -115,34 +114,34 @@ proc mdcontextmenu::_updateEditorMenu {} {
     $listMenu add command -label "Quote" -command [list $currentEditor prefix "> "]
     $editorMenu add cascade -label "Liste / Zitat" -menu $listMenu
     
-    uicontextmenu::addSeparator $editorMenu
+    mdstack::uicontextmenu::addSeparator $editorMenu
     
     # Insert group
-    uicontextmenu::addItem $editorMenu "Insert Link..." \
-        -command [list mdcontextmenu::_insertLink $currentEditor] \
+    mdstack::uicontextmenu::addItem $editorMenu "Insert Link..." \
+        -command [list mdstack::contextmenu::_insertLink $currentEditor] \
         -accelerator "Ctrl+K"
     
-    uicontextmenu::addItem $editorMenu "Insert Image..." \
-        -command [list mdcontextmenu::_insertImage $currentEditor]
+    mdstack::uicontextmenu::addItem $editorMenu "Insert Image..." \
+        -command [list mdstack::contextmenu::_insertImage $currentEditor]
     
-    uicontextmenu::addItem $editorMenu "Insert Table..." \
-        -command [list mdcontextmenu::_insertTable $currentEditor]
+    mdstack::uicontextmenu::addItem $editorMenu "Insert Table..." \
+        -command [list mdstack::contextmenu::_insertTable $currentEditor]
     
-    uicontextmenu::addItem $editorMenu "Code-Block" \
+    mdstack::uicontextmenu::addItem $editorMenu "Code-Block" \
         -command [list $currentEditor codeblock]
     
-    uicontextmenu::addItem $editorMenu "Horizontale Linie" \
-        -command [list mdcontextmenu::_insertHR $currentEditor]
+    mdstack::uicontextmenu::addItem $editorMenu "Horizontale Linie" \
+        -command [list mdstack::contextmenu::_insertHR $currentEditor]
     
-    uicontextmenu::addSeparator $editorMenu
+    mdstack::uicontextmenu::addSeparator $editorMenu
     
     # Auswahl-Gruppe
-    uicontextmenu::addItem $editorMenu "Select All" \
-        -command [list mdcontextmenu::_selectAll $currentEditor] \
+    mdstack::uicontextmenu::addItem $editorMenu "Select All" \
+        -command [list mdstack::contextmenu::_selectAll $currentEditor] \
         -accelerator "Ctrl+A"
 }
 
-proc mdcontextmenu::attachToEditor {editor} {
+proc mdstack::contextmenu::attachToEditor {editor} {
     variable editorMenu
     variable currentEditor
     
@@ -152,13 +151,13 @@ proc mdcontextmenu::attachToEditor {editor} {
     # ($editor text returns the command, not the path)
     
     # Right-click binding
-    bind $editor <Button-3> [list mdcontextmenu::_showEditorMenu $editor %X %Y]
+    bind $editor <Button-3> [list mdstack::contextmenu::_showEditorMenu $editor %X %Y]
     
     # For macOS
-    bind $editor <Control-Button-1> [list mdcontextmenu::_showEditorMenu $editor %X %Y]
+    bind $editor <Control-Button-1> [list mdstack::contextmenu::_showEditorMenu $editor %X %Y]
 }
 
-proc mdcontextmenu::_showEditorMenu {editor x y} {
+proc mdstack::contextmenu::_showEditorMenu {editor x y} {
     variable editorMenu
     variable currentEditor
     
@@ -175,21 +174,21 @@ proc mdcontextmenu::_showEditorMenu {editor x y} {
 # Outline context menu
 # ============================================================
 
-proc mdcontextmenu::createOutlineMenu {} {
+proc mdstack::contextmenu::createOutlineMenu {} {
     variable outlineMenu
     
     if {$outlineMenu ne "" && [winfo exists $outlineMenu]} {
         return $outlineMenu
     }
     
-    set outlineMenu [uicontextmenu::create .mdOutlineContextMenu -dynamic 1]
+    set outlineMenu [mdstack::uicontextmenu::create .mdOutlineContextMenu -dynamic 1]
     
-    uicontextmenu::setUpdateHandler $outlineMenu [list mdcontextmenu::_updateOutlineMenu]
+    mdstack::uicontextmenu::setUpdateHandler $outlineMenu [list mdstack::contextmenu::_updateOutlineMenu]
     
     return $outlineMenu
 }
 
-proc mdcontextmenu::_updateOutlineMenu {} {
+proc mdstack::contextmenu::_updateOutlineMenu {} {
     variable outlineMenu
     variable currentOutline
     
@@ -202,57 +201,57 @@ proc mdcontextmenu::_updateOutlineMenu {} {
         return
     }
     
-    set tree [mdoutline::dispatch $currentOutline tree]
+    set tree [mdstack::outline::dispatch $currentOutline tree]
     set sel [$tree selection]
     set hasSelection [expr {$sel ne ""}]
     
-    uicontextmenu::addItem $outlineMenu "Go to Heading" \
-        -command [list mdoutline::gotoSelection $currentOutline] \
+    mdstack::uicontextmenu::addItem $outlineMenu "Go to Heading" \
+        -command [list mdstack::outline::gotoSelection $currentOutline] \
         -state [expr {$hasSelection ? "normal" : "disabled"}]
     
-    uicontextmenu::addSeparator $outlineMenu
+    mdstack::uicontextmenu::addSeparator $outlineMenu
     
     # Change heading level
     set levelMenu [menu $outlineMenu.level -tearoff 0]
     for {set i 1} {$i <= 6} {incr i} {
         $levelMenu add command -label "Ebene $i (H$i)" \
-            -command [list mdcontextmenu::_changeHeadingLevel $currentOutline $i]
+            -command [list mdstack::contextmenu::_changeHeadingLevel $currentOutline $i]
     }
     $outlineMenu add cascade -label "Change Level" -menu $levelMenu \
         -state [expr {$hasSelection ? "normal" : "disabled"}]
     
-    uicontextmenu::addSeparator $outlineMenu
+    mdstack::uicontextmenu::addSeparator $outlineMenu
     
-    uicontextmenu::addItem $outlineMenu "Alle aufklappen" \
-        -command [list mdcontextmenu::_expandAll $currentOutline]
+    mdstack::uicontextmenu::addItem $outlineMenu "Alle aufklappen" \
+        -command [list mdstack::contextmenu::_expandAll $currentOutline]
     
-    uicontextmenu::addItem $outlineMenu "Alle zuklappen" \
-        -command [list mdcontextmenu::_collapseAll $currentOutline]
+    mdstack::uicontextmenu::addItem $outlineMenu "Alle zuklappen" \
+        -command [list mdstack::contextmenu::_collapseAll $currentOutline]
     
-    uicontextmenu::addSeparator $outlineMenu
+    mdstack::uicontextmenu::addSeparator $outlineMenu
     
-    uicontextmenu::addItem $outlineMenu "Aktualisieren" \
-        -command [list mdoutline::refresh $currentOutline]
+    mdstack::uicontextmenu::addItem $outlineMenu "Aktualisieren" \
+        -command [list mdstack::outline::refresh $currentOutline]
 }
 
-proc mdcontextmenu::attachToOutline {outline} {
+proc mdstack::contextmenu::attachToOutline {outline} {
     variable outlineMenu
     variable currentOutline
     
     createOutlineMenu
     
-    set tree [mdoutline::dispatch $outline tree]
+    set tree [mdstack::outline::dispatch $outline tree]
     
-    bind $tree <Button-3> [list mdcontextmenu::_showOutlineMenu $outline %X %Y %x %y]
-    bind $tree <Control-Button-1> [list mdcontextmenu::_showOutlineMenu $outline %X %Y %x %y]
+    bind $tree <Button-3> [list mdstack::contextmenu::_showOutlineMenu $outline %X %Y %x %y]
+    bind $tree <Control-Button-1> [list mdstack::contextmenu::_showOutlineMenu $outline %X %Y %x %y]
 }
 
-proc mdcontextmenu::_showOutlineMenu {outline X Y x y} {
+proc mdstack::contextmenu::_showOutlineMenu {outline X Y x y} {
     variable outlineMenu
     variable currentOutline
     
     set currentOutline $outline
-    set tree [mdoutline::dispatch $outline tree]
+    set tree [mdstack::outline::dispatch $outline tree]
     
     # Select item under cursor
     set item [$tree identify item $x $y]
@@ -269,7 +268,7 @@ proc mdcontextmenu::_showOutlineMenu {outline X Y x y} {
 # Editor-Aktionen
 # ============================================================
 
-proc mdcontextmenu::_cut {editor} {
+proc mdstack::contextmenu::_cut {editor} {
     set t [$editor text]
     if {![catch {$t index sel.first}]} {
         clipboard clear
@@ -278,7 +277,7 @@ proc mdcontextmenu::_cut {editor} {
     }
 }
 
-proc mdcontextmenu::_copy {editor} {
+proc mdstack::contextmenu::_copy {editor} {
     set t [$editor text]
     if {![catch {$t index sel.first}]} {
         clipboard clear
@@ -286,7 +285,7 @@ proc mdcontextmenu::_copy {editor} {
     }
 }
 
-proc mdcontextmenu::_paste {editor} {
+proc mdstack::contextmenu::_paste {editor} {
     set t [$editor text]
     if {![catch {set text [clipboard get]}]} {
         if {![catch {$t index sel.first}]} {
@@ -296,12 +295,12 @@ proc mdcontextmenu::_paste {editor} {
     }
 }
 
-proc mdcontextmenu::_selectAll {editor} {
+proc mdstack::contextmenu::_selectAll {editor} {
     set t [$editor text]
     $t tag add sel 1.0 end-1c
 }
 
-proc mdcontextmenu::_insertLink {editor} {
+proc mdstack::contextmenu::_insertLink {editor} {
     set url [_inputDialog "Insert Link" "URL:"]
     if {$url eq ""} return
     
@@ -312,7 +311,7 @@ proc mdcontextmenu::_insertLink {editor} {
     $t insert insert "\[$text\]($url)"
 }
 
-proc mdcontextmenu::_insertImage {editor} {
+proc mdstack::contextmenu::_insertImage {editor} {
     set file [tk_getOpenFile \
         -title "Choose Image" \
         -filetypes {
@@ -329,7 +328,7 @@ proc mdcontextmenu::_insertImage {editor} {
     $t insert insert "!\[$alt\]($file)"
 }
 
-proc mdcontextmenu::_insertTable {editor} {
+proc mdstack::contextmenu::_insertTable {editor} {
     set cols [_inputDialog "Tabelle" "Spalten:" "3"]
     if {$cols eq "" || ![string is integer $cols]} return
     
@@ -339,7 +338,7 @@ proc mdcontextmenu::_insertTable {editor} {
     $editor table $cols $rows
 }
 
-proc mdcontextmenu::_insertHR {editor} {
+proc mdstack::contextmenu::_insertHR {editor} {
     set t [$editor text]
     $t insert insert "\n---\n"
 }
@@ -348,8 +347,8 @@ proc mdcontextmenu::_insertHR {editor} {
 # Outline-Aktionen
 # ============================================================
 
-proc mdcontextmenu::_changeHeadingLevel {outline newLevel} {
-    set tree [mdoutline::dispatch $outline tree]
+proc mdstack::contextmenu::_changeHeadingLevel {outline newLevel} {
+    set tree [mdstack::outline::dispatch $outline tree]
     set sel [$tree selection]
     if {$sel eq ""} return
     
@@ -357,7 +356,7 @@ proc mdcontextmenu::_changeHeadingLevel {outline newLevel} {
     if {[llength $values] == 0} return
     
     set idx [lindex $values 0]
-    set editor [mdoutline::dispatch $outline editor]
+    set editor [mdstack::outline::dispatch $outline editor]
     set t [$editor text]
     
     # Get line
@@ -378,31 +377,31 @@ proc mdcontextmenu::_changeHeadingLevel {outline newLevel} {
     $t insert $lineStart $newLine
     
     # Update outline
-    mdoutline::refresh $outline
+    mdstack::outline::refresh $outline
 }
 
-proc mdcontextmenu::_expandAll {outline} {
-    set tree [mdoutline::dispatch $outline tree]
+proc mdstack::contextmenu::_expandAll {outline} {
+    set tree [mdstack::outline::dispatch $outline tree]
     foreach item [$tree children {}] {
         _expandItem $tree $item
     }
 }
 
-proc mdcontextmenu::_expandItem {tree item} {
+proc mdstack::contextmenu::_expandItem {tree item} {
     $tree item $item -open 1
     foreach child [$tree children $item] {
         _expandItem $tree $child
     }
 }
 
-proc mdcontextmenu::_collapseAll {outline} {
-    set tree [mdoutline::dispatch $outline tree]
+proc mdstack::contextmenu::_collapseAll {outline} {
+    set tree [mdstack::outline::dispatch $outline tree]
     foreach item [$tree children {}] {
         _collapseItem $tree $item
     }
 }
 
-proc mdcontextmenu::_collapseItem {tree item} {
+proc mdstack::contextmenu::_collapseItem {tree item} {
     $tree item $item -open 0
     foreach child [$tree children $item] {
         _collapseItem $tree $child
@@ -413,7 +412,7 @@ proc mdcontextmenu::_collapseItem {tree item} {
 # Hilfs-Dialog
 # ============================================================
 
-proc mdcontextmenu::_inputDialog {title prompt {default ""}} {
+proc mdstack::contextmenu::_inputDialog {title prompt {default ""}} {
     set w .mdcontextmenu_input
     catch {destroy $w}
     
@@ -443,17 +442,17 @@ proc mdcontextmenu::_inputDialog {title prompt {default ""}} {
     pack $w.f.lbl -anchor w
     pack $w.f.entry -fill x -pady 5
     
-    set ::mdcontextmenu::_dialogResult ""
+    set ::mdstack::contextmenu::_dialogResult ""
     
     ttk::frame $w.f.btns
     pack $w.f.btns -fill x
     
     ttk::button $w.f.btns.ok -text "OK" -command {
-        set ::mdcontextmenu::_dialogResult [.mdcontextmenu_input.f.entry get]
+        set ::mdstack::contextmenu::_dialogResult [.mdcontextmenu_input.f.entry get]
         destroy .mdcontextmenu_input
     }
     ttk::button $w.f.btns.cancel -text "Abbrechen" -command {
-        set ::mdcontextmenu::_dialogResult ""
+        set ::mdstack::contextmenu::_dialogResult ""
         destroy .mdcontextmenu_input
     }
     pack $w.f.btns.ok $w.f.btns.cancel -side left -padx 5
@@ -465,5 +464,5 @@ proc mdcontextmenu::_inputDialog {title prompt {default ""}} {
     grab set $w
     tkwait window $w
     
-    return $::mdcontextmenu::_dialogResult
+    return $::mdstack::contextmenu::_dialogResult
 }

@@ -14,13 +14,18 @@
 #
 # Without argument, demo-tip700.md is loaded.
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
 
 package require Tk
-package require mdparser 0.2
-package require mdmodel 0.1
-package require mdviewer 0.3
-package require mdvalidator 0.1
+package require mdstack::parser 0.2
+package require mdstack::model 0.1
+package require mdstack::viewer 0.3
+package require mdstack::validator 0.1
 
 # ============================================================
 # Global Variables
@@ -150,7 +155,7 @@ bind .pw.toc.list <<ListboxSelect>> cmd::tocSelect
 ttk::frame .pw.viewer
 .pw add .pw.viewer -weight 1
 
-mdviewer::create .pw.viewer.v -fontsize $::fontSize -tablemode frame
+mdstack::viewer::create .pw.viewer.v -fontsize $::fontSize -tablemode frame
 pack .pw.viewer.v -fill both -expand 1
 
 # ============================================================
@@ -190,8 +195,8 @@ proc cmd::loadFile {file} {
     }
 
     if {[catch {
-        set ::ast [mdparser::parse $content]
-        set ::doc [mdmodel::new $::ast]
+        set ::ast [mdstack::parser::parse $content]
+        set ::doc [mdstack::model::new $::ast]
     } err]} {
         tk_messageBox -icon error -message "Parse error:\n$err"
         set ::statusText "Parse error"
@@ -202,9 +207,9 @@ proc cmd::loadFile {file} {
     cmd::updateMeta
 
     # Render
-    mdviewer::configure .pw.viewer.v -root [file dirname $file]
-    mdviewer::configure .pw.viewer.v -fontsize $::fontSize
-    mdviewer::renderModel .pw.viewer.v $::doc
+    mdstack::viewer::configure .pw.viewer.v -root [file dirname $file]
+    mdstack::viewer::configure .pw.viewer.v -fontsize $::fontSize
+    mdstack::viewer::renderModel .pw.viewer.v $::doc
 
     # Apply TIP-700-Styling
     cmd::applyTip700Styling
@@ -215,7 +220,7 @@ proc cmd::loadFile {file} {
     # Statistics
     set nBlocks [llength [dict get $::ast blocks]]
     set nRefs [dict size [dict get $::ast reflinks]]
-    set errs [mdvalidator::validate $::ast]
+    set errs [mdstack::validator::validate $::ast]
     set valid [expr {[llength $errs] == 0 ? "valid" : "[llength $errs] errors"}]
 
     set ::statusText "[file tail $file] | $nBlocks blocks | $nRefs refs | $valid"
@@ -236,7 +241,7 @@ proc cmd::updateMeta {} {
 }
 
 proc cmd::applyTip700Styling {} {
-    set t [mdviewer::widget .pw.viewer.v]
+    set t [mdstack::viewer::widget .pw.viewer.v]
     set baseSize $::fontSize
 
     # Configure Span classes
@@ -281,7 +286,7 @@ proc cmd::updateTOC {} {
     set ::tocAnchors {}
     if {![info exists ::doc] || $::doc eq ""} return
 
-    foreach h [mdmodel::headings $::doc] {
+    foreach h [mdstack::model::headings $::doc] {
         set level [dict get $h level]
         set text [dict get $h text]
         set anchor [dict get $h anchor]
@@ -296,13 +301,13 @@ proc cmd::tocSelect {} {
     set sel [.pw.toc.list curselection]
     if {$sel eq ""} return
     set anchor [lindex $::tocAnchors $sel]
-    mdviewer::gotoAnchor .pw.viewer.v $anchor
+    mdstack::viewer::gotoAnchor .pw.viewer.v $anchor
 }
 
 proc cmd::applyFontSize {} {
     if {$::currentFile ne ""} {
-        mdviewer::configure .pw.viewer.v -fontsize $::fontSize
-        mdviewer::renderModel .pw.viewer.v $::doc
+        mdstack::viewer::configure .pw.viewer.v -fontsize $::fontSize
+        mdstack::viewer::renderModel .pw.viewer.v $::doc
         cmd::applyTip700Styling
     }
 }
@@ -312,8 +317,8 @@ proc cmd::validateAst {} {
         tk_messageBox -icon info -message "No document loaded."
         return
     }
-    set normal [mdvalidator::report $::ast]
-    set strict [mdvalidator::report $::ast -strict]
+    set normal [mdstack::validator::report $::ast]
+    set strict [mdstack::validator::report $::ast -strict]
     tk_messageBox -icon info -title "AST Validation" \
         -message "Normal:\n$normal\n\nStrict:\n$strict"
 }

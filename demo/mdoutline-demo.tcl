@@ -6,11 +6,16 @@
 
 set appDir [file dirname [file normalize [info script]]]
 set libDir [file join [file dirname $appDir] lib]
-tcl::tm::path add $libDir
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
 
 package require Tk 8.6-
-package require mdtext     0.1
-package require mdoutline  0.1
+package require mdstack::text     0.1
+package require mdstack::outline  0.1
 
 # --- Test Document ---
 set markdown {# Main Heading
@@ -73,11 +78,11 @@ ttk::panedwindow .pw -orient horizontal
 pack .pw -fill both -expand 1
 
 # Editor (mdtext)
-set ed [mdtext::create .pw.editor]
+set ed [mdstack::text::create .pw.editor]
 .pw add .pw.editor -weight 1
 
 # Outline (left)
-set outline [mdoutline::create .pw.outline -editor $ed]
+set outline [mdstack::outline::create .pw.outline -editor $ed]
 .pw add .pw.outline -weight 0
 
 # Order: Outline left
@@ -87,16 +92,16 @@ set outline [mdoutline::create .pw.outline -editor $ed]
 .pw add .pw.editor -weight 1
 
 # Set text
-set t [mdtext::_t $ed]
+set t [mdstack::text::_t $ed]
 $t insert end $markdown
 $t mark set insert 1.0
 $t see 1.0
 
 # Fill outline
-mdoutline::refresh $outline
+mdstack::outline::refresh $outline
 
 # Update outline on changes
-bind $t <KeyRelease> [list after idle [list mdoutline::refresh $outline]]
+bind $t <KeyRelease> [list after idle [list mdstack::outline::refresh $outline]]
 
 ttk::label .info -text "Click on heading in outline jumps to the line." \
     -foreground "#666666"

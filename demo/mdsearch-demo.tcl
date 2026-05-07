@@ -1,14 +1,19 @@
 #!/usr/bin/env wish
 # Demo: mdsearch – Full-text search with highlight
 #
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
 package require Tk
 
 set dir [file dirname [file normalize [info script]]]
-tcl::tm::path add [file join $dir .. lib]
-
-package require mdparser 0.2
-package require mdviewer 0.3
-package require mdsearch 0.1
+package require mdstack::parser 0.2
+package require mdstack::viewer 0.3
+package require mdstack::search 0.1
 
 set md {# Tcl/Tk Reference
 
@@ -88,15 +93,15 @@ ttk::label .top.lbl -text "Search:"
 ttk::entry .top.entry -width 30 -textvariable ::searchTerm
 ttk::button .top.find -text "Find" -command doSearch
 ttk::button .top.next -text "↓" -width 3 -command {
-    set n [mdsearch::next .v]
+    set n [mdstack::search::next .v]
     updateStatus
 }
 ttk::button .top.prev -text "↑" -width 3 -command {
-    set n [mdsearch::prev .v]
+    set n [mdstack::search::prev .v]
     updateStatus
 }
 ttk::button .top.clear -text "✕" -width 3 -command {
-    mdsearch::clearHighlight .v
+    mdstack::search::clearHighlight .v
     set ::searchTerm ""
     set ::statusText ""
 }
@@ -109,16 +114,16 @@ pack .top -side top -fill x
 bind .top.entry <Return> doSearch
 
 proc doSearch {} {
-    set matches [mdsearch::find .v $::searchTerm]
+    set matches [mdstack::search::find .v $::searchTerm]
     if {[llength $matches] > 0} {
-        mdsearch::next .v
+        mdstack::search::next .v
     }
     updateStatus
 }
 
 proc updateStatus {} {
-    set total [mdsearch::count .v]
-    set cur [mdsearch::current .v]
+    set total [mdstack::search::count .v]
+    set cur [mdstack::search::current .v]
     if {$total > 0} {
         set ::statusText "$cur / $total"
     } elseif {$::searchTerm ne ""} {
@@ -129,11 +134,11 @@ proc updateStatus {} {
 }
 
 # Viewer
-mdviewer::create .v
+mdstack::viewer::create .v
 pack .v -fill both -expand 1
 
-set ast [mdparser::parse $md]
-mdviewer::render .v $ast
+set ast [mdstack::parser::parse $md]
+mdstack::viewer::render .v $ast
 
 wm title . "mdsearch Demo"
 wm geometry . 700x600

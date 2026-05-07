@@ -5,7 +5,7 @@
 set dir [file dirname [file normalize [info script]]]
 tcl::tm::path add [file join $dir .. lib]
 
-package require mdparser 0.2
+package require mdstack::parser 0.2
 
 set total 0; set passed 0; set failed 0
 
@@ -24,7 +24,7 @@ proc assert {testName condition} {
 # =========================================================================
 
 proc getInlines {md} {
-    set ast [mdparser::parse $md]
+    set ast [mdstack::parser::parse $md]
     set block [lindex [dict get $ast blocks] 0]
     return [dict get $block content]
 }
@@ -135,7 +135,7 @@ set md {See the [encoding] command.
 [encoding]: encoding.md
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set para [lindex [dict get $ast blocks] 0]
 set inlines [dict get $para content]
 
@@ -160,7 +160,7 @@ set md {Use [lsort] for sorting.
 [lsort]: lsort.md "List Sort Command"
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set para [lindex [dict get $ast blocks] 0]
 set inlines [dict get $para content]
 set linkNode ""
@@ -176,7 +176,7 @@ assert "G3: title preserved" {[dict get $linkNode title] eq "List Sort Command"}
 # =========================================================================
 
 set md {The [unknown] command is not defined as reflink.}
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set para [lindex [dict get $ast blocks] 0]
 set inlines [dict get $para content]
 
@@ -220,7 +220,7 @@ set md {Both [encoding] and [binary scan][binary] work.
 [encoding]: encoding.md
 [binary]: binary.md
 }
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set para [lindex [dict get $ast blocks] 0]
 set inlines [dict get $para content]
 set links {}

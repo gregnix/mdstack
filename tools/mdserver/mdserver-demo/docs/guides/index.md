@@ -72,7 +72,7 @@ h1   { color: #8b0000; }
 Im Code (Theme als Basis + Overrides):
 
 ```tcl
-set html [mdhtml::render $ast -theme hell -css custom.css]
+set html [mdstack::html::render $ast -theme hell -css custom.css]
 ```
 
 ## index.md als Startseite

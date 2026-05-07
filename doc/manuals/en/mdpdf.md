@@ -1,10 +1,10 @@
-# mdpdf
+# mdstack::pdf
 
 > Version 0.2 – pdf4tcllib backend
 
 ## Purpose
 
-`mdpdf` exports Markdown documents as PDF files.
+`mdstack::pdf` exports Markdown documents as PDF files.
 
 The module:
 - converts a Markdown AST or model to PDF
@@ -41,14 +41,14 @@ The module:
 - Tcl ≥ 8.6
 - pdf4tcl 0.9+
 - pdf4tcllib 0.1
-- mdparser 0.2 (optional, for AST input)
-- mdmodel 0.1 (optional, for model input)
+- mdstack::parser 0.2 (optional, for AST input)
+- mdstack::model 0.1 (optional, for model input)
 
 ---
 
 ## Public API
 
-### `mdpdf::exportFile mdFile outputFile ?options?`
+### `mdstack::pdf::exportFile mdFile outputFile ?options?`
 
 Reads a Markdown file and exports it as PDF.
 **Recommended API for files with Emojis and special characters.**
@@ -57,9 +57,9 @@ Reads the file binary and replaces Emoji bytes (4-byte UTF-8) with
 ASCII fallbacks before Tcl 8.6 can corrupt them to U+FFFD.
 
 ```tcl
-package require mdpdf 0.2
+package require mdstack::pdf 0.2
 
-mdpdf::exportFile "input.md" "output.pdf" \
+mdstack::pdf::exportFile "input.md" "output.pdf" \
     -title "Documentation" \
     -toc 1 \
     -fontsize 11 \
@@ -68,24 +68,24 @@ mdpdf::exportFile "input.md" "output.pdf" \
 
 ---
 
-### `mdpdf::export ast outputFile ?options?`
+### `mdstack::pdf::export ast outputFile ?options?`
 
 Exports an AST as PDF.
 
 ```tcl
-set ast [mdparser::parse $markdown]
-mdpdf::export $ast "output.pdf" -title "Documentation" -toc 1
+set ast [mdstack::parser::parse $markdown]
+mdstack::pdf::export $ast "output.pdf" -title "Documentation" -toc 1
 ```
 
 ---
 
-### `mdpdf::exportModel doc outputFile ?options?`
+### `mdstack::pdf::exportModel doc outputFile ?options?`
 
-Exports an mdmodel document model as PDF.
+Exports an mdstack::model document model as PDF.
 
 ```tcl
-set doc [mdmodel::new $ast]
-mdpdf::exportModel $doc "output.pdf" -title "Documentation"
+set doc [mdstack::model::new $ast]
+mdstack::pdf::exportModel $doc "output.pdf" -title "Documentation"
 ```
 
 ---
@@ -108,16 +108,16 @@ mdpdf::exportModel $doc "output.pdf" -title "Documentation"
 | `-pdfa` | `""` | PDF/A conformance: `1b`, `2b` (pdf4tcl 0.9.4.11+) |
 | `-userpassword` | `""` | AES-128 user password |
 | `-ownerpassword` | `""` | AES-128 owner password |
-| `-theme` | `""` | mdtheme name: `hell`, `dunkel`, `solarized` |
+| `-theme` | `""` | mdstack::theme name: `hell`, `dunkel`, `solarized` |
 
 ---
 
-### `mdpdf::configure ?options?`
+### `mdstack::pdf::configure ?options?`
 
 Sets global defaults.
 
 ```tcl
-mdpdf::configure -fontsize 12 -margin 60
+mdstack::pdf::configure -fontsize 12 -margin 60
 ```
 
 ---
@@ -131,22 +131,22 @@ Markdown links `[Label](URL)` are embedded as clickable PDF annotations.
 ### PDF/A export (0.2)
 
 ```tcl
-mdpdf::export $ast output.pdf -pdfa 1b  ;# PDF/A-1b
-mdpdf::export $ast output.pdf -pdfa 2b  ;# PDF/A-2b
+mdstack::pdf::export $ast output.pdf -pdfa 1b  ;# PDF/A-1b
+mdstack::pdf::export $ast output.pdf -pdfa 2b  ;# PDF/A-2b
 ```
 
 ### Encryption (0.2)
 
 ```tcl
-mdpdf::export $ast output.pdf -userpassword "secret"
-mdpdf::export $ast output.pdf -ownerpassword "admin"
+mdstack::pdf::export $ast output.pdf -userpassword "secret"
+mdstack::pdf::export $ast output.pdf -ownerpassword "admin"
 ```
 
 ### Theme support (0.2)
 
 ```tcl
-mdpdf::export $ast output.pdf -theme hell
-mdpdf::export $ast output.pdf -theme dunkel
+mdstack::pdf::export $ast output.pdf -theme hell
+mdstack::pdf::export $ast output.pdf -theme dunkel
 ```
 
 ---
@@ -163,4 +163,4 @@ mdpdf::export $ast output.pdf -theme dunkel
 
 - [mdhelp_pdf](mdhelp_pdf.md) – widget-based PDF export
 - [pdf4tcllib](pdf4tcllib.md) – PDF extension library
-- [mdparser](mdparser.md) – Markdown parser
+- [mdstack::parser](mdparser.md) – Markdown parser

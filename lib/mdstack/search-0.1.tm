@@ -1,39 +1,38 @@
 # mdsearch-0.1.tm
-# (c) 2026 Gregor Ebbing -- MIT License (see LICENSE)
 # ============================================================
 # Full-text search for mdstack
 # ============================================================
 # Search in viewer widget with highlighting and navigation.
 #
 # API:
-#   mdsearch::find $viewerPath $pattern      → List of match positions
-#   mdsearch::next $viewerPath               → jumps to next match
-#   mdsearch::prev $viewerPath               → jumps to previous match
-#   mdsearch::clearHighlight $viewerPath     → removes all highlights
-#   mdsearch::count $viewerPath              → Number of current matches
-#   mdsearch::current $viewerPath            → Index of current match (1-based)
+#   mdstack::search::find $viewerPath $pattern      → List of match positions
+#   mdstack::search::next $viewerPath               → jumps to next match
+#   mdstack::search::prev $viewerPath               → jumps to previous match
+#   mdstack::search::clearHighlight $viewerPath     → removes all highlights
+#   mdstack::search::count $viewerPath              → Number of current matches
+#   mdstack::search::current $viewerPath            → Index of current match (1-based)
 #
 # Tags:
 #   searchmatch   – Background for all matches
 #   searchcurrent – Background for current match
 #
 # Example:
-#   package require mdsearch 0.1
-#   set n [mdsearch::find .v "Tcl"]
+#   package require mdstack::search 0.1
+#   set n [mdstack::search::find .v "Tcl"]
 #   puts "[llength $n] matches found"
-#   mdsearch::next .v   ;# to first/next match
+#   mdstack::search::next .v   ;# to first/next match
 #
 
 package require Tk
-package provide mdsearch 0.1
+package provide mdstack::search 0.1
 
-namespace eval mdsearch {
+namespace eval mdstack::search {
     namespace export find next prev clearHighlight count current
     variable state
     # Pro Widget: matches (Positionsliste), currentIdx (0-based, -1=none)
 }
 
-proc mdsearch::_initTags {t} {
+proc mdstack::search::_initTags {t} {
     # Configure tags only once
     if {"searchmatch" ni [$t tag names]} {
         $t tag configure searchmatch -background #FFEB3B -foreground #000000
@@ -43,14 +42,14 @@ proc mdsearch::_initTags {t} {
     }
 }
 
-proc mdsearch::find {viewerPath pattern} {
+proc mdstack::search::find {viewerPath pattern} {
     # Sucht pattern im Viewer-Text-Widget.
     # Returns list of match start positions.
     variable state
 
-    set t [mdviewer::widget $viewerPath]
-    mdsearch::clearHighlight $viewerPath
-    mdsearch::_initTags $t
+    set t [mdstack::viewer::widget $viewerPath]
+    mdstack::search::clearHighlight $viewerPath
+    mdstack::search::_initTags $t
 
     if {$pattern eq ""} {
         return {}
@@ -75,7 +74,7 @@ proc mdsearch::find {viewerPath pattern} {
     return $matches
 }
 
-proc mdsearch::next {viewerPath} {
+proc mdstack::search::next {viewerPath} {
     # Jumps to next match. Wraps around.
     # Returns 1-based index, or 0 if no matches.
     variable state
@@ -88,11 +87,11 @@ proc mdsearch::next {viewerPath} {
     incr idx
     if {$idx >= [llength $matches]} { set idx 0 }
 
-    mdsearch::_gotoIdx $viewerPath $idx
+    mdstack::search::_gotoIdx $viewerPath $idx
     return [expr {$idx + 1}]
 }
 
-proc mdsearch::prev {viewerPath} {
+proc mdstack::search::prev {viewerPath} {
     # Jumps to previous match. Wraps around.
     variable state
 
@@ -104,15 +103,15 @@ proc mdsearch::prev {viewerPath} {
     incr idx -1
     if {$idx < 0} { set idx [expr {[llength $matches] - 1}] }
 
-    mdsearch::_gotoIdx $viewerPath $idx
+    mdstack::search::_gotoIdx $viewerPath $idx
     return [expr {$idx + 1}]
 }
 
-proc mdsearch::_gotoIdx {viewerPath idx} {
+proc mdstack::search::_gotoIdx {viewerPath idx} {
     # Internal helper: sets currentIdx, highlights match, scrolls to it.
     variable state
 
-    set t [mdviewer::widget $viewerPath]
+    set t [mdstack::viewer::widget $viewerPath]
     set matches $state($viewerPath,matches)
 
     # Remove old current tag
@@ -131,11 +130,11 @@ proc mdsearch::_gotoIdx {viewerPath idx} {
     set state($viewerPath,currentIdx) $idx
 }
 
-proc mdsearch::clearHighlight {viewerPath} {
+proc mdstack::search::clearHighlight {viewerPath} {
     # Removes all search highlights.
     variable state
 
-    set t [mdviewer::widget $viewerPath]
+    set t [mdstack::viewer::widget $viewerPath]
 
     $t tag remove searchmatch 1.0 end
     $t tag remove searchcurrent 1.0 end
@@ -145,14 +144,14 @@ proc mdsearch::clearHighlight {viewerPath} {
     set state($viewerPath,currentIdx) -1
 }
 
-proc mdsearch::count {viewerPath} {
+proc mdstack::search::count {viewerPath} {
     # Number of current matches.
     variable state
     if {![info exists state($viewerPath,matches)]} { return 0 }
     return [llength $state($viewerPath,matches)]
 }
 
-proc mdsearch::current {viewerPath} {
+proc mdstack::search::current {viewerPath} {
     # 1-based Index of current match, 0 wenn keiner.
     variable state
     if {![info exists state($viewerPath,currentIdx)]} { return 0 }

@@ -1,12 +1,12 @@
-# mdoutline
+# mdstack::outline
 
 ## Purpose
 
-`mdoutline` displays the **heading structure** of a Markdown document
+`mdstack::outline` displays the **heading structure** of a Markdown document
 as a clickable tree. Clicking a heading jumps to that position in the editor.
 
 The module:
-- reads headings from an `mdtext` editor widget
+- reads headings from an `mdstack::text` editor widget
 - displays them as a `ttk::treeview`
 - auto-refreshes on changes (configurable interval)
 - is a **pure UI widget** with no business logic
@@ -16,18 +16,18 @@ The module:
 ## Dependencies
 
 - Tcl/Tk ≥ 8.6
-- `mdtext 0.1` (as editor source)
+- `mdstack::text 0.1` (as editor source)
 
 ---
 
 ## Public API
 
-### `mdoutline::create path ?options?`
+### `mdstack::outline::create path ?options?`
 
 Creates an outline panel.
 
 ```tcl
-set outline [mdoutline::create .outline -editor .editor]
+set outline [mdstack::outline::create .outline -editor .editor]
 pack $outline -fill both -expand 1
 ```
 
@@ -35,50 +35,50 @@ pack $outline -fill both -expand 1
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-editor` | — | **Required.** Path to the `mdtext` editor widget |
+| `-editor` | — | **Required.** Path to the `mdstack::text` editor widget |
 | `-refresh` | `500` | Refresh interval in milliseconds |
 
 **Return value:** `path` (the created widget)
 
 ---
 
-### `mdoutline::refresh path`
+### `mdstack::outline::refresh path`
 
 Re-reads the editor content and updates the tree immediately.
 
 ```tcl
-mdoutline::refresh .outline
+mdstack::outline::refresh .outline
 ```
 
 ---
 
-### `mdoutline::gotoSelection path`
+### `mdstack::outline::gotoSelection path`
 
 Jumps to the currently selected heading in the editor.
 Normally called automatically on `<<TreeviewSelect>>`.
 
 ```tcl
-mdoutline::gotoSelection .outline
+mdstack::outline::gotoSelection .outline
 ```
 
 ---
 
-### `mdoutline::dispatch path subcmd ?args?`
+### `mdstack::outline::dispatch path subcmd ?args?`
 
 Dispatch interface for external callers.
 
 ```tcl
-mdoutline::dispatch .outline refresh
+mdstack::outline::dispatch .outline refresh
 ```
 
 ---
 
-### `mdoutline::destroy path`
+### `mdstack::outline::destroy path`
 
 Releases resources and removes the widget.
 
 ```tcl
-mdoutline::destroy .outline
+mdstack::outline::destroy .outline
 ```
 
 ---
@@ -101,14 +101,14 @@ Headings are styled by level:
 ## Example
 
 ```tcl
-package require mdtext    0.1
-package require mdoutline 0.1
+package require mdstack::text    0.1
+package require mdstack::outline 0.1
 
 ttk::panedwindow .pw -orient horizontal
 pack .pw -fill both -expand 1
 
-set editor  [mdtext::create   .editor]
-set outline [mdoutline::create .outline -editor .editor -refresh 300]
+set editor  [mdstack::text::create   .editor]
+set outline [mdstack::outline::create .outline -editor .editor -refresh 300]
 
 .pw add .outline -weight 0
 .pw add .editor  -weight 1
@@ -120,4 +120,4 @@ set outline [mdoutline::create .outline -editor .editor -refresh 300]
 
 - No rendering (structure display only)
 - No search
-- No access to mdviewer (mdtext only)
+- No access to mdstack::viewer (mdstack::text only)

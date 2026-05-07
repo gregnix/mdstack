@@ -1,13 +1,13 @@
-# mdmodel
+# mdstack::model
 
 ## Purpose
 
-`mdmodel` provides a **semantic document model** for Markdown.
+`mdstack::model` provides a **semantic document model** for Markdown.
 
 It sits **between parser and viewer**:
 
 ```
-Markdown → mdparser (AST) → mdmodel (document model) → mdviewer
+Markdown → mdstack::parser (AST) → mdstack::model (document model) → mdstack::viewer
 ```
 
 The module:
@@ -15,7 +15,7 @@ The module:
 - provides structured document information
 - is **GUI-independent**
 
-`mdmodel` is the central place for:
+`mdstack::model` is the central place for:
 - table of contents
 - search
 - cross-references
@@ -26,42 +26,42 @@ The module:
 ## Dependencies
 
 - Tcl ≥ 8.6
-- `mdparser 0.2`
+- `mdstack::parser 0.2`
 - No Tk dependency
 
 ---
 
 ## Public API
 
-### `mdmodel::new ast`
+### `mdstack::model::new ast`
 
 Creates a document model from an AST.
 
 ```tcl
-set ast [mdparser::parse $markdown]
-set doc [mdmodel::new $ast]
+set ast [mdstack::parser::parse $markdown]
+set doc [mdstack::model::new $ast]
 ```
 
 **Return value:** document model (`dict`)
 
 ---
 
-### `mdmodel::ast docModel`
+### `mdstack::model::ast docModel`
 
 Returns the underlying AST.
 
 ```tcl
-set ast [mdmodel::ast $doc]
+set ast [mdstack::model::ast $doc]
 ```
 
 ---
 
-### `mdmodel::toc docModel`
+### `mdstack::model::toc docModel`
 
 Returns a table of contents.
 
 ```tcl
-set toc [mdmodel::toc $doc]
+set toc [mdstack::model::toc $doc]
 foreach entry $toc {
     set level  [dict get $entry level]
     set text   [dict get $entry text]
@@ -74,24 +74,24 @@ foreach entry $toc {
 
 ---
 
-### `mdmodel::headings docModel`
+### `mdstack::model::headings docModel`
 
 Returns all headings.
 
 ```tcl
-set headings [mdmodel::headings $doc]
+set headings [mdstack::model::headings $doc]
 ```
 
 Each entry: `level` `text` `anchor`
 
 ---
 
-### `mdmodel::anchors docModel`
+### `mdstack::model::anchors docModel`
 
 Returns a dictionary of all anchors.
 
 ```tcl
-set anchors [mdmodel::anchors $doc]
+set anchors [mdstack::model::anchors $doc]
 set heading [dict get $anchors "installation"]
 ```
 
@@ -99,12 +99,12 @@ set heading [dict get $anchors "installation"]
 
 ---
 
-### `mdmodel::find docModel pattern`
+### `mdstack::model::find docModel pattern`
 
 Searches the document for a regexp pattern.
 
 ```tcl
-set hits [mdmodel::find $doc "important"]
+set hits [mdstack::model::find $doc "important"]
 puts "Found: [llength $hits] locations"
 foreach block $hits {
     puts "Block type: [dict get $block type]"
@@ -118,12 +118,12 @@ via `list_item blocks`).
 
 ---
 
-### `mdmodel::meta docModel`
+### `mdstack::model::meta docModel`
 
 Returns document metadata (from YAML frontmatter).
 
 ```tcl
-set meta [mdmodel::meta $doc]
+set meta [mdstack::model::meta $doc]
 if {[dict exists $meta title]} {
     puts "Title: [dict get $meta title]"
 }
@@ -135,7 +135,7 @@ if {[dict exists $meta title]} {
 
 ```tcl
 {
-    type     "mdmodel"
+    type     "mdstack::model"
     version  1
     ast      { ... }    ;# original AST
     headings { ... }    ;# extracted heading list
@@ -163,7 +163,7 @@ List items now use `blocks` (list of block nodes):
 
 ## Error handling
 
-- `mdmodel::new` throws a Tcl error if AST is invalid
+- `mdstack::model::new` throws a Tcl error if AST is invalid
 - AST must have `type document` with `version 1`
 - Errors are not collected in the model
 

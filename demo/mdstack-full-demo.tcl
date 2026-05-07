@@ -12,16 +12,21 @@
 #
 # Simuliert noteskit als Datenquelle.
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
 
 package require Tk
 package require mdstack 0.1
-package require mdtext 0.1
-package require mdparser 0.2
-package require mdmodel 0.1
-package require mdviewer 0.3
-package require uicontextmenu 0.1
-package require mdcontextmenu 0.1
+package require mdstack::text 0.1
+package require mdstack::parser 0.2
+package require mdstack::model 0.1
+package require mdstack::viewer 0.3
+package require mdstack::uicontextmenu 0.1
+package require mdstack::contextmenu 0.1
 
 # ============================================================
 # Fenster Setup
@@ -57,12 +62,12 @@ ttk::frame .paned.editor
 ttk::label .paned.editor.lbl -text "Editor (mdtext)" -font {TkDefaultFont 10 bold}
 pack .paned.editor.lbl -fill x
 
-set editor [mdtext::create .paned.editor.text -width 60 -height 30]
+set editor [mdstack::text::create .paned.editor.text -width 60 -height 30]
 $editor enableFeature smartReturn
 $editor enableFeature indent
 
 # Context menu
-mdcontextmenu::attachToEditor $editor
+mdstack::contextmenu::attachToEditor $editor
 
 # Scrollbar
 ttk::scrollbar .paned.editor.sb -orient vertical -command [list [$editor text] yview]
@@ -75,7 +80,7 @@ ttk::frame .paned.preview
 ttk::label .paned.preview.lbl -text "Preview (mdviewer)" -font {TkDefaultFont 10 bold}
 pack .paned.preview.lbl -fill x
 
-set preview [mdviewer::create .paned.preview.viewer -root [file dirname [info script]]]
+set preview [mdstack::viewer::create .paned.preview.viewer -root [file dirname [info script]]]
 pack $preview -fill both -expand 1
 
 .paned add .paned.editor -weight 1
@@ -171,12 +176,12 @@ mdstack::setPreviewAPI -render [list renderPreview]
 proc renderPreview {text} {
     global preview
     if {$text eq ""} {
-        mdviewer::clear $preview
+        mdstack::viewer::clear $preview
         return
     }
-    set ast [mdparser::parse $text]
-    set doc [mdmodel::new $ast]
-    mdviewer::renderModel $preview $doc
+    set ast [mdstack::parser::parse $text]
+    set doc [mdstack::model::new $ast]
+    mdstack::viewer::renderModel $preview $doc
 }
 
 # Callbacks

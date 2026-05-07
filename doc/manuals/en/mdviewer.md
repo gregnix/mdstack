@@ -1,8 +1,8 @@
-# mdviewer
+# mdstack::viewer
 
 ## Purpose
 
-`mdviewer` renders a Markdown AST **read-only** into a Tk text widget.
+`mdstack::viewer` renders a Markdown AST **read-only** into a Tk text widget.
 
 The module:
 - displays Markdown content with full formatting
@@ -36,20 +36,20 @@ The module:
 ## Dependencies
 
 - Tcl/Tk ≥ 8.6
-- `mdparser 0.2`
-- `mdmodel 0.1`
+- `mdstack::parser 0.2`
+- `mdstack::model 0.1`
 - Optional: `Img` package (for JPG support)
 
 ---
 
 ## Public API
 
-### `mdviewer::create path ?options?`
+### `mdstack::viewer::create path ?options?`
 
 Creates a Markdown viewer widget.
 
 ```tcl
-set v [mdviewer::create .v -root $docsDir -onlink onLink]
+set v [mdstack::viewer::create .v -root $docsDir -onlink onLink]
 pack $v -fill both -expand 1
 ```
 
@@ -64,85 +64,85 @@ pack $v -fill both -expand 1
 
 ---
 
-### `mdviewer::render path ast`
+### `mdstack::viewer::render path ast`
 
 Renders an AST directly.
 
 ```tcl
-set ast [mdparser::parse "# Title\n\nText."]
-mdviewer::render $v $ast
+set ast [mdstack::parser::parse "# Title\n\nText."]
+mdstack::viewer::render $v $ast
 ```
 
 ---
 
-### `mdviewer::renderModel path docModel`
+### `mdstack::viewer::renderModel path docModel`
 
-Renders an mdmodel document model.
+Renders an mdstack::model document model.
 
 ```tcl
-set ast [mdparser::parse $markdown]
-set doc [mdmodel::new $ast]
-mdviewer::renderModel $v $doc
+set ast [mdstack::parser::parse $markdown]
+set doc [mdstack::model::new $ast]
+mdstack::viewer::renderModel $v $doc
 ```
 
 ---
 
-### `mdviewer::setFontSize path size`
+### `mdstack::viewer::setFontSize path size`
 
 Adjusts all tags proportionally to the new base font size.
 
 ```tcl
-mdviewer::setFontSize $v 14
+mdstack::viewer::setFontSize $v 14
 ```
 
 Heading scaling: h1=1.6×, h2=1.4×, h3=1.2×, h4=1.1×, h5/h6=1.0×
 
 ---
 
-### `mdviewer::gotoAnchor path anchor`
+### `mdstack::viewer::gotoAnchor path anchor`
 
 Scrolls to the heading with the given anchor. Returns 1/0.
 
 ```tcl
-mdviewer::gotoAnchor $v "installation"
+mdstack::viewer::gotoAnchor $v "installation"
 ```
 
 ---
 
-### `mdviewer::anchors path`
+### `mdstack::viewer::anchors path`
 
 Returns a list of all anchor names in the current document.
 
 ---
 
-### `mdviewer::configure path ?options?`
+### `mdstack::viewer::configure path ?options?`
 
 Changes configuration options.
 
 ```tcl
-mdviewer::configure $v -root /new/path
+mdstack::viewer::configure $v -root /new/path
 ```
 
 ---
 
-### `mdviewer::cget path option`
+### `mdstack::viewer::cget path option`
 
 Queries a configuration option.
 
 ```tcl
-set root [mdviewer::cget $v -root]
-set size [mdviewer::cget $v -fontsize]
+set root [mdstack::viewer::cget $v -root]
+set size [mdstack::viewer::cget $v -fontsize]
 ```
 
 ---
 
-### `mdviewer::clear path`
+### `mdstack::viewer::clear path`
 
 Clears the viewer content.
 
 ---
 
-### `mdviewer::widget path`
+### `mdstack::viewer::widget path`
 
 Returns the underlying Tk text widget.
 
@@ -176,11 +176,11 @@ proc onLink {url} {
     if {[string match "http*" $url]} {
         exec xdg-open $url &
     } elseif {[string match "#*" $url]} {
-        mdviewer::gotoAnchor $v [string range $url 1 end]
+        mdstack::viewer::gotoAnchor $v [string range $url 1 end]
     }
 }
 
-set v [mdviewer::create .v -onlink onLink]
+set v [mdstack::viewer::create .v -onlink onLink]
 ```
 
 ---
@@ -188,7 +188,7 @@ set v [mdviewer::create .v -onlink onLink]
 ## Context tag system
 
 Tk text widget cannot combine fonts across overlapping tags — the
-higher-priority tag wins completely. `mdviewer` uses context-dependent
+higher-priority tag wins completely. `mdstack::viewer` uses context-dependent
 tags with predefined font combinations:
 
 | Context | Tag | Font |
@@ -208,7 +208,7 @@ tags with predefined font combinations:
 - No saving
 - No file selection
 
-These belong in applications or `mdeditorkit`.
+These belong in applications or `mdstack::editorkit`.
 
 ---
 

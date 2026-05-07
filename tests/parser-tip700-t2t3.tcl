@@ -4,7 +4,7 @@
 set dir [file dirname [file normalize [info script]]]
 tcl::tm::path add [file join $dir .. lib]
 
-package require mdparser 0.2
+package require mdstack::parser 0.2
 
 set total 0; set passed 0; set failed 0
 
@@ -30,7 +30,7 @@ section: n
 # Array Command
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set meta [dict get $ast meta]
 assert "A1: meta is dict" {[llength [dict keys $meta]] > 0}
 assert "A2: title" {[dict get $meta title] eq "array"}
@@ -48,7 +48,7 @@ set md {# Normal Heading
 Some text.
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set meta [dict get $ast meta]
 assert "B1: empty meta without frontmatter" {[llength [dict keys $meta]] == 0}
 
@@ -69,7 +69,7 @@ version: 9.0
 # puts
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set meta [dict get $ast meta]
 assert "C1: title" {[dict get $meta title] eq "puts"}
 assert "C2: section" {[dict get $meta section] eq "n"}
@@ -87,7 +87,7 @@ title: test
 Some text.
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set meta [dict get $ast meta]
 assert "D1: dots closer works" {[dict get $meta title] eq "test"}
 
@@ -103,7 +103,7 @@ keywords:
 Text.
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set meta [dict get $ast meta]
 assert "E1: empty value" {[dict get $meta keywords] eq ""}
 assert "E2: title still works" {[dict get $meta title] eq "array"}
@@ -119,7 +119,7 @@ set md {Some text.
 More text.
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set meta [dict get $ast meta]
 assert "F1: hr not mistaken for frontmatter" {[llength [dict keys $meta]] == 0}
 
@@ -132,7 +132,7 @@ set md {::: {.synopsis}
 :::
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set blocks [dict get $ast blocks]
 set div [lindex $blocks 0]
 assert "G1: div type" {[dict get $div type] eq "div"}
@@ -164,7 +164,7 @@ puts "hi"
 :::
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set div [lindex [dict get $ast blocks] 0]
 assert "H1: div type" {[dict get $div type] eq "div"}
 set inner [dict get $div blocks]
@@ -185,7 +185,7 @@ Text inner.
 :::
 }
 
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set outerDiv [lindex [dict get $ast blocks] 0]
 assert "I1: outer div" {[dict get $outerDiv type] eq "div"}
 assert "I2: outer class" {[dict get $outerDiv class] eq "outer"}
@@ -207,7 +207,7 @@ set md {::: .note
 Important text.
 :::
 }
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set div [lindex [dict get $ast blocks] 0]
 assert "J1: dot-class syntax" {[dict get $div type] eq "div"}
 assert "J2: class from dot syntax" {[dict get $div class] eq "note"}
@@ -217,7 +217,7 @@ set md {::: warning
 Be careful.
 :::
 }
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set div [lindex [dict get $ast blocks] 0]
 assert "J3: bare class syntax" {[dict get $div type] eq "div"}
 assert "J4: class from bare syntax" {[dict get $div class] eq "warning"}
@@ -229,7 +229,7 @@ assert "J4: class from bare syntax" {[dict get $div class] eq "warning"}
 set md {::: {.empty}
 :::
 }
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set div [lindex [dict get $ast blocks] 0]
 assert "K1: empty div type" {[dict get $div type] eq "div"}
 assert "K2: empty div no blocks" {[llength [dict get $div blocks]] == 0}
@@ -244,7 +244,7 @@ set md {Some text.
 
 More text.
 }
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 set blocks [dict get $ast blocks]
 # Should have 2 paragraphs, ::: is skipped
 set types {}
@@ -268,7 +268,7 @@ title: test
 
 Description paragraph.
 }
-set ast [mdparser::parse $md]
+set ast [mdstack::parser::parse $md]
 assert "M1: meta present" {[dict get [dict get $ast meta] title] eq "test"}
 set blocks [dict get $ast blocks]
 assert "M2: div block" {[dict get [lindex $blocks 0] type] eq "div"}

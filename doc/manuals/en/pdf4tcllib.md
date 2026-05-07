@@ -22,8 +22,8 @@ Single file (~1900 lines), all 8 modules included.
 In mdstack, pdf4tcllib is located under `vendors/tm/`:
 
 ```tcl
-# Automatic: mdpdf and mdhelp_pdf add the path themselves
-package require mdpdf 0.2
+# Automatic: mdstack::pdf and mdhelp_pdf add the path themselves
+package require mdstack::pdf 0.2
 
 # Manual
 tcl::tm::path add /path/to/mdstack/vendors/tm
@@ -168,8 +168,8 @@ not the top edge. First text line in a box: `boxY + fontSize`.
 ## Emoji workflow
 
 ```tcl
-# Option A: mdpdf::exportFile (recommended)
-mdpdf::exportFile "input.md" "output.pdf" -title "Test"
+# Option A: mdstack::pdf::exportFile (recommended)
+mdstack::pdf::exportFile "input.md" "output.pdf" -title "Test"
 
 # Option B: read file manually
 set text [pdf4tcllib::unicode::readFile "input.md"]

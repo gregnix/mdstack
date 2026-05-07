@@ -1,144 +1,34 @@
-# docir-md
+# docir-md (Markdown → DocIR)
 
-## Purpose
+**Moved.** The `docir::mdSource` module no longer lives in mdstack. As of
+May 2026 it was renamed to `docir::mdSource` (naming convention:
+sources are called `docir::FORMATSource`) and moved to the central
+[docir Repository](../../../docir/).
 
-`docir-md` converts an **mdparser AST** into a **DocIR sequence**.
+## Where to find it now
 
-DocIR (Document Intermediate Representation) is a shared intermediate
-format used by both `man-viewer` and `mdstack`. It allows a single
-renderer (Tk, PDF, HTML) to handle documents from multiple sources
-(nroff and Markdown).
+- Module: `docir/mdSource-0.1.tm` in the docir repo under `lib/tm/`
+- Docs: `docir/doc/{de,en}/docir-spec.md` for the format spec
+- Cookbook: `docir/doc/{de,en}/cookbook.md` for examples
 
-```
-mdparser AST  →  docir::md::fromAst  →  DocIR sequence
-nroff AST     →  docir::roff         →  DocIR sequence
-                                              ↓
-                                   docir-renderer-tk  →  Tk
-```
+## How to use it from mdstack
 
-The module:
-- is **stateless**
-- has **no GUI dependency**
-- returns a **flat list** of DocIR nodes (depth-first traversal)
-
----
-
-## Dependencies
-
-- Tcl ≥ 8.6
-- `mdparser 0.2`
-- No Tk dependency
-
----
-
-## Public API
-
-### `docir::md::fromAst ast`
-
-Converts an mdparser AST into a DocIR sequence.
+mdstack now loads the module via `lib/docir-loader.tcl`:
 
 ```tcl
-package require docir-md 0.1
+source -encoding utf-8 [file join $projectRoot lib docir-loader.tcl]
+package require docir::mdSource
 
-set ast [mdparser::parse $markdown]
-set ir  [docir::md::fromAst $ast]
+# Function lives in the same namespace as before:
+set ir [::docir::md::fromAst $ast]
 ```
 
-**Return value:** list of DocIR nodes (flat, depth-first)
+## Why the move?
 
----
+- DocIR became large and independent enough for its own repo
+- Naming conflict: man-viewer had a `docir::mdSource` as SINK (DocIR → Markdown),
+  mdstack had a `docir::mdSource` as SOURCE. Clear convention in the docir repo:
+  `docir-FORMAT` (sink) vs `docir::FORMATSource` (source).
+- Eliminated code duplication (was a 1:1 copy between repos)
 
-## Block mapping
-
-| mdparser type | DocIR type | Notes |
-|---------------|-----------|-------|
-| `document` | `doc_header` | meta from YAML frontmatter |
-| `heading` | `heading` | level, anchor as id |
-| `paragraph` | `paragraph` | |
-| `code_block` | `pre` | kind=code, language |
-| `list` (ul/ol) | `list` + `listItem` | kind=ul/ol |
-| `blockquote` | `paragraph` | class=blockquote |
-| `deflist` | `list` + `listItem` | kind=dl, term in meta |
-| `table` | `pre` | kind=table (placeholder) |
-| `hr` | `hr` | |
-| `div` | — | inner blocks rendered recursively |
-
-## Inline mapping
-
-| mdparser type | DocIR type |
-|---------------|-----------|
-| `text` | `text` |
-| `strong` | `strong` |
-| `emphasis` | `emphasis` |
-| `inline_code` | `code` |
-| `link` | `link` (href in meta) |
-| `image` | `text` (fallback: alt text) |
-| `linebreak` | `linebreak` |
-| `span` | `text` (class attribute ignored) |
-
----
-
-## DocIR node structure
-
-Every node is a `dict` with at least:
-
-```tcl
-{type TYPE  content CONTENT  meta META}
-```
-
-Examples:
-
-```tcl
-# Heading
-{type heading  content "My Title"  meta {level 2 id "my-title"}}
-
-# Paragraph with inlines
-{type paragraph  content {{type text value "Text"}}  meta {}}
-
-# Code block
-{type pre  content "puts hello"  meta {kind code language tcl}}
-
-# List item
-{type listItem  content {{type text value "Item"}}  meta {kind ul}}
-```
-
----
-
-## Example
-
-```tcl
-package require mdparser 0.2
-package require docir-md 0.1
-
-set md {# Title
-
-A paragraph with **bold** text.
-
-- Item 1
-- Item 2
-}
-
-set ast [mdparser::parse $md]
-set ir  [docir::md::fromAst $ast]
-
-foreach node $ir {
-    puts "[dict get $node type]: [string range [dict get $node content] 0 40]"
-}
-```
-
----
-
-## Tests
-
-```bash
-tclsh tests/test-docir-md.tcl   # 19 tests
-tclsh tests/all.tcl --core      # included in group B (Renderer)
-```
-
----
-
-## Non-goals
-
-- No rendering
-- No full YAML support (frontmatter key-value only)
-- No table rendering (tables passed through as `pre`)
+See [`docir/CHANGES.md`](../../../docir/CHANGES.md) for the migration.

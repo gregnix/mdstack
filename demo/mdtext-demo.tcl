@@ -6,12 +6,17 @@
 # - Format-Operationen
 # - Context menu (right-click)
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
 
 package require Tk
-package require mdtext 0.1
-package require uicontextmenu 0.1
-package require mdcontextmenu 0.1
+package require mdstack::text 0.1
+package require mdstack::uicontextmenu 0.1
+package require mdstack::contextmenu 0.1
 
 wm title . "mdtext Widget Demo"
 wm geometry . 800x600
@@ -47,18 +52,18 @@ pack .toolbar.codeblock .toolbar.table -side left -padx 1
 ttk::frame .editorframe
 pack .editorframe -fill both -expand 1 -padx 5 -pady 5
 
-set editor [mdtext::create .editorframe.text -width 80 -height 30]
+set editor [mdstack::text::create .editorframe.text -width 80 -height 30]
 
 # Features aktivieren
 $editor enableFeature smartReturn
 $editor enableFeature indent
 
 # Attach context menu (right-click)
-mdcontextmenu::attachToEditor $editor
+mdstack::contextmenu::attachToEditor $editor
 
 # Scrollbar
-ttk::scrollbar .editorframe.sb -orient vertical -command [list [mdtext::_t $editor] yview]
-[mdtext::_t $editor] configure -yscrollcommand [list .editorframe.sb set]
+ttk::scrollbar .editorframe.sb -orient vertical -command [list [mdstack::text::_t $editor] yview]
+[mdstack::text::_t $editor] configure -yscrollcommand [list .editorframe.sb set]
 
 pack .editorframe.sb -side right -fill y
 pack $editor -side left -fill both -expand 1

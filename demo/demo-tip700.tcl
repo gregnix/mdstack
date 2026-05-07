@@ -8,10 +8,15 @@
 #   4. Fenced Divs ::: {.class} ... :::
 #   5. AST-Validator (mdvalidator)
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
 
-package require mdparser 0.2
-package require mdvalidator 0.1
+
+package require mdstack::parser 0.2
+package require mdstack::validator 0.1
 
 # ====================================================================
 # Helper
@@ -126,7 +131,7 @@ version: 9.0
 Manipulate array variables.
 }
 
-set ast1 [mdparser::parse $md1]
+set ast1 [mdstack::parser::parse $md1]
 
 puts "Metadaten aus YAML:"
 dict for {k v} [dict get $ast1 meta] {
@@ -161,7 +166,7 @@ set md2 {## Synopsis
 [pathName]{.ins} [addtag]{.sub} [tag]{.arg} [searchSpec]{.arg} [arg]{.optdot}
 }
 
-set ast2 [mdparser::parse $md2]
+set ast2 [mdstack::parser::parse $md2]
 
 puts "Tcl-Kommandosyntax (semantisch geparst):"
 puts ""
@@ -203,7 +208,7 @@ set md3 {[Tcl_AllowExceptions]{.ccmd} [interp]{.cargs}
 [unsigned char *]{.ret} [Tcl_GetBytesFromObj]{.ccmd} [interp, objPtr, numBytesPtr]{.cargs}
 }
 
-set ast3 [mdparser::parse $md3]
+set ast3 [mdstack::parser::parse $md3]
 
 puts "C API Funktionen:"
 puts ""
@@ -244,7 +249,7 @@ subcommand uses similar syntax. Also check [lsort] and [lsearch].
 [lsearch]: lsearch.md "List Search Command"
 }
 
-set ast4 [mdparser::parse $md4]
+set ast4 [mdstack::parser::parse $md4]
 
 puts "Referenz-Links:"
 dict for {k v} [dict get $ast4 reflinks] {
@@ -296,7 +301,7 @@ array get colors
 [array]: array.md
 }
 
-set ast5 [mdparser::parse $md5]
+set ast5 [mdstack::parser::parse $md5]
 
 puts "Dokument-Struktur:"
 foreach b [dict get $ast5 blocks] {
@@ -318,7 +323,7 @@ set md6 {::: {.synopsis}
 :::
 }
 
-set ast6 [mdparser::parse $md6]
+set ast6 [mdstack::parser::parse $md6]
 
 puts "Verschachtelte Spans:"
 set div [lindex [dict get $ast6 blocks] 0]
@@ -404,7 +409,7 @@ puts stderr "something went wrong"
 [channelId]: Tcl_OpenFileChannel.md
 }
 
-set ast7 [mdparser::parse $md7]
+set ast7 [mdstack::parser::parse $md7]
 
 puts "Meta:"
 dict for {k v} [dict get $ast7 meta] {
@@ -434,8 +439,8 @@ hr
 puts ""
 
 puts "Validierung der TIP-700-Manpage:"
-puts "  [mdvalidator::report $ast7]"
-puts "  [mdvalidator::report $ast7 -strict]"
+puts "  [mdstack::validator::report $ast7]"
+puts "  [mdstack::validator::report $ast7 -strict]"
 puts ""
 
 # Kaputte ASTs erkennen
@@ -445,7 +450,7 @@ puts ""
 set bad1 [dict create type document version 1 meta {} reflinks {} blocks [list \
     [dict create type code lang "tcl" text "puts hi"]]]
 puts "  Alt: type=code, lang=tcl"
-foreach e [mdvalidator::validate $bad1 -strict] {
+foreach e [mdstack::validator::validate $bad1 -strict] {
     puts "    -> $e"
 }
 puts ""
@@ -453,7 +458,7 @@ puts ""
 set bad2 [dict create type document version 1 meta {} reflinks {} blocks [list \
     [dict create type paragraph inlines [list [dict create type text value "x"]]]]]
 puts "  Alt: paragraph.inlines statt paragraph.content"
-foreach e [mdvalidator::validate $bad2] {
+foreach e [mdstack::validator::validate $bad2] {
     puts "    -> $e"
 }
 puts ""
@@ -461,7 +466,7 @@ puts ""
 set bad3 [dict create type document version 1 meta {} reflinks {} blocks [list \
     [dict create type list ordered 0 items {}]]]
 puts "  Alt: list.ordered statt list.style"
-foreach e [mdvalidator::validate $bad3] {
+foreach e [mdstack::validator::validate $bad3] {
     puts "    -> $e"
 }
 puts ""
@@ -469,7 +474,7 @@ puts ""
 puts "Alle 7 Demo-ASTs validieren:"
 set all_valid 1
 foreach ast [list $ast1 $ast2 $ast3 $ast4 $ast5 $ast6 $ast7] {
-    set errs [mdvalidator::validate $ast]
+    set errs [mdstack::validator::validate $ast]
     if {[llength $errs] > 0} {
         set all_valid 0
         puts "  ERROR: $errs"

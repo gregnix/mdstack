@@ -1,12 +1,17 @@
 #!/usr/bin/env wish
 # Test for blockquote italic formatting
 
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
 
 package require Tk
-package require mdparser 0.2
-package require mdmodel 0.1
-package require mdviewer 0.3
+package require mdstack::parser 0.2
+package require mdstack::model 0.1
+package require mdstack::viewer 0.3
 
 set md {# Test Blockquote
 
@@ -19,15 +24,15 @@ set md {# Test Blockquote
 > This is a quote with ***bold and italic*** text.
 }
 
-set ast [mdparser::parse $md]
-set doc [mdmodel::new $ast]
+set ast [mdstack::parser::parse $md]
+set doc [mdstack::model::new $ast]
 
 wm title . "Blockquote Italic Test"
 wm geometry . 600x400
 
-set v [mdviewer::create .v]
+set v [mdstack::viewer::create .v]
 pack $v -fill both -expand 1
 
-mdviewer::renderModel $v $doc
+mdstack::viewer::renderModel $v $doc
 
 puts "Test window opened. Check italic formatting in blockquotes."

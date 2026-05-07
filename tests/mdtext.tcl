@@ -1,10 +1,15 @@
 #!/usr/bin/env tclsh
 # mdtext.tcl - Tests for mdtext-Widget
 
+# Eigene Module aus dem Repo (Tests laufen aus dem Repo)
+if {![info exists ::_setup_done]} {
+    lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    set ::_setup_done 1
+}
+
+
 package require tcltest
 namespace import ::tcltest::*
-
-tcl::tm::path add [file normalize [file join [file dirname [info script]] .. lib]]
 
 # Requires Tk for widget tests
 if {[catch {package require Tk}]} {
@@ -12,20 +17,20 @@ if {[catch {package require Tk}]} {
     return
 }
 
-package require mdtext 0.1
+package require mdstack::text 0.1
 
 # Test-Widget erstellen (versteckt)
 wm withdraw .
 
 test mdtext-1 "create widget" -body {
-    set w [mdtext::create .t1]
+    set w [mdstack::text::create .t1]
     expr {$w eq ".t1"}
 } -result {1} -cleanup {
     destroy .t1
 }
 
 test mdtext-2 "set and get text" -body {
-    set w [mdtext::create .t2]
+    set w [mdstack::text::create .t2]
     $w set "Hello World"
     $w get
 } -result {Hello World} -cleanup {
@@ -33,7 +38,7 @@ test mdtext-2 "set and get text" -body {
 }
 
 test mdtext-3 "clear" -body {
-    set w [mdtext::create .t3]
+    set w [mdstack::text::create .t3]
     $w set "Some text"
     $w clear
     $w get
@@ -42,7 +47,7 @@ test mdtext-3 "clear" -body {
 }
 
 test mdtext-4 "modified flag" -body {
-    set w [mdtext::create .t4]
+    set w [mdstack::text::create .t4]
     $w set "Text"
     set before [$w modified]
     $w insert end " more"
@@ -55,7 +60,7 @@ test mdtext-4 "modified flag" -body {
 }
 
 test mdtext-5 "lineType heading" -body {
-    set w [mdtext::create .t5]
+    set w [mdstack::text::create .t5]
     $w set "# Heading"
     $w mark set insert 1.0
     $w lineType
@@ -64,7 +69,7 @@ test mdtext-5 "lineType heading" -body {
 }
 
 test mdtext-6 "lineType list" -body {
-    set w [mdtext::create .t6]
+    set w [mdstack::text::create .t6]
     $w set "- Item"
     $w mark set insert 1.0
     $w lineType
@@ -73,7 +78,7 @@ test mdtext-6 "lineType list" -body {
 }
 
 test mdtext-7 "lineType checkbox" -body {
-    set w [mdtext::create .t7]
+    set w [mdstack::text::create .t7]
     $w set "- \[ \] Task"
     $w mark set insert 1.0
     $w lineType
@@ -82,7 +87,7 @@ test mdtext-7 "lineType checkbox" -body {
 }
 
 test mdtext-8 "lineType numlist" -body {
-    set w [mdtext::create .t8]
+    set w [mdstack::text::create .t8]
     $w set "1. Item"
     $w mark set insert 1.0
     $w lineType
@@ -91,7 +96,7 @@ test mdtext-8 "lineType numlist" -body {
 }
 
 test mdtext-9 "lineType quote" -body {
-    set w [mdtext::create .t9]
+    set w [mdstack::text::create .t9]
     $w set "> Quote"
     $w mark set insert 1.0
     $w lineType
@@ -100,7 +105,7 @@ test mdtext-9 "lineType quote" -body {
 }
 
 test mdtext-10 "getHeadings" -body {
-    set w [mdtext::create .t10]
+    set w [mdstack::text::create .t10]
     $w set "# H1\n\n## H2\n\nText\n\n### H3"
     llength [$w getHeadings]
 } -result {3} -cleanup {
@@ -108,7 +113,7 @@ test mdtext-10 "getHeadings" -body {
 }
 
 test mdtext-11 "enableFeature" -body {
-    set w [mdtext::create .t11]
+    set w [mdstack::text::create .t11]
     $w enableFeature smartReturn
     $w featureEnabled smartReturn
 } -result {1} -cleanup {
@@ -116,7 +121,7 @@ test mdtext-11 "enableFeature" -body {
 }
 
 test mdtext-12 "disableFeature" -body {
-    set w [mdtext::create .t12]
+    set w [mdstack::text::create .t12]
     $w enableFeature indent
     $w disableFeature indent
     $w featureEnabled indent
