@@ -78,8 +78,7 @@ mdparser → mdstack::pdf::export → docir::md::fromAst
 
 The public API is backwards-compatible. Original V0.2 kept as a
 `mdpdf-0.2.tm.legacy` backup. **Deliberately NOT ported:** PDF/A,
-AES-128 encryption, automatic TOC with PDF outlines. If those
-features are needed, the legacy version can be reactivated.
+AES-128 encryption, automatic TOC with PDF outlines. 
 
 **What docir::pdf gained in Phase 3:**
 - TTF font embedding (DejaVu, Unicode support)
