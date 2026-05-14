@@ -1,60 +1,60 @@
 # mdstack — Changelog
 
-## 2026-05-13 — Repo-Hygiene + Test-Stabilitaet
+## 2026-05-13 — Repo hygiene + test stability
 
-**Affected consumers:** keine API-Aenderung. Konsumenten (man-viewer,
-mdhelp4) brauchen nichts anzupassen.
+**Affected consumers:** no API changes. Consumers (man-viewer,
+mdhelp) need no adjustments.
 
 ### Removed
 
-- **`tests/test-toc.pdf`** -- Test-Output war versionsverwaltet
-  obwohl `.gitignore` `test-toc.pdf` explizit auflistet.
+- **`tests/test-toc.pdf`** — test output was version-controlled
+  although `.gitignore` explicitly listed `test-toc.pdf`.
 
 ### Added
 
-- **`tests/_paths.tcl`** -- gemeinsame Pfad-Konfiguration fuer Tests.
-  Sucht `docir` an mehreren Stellen (`$DOCIR_HOME`, Sibling-Repo,
-  Parent-Sibling, `~/lib/tcltk/docir`, System-Default). Stellt
-  `haveDocir`-Helper bereit fuer Self-Skipping.
+- **`tests/_paths.tcl`** — shared path configuration for tests.
+  Searches for `docir` in several locations (`$DOCIR_HOME`, sibling
+  repo, parent sibling, `~/lib/tcltk/docir`, system default).
+  Provides the `haveDocir` helper for self-skipping.
 
-  Wird gesourced von `basic.tcl`, `test-docir-md.tcl`,
-  `test-emoji-pdf.tcl`, `test-emoji-sanitize.tcl` -- vorher fehlte die
-  Datei komplett, diese drei Tests kraschten mit
+  Sourced by `basic.tcl`, `test-docir-md.tcl`,
+  `test-emoji-pdf.tcl`, `test-emoji-sanitize.tcl` — previously the
+  file was missing, and these three tests crashed with
   "no such file or directory".
 
 ### Fixed
 
-- **`tests/basic.tcl::stack-1`** scheiterte ohne docir, weil
-  `mdstack::html` als Adapter `docir::mdSource` per `package require`
-  laedt. Test prueft jetzt mit `haveDocir` und nutzt eine reduzierte
-  Variante (`stack-1-no-docir`) wenn docir fehlt.
-- **`tests/test-docir-md.tcl`** -- Self-Skip ohne docir.
-- **`tests/test-emoji-pdf.tcl`** -- Self-Skip ohne pdf4tcl.
-- **`tests/test-emoji-sanitize.tcl`** -- Self-Skip ohne pdf4tcllib.
-- **`tests/all.tcl`** -- `test-docir-md.tcl` jetzt via `runCustom`
-  (eigenes Test-Framework + Sub-Prozess), nicht `runAssert`. Damit
-  beendet ein `exit 0` aus dem Skip nicht den Runner selbst.
+- **`tests/basic.tcl::stack-1`** previously failed without docir,
+  because `mdstack::html` as an adapter loads `docir::mdSource` via
+  `package require`. The test now checks with `haveDocir` and uses a
+  reduced variant (`stack-1-no-docir`) when docir is missing.
+- **`tests/test-docir-md.tcl`** — self-skip without docir.
+- **`tests/test-emoji-pdf.tcl`** — self-skip without pdf4tcl.
+- **`tests/test-emoji-sanitize.tcl`** — self-skip without pdf4tcllib.
+- **`tests/all.tcl`** — `test-docir-md.tcl` now runs via `runCustom`
+  (its own test framework + subprocess) rather than `runAssert`,
+  so that an `exit 0` from a skip does not end the runner itself.
 
 ### Documentation
 
 - **`README.md`**:
-  - `lib/docir-loader.tcl`-Hinweis entfernt -- Datei existiert nicht.
-    Stattdessen Hinweis auf `tcl::tm::path`-Konfiguration durch
-    Anwendung (oder `tests/_paths.tcl` fuer Development).
-  - `vendors/tm/`-Eintrag in Directory Structure entfernt -- seit
-    2026-05 keine vendored Deps.
-  - `mdhtml-0.1.tm.legacy` und `mdpdf-0.2.tm.legacy` Verweise korrigiert
-    -- diese Dateien existieren im Repo nicht (mehr).
-  - **Requirements** mit konkreten Min-Versionen (`pdf4tcl 0.9.4+`,
-    `pdf4tcllib 0.1+`, `tls 1.7+`) und einer **Consumer-Matrix**.
-  - Test-Zahl auf realistische **532 tests passing ohne Deps**
-    aktualisiert (vorher: "445 headless"); Skip-Verhalten dokumentiert.
+  - removed the `lib/docir-loader.tcl` hint — that file does not
+    exist. Replaced by a note about `tcl::tm::path` configuration by
+    the application (or `tests/_paths.tcl` for development).
+  - removed the `vendors/tm/` entry from the directory structure —
+    no vendored dependencies since May 2026.
+  - corrected references to `mdhtml-0.1.tm.legacy` and
+    `mdpdf-0.2.tm.legacy` — these files no longer exist in the repo.
+  - **Requirements** with concrete minimum versions (`pdf4tcl 0.9.4+`,
+    `pdf4tcllib 0.1+`, `tls 1.7+`) and a **consumer matrix**.
+  - Test count updated to the realistic **532 tests passing without
+    deps** (previously: "445 headless"); skip behavior documented.
 
 ### Test status
 
-`tclsh tests/all.tcl --core` ohne externe Deps:
-**Total 532, Passed 532, Failed 0**. Tests mit docir/pdf4tcl/Tk Bedarf
-skippen sich sauber statt zu crashen.
+`tclsh tests/all.tcl --core` without external deps:
+**Total 532, Passed 532, Failed 0**. Tests requiring docir / pdf4tcl /
+Tk skip cleanly instead of crashing.
 
 ## 2026-05-07 — Namespace refactor, pkgIndex convention, doc sync
 
