@@ -137,7 +137,10 @@ if {$runCore} {
     # --------------------------------------------------------
     puts "\n--- B. Renderer (headless) ---"
 
-    runAssert $dir {
+    # test-docir-md.tcl: eigenes Test-Framework, eigener Output --
+    # via runCustom in Sub-Prozess. So skipt es sich sauber auch
+    # ohne Renner abzubrechen.
+    runCustom $dir {
         test-docir-md.tcl
     }
 }

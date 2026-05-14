@@ -11,7 +11,12 @@
 
 set scriptDir [file dirname [file normalize [info script]]]
 source [file join $scriptDir _paths.tcl]
-package require pdf4tcllib 0.1
+
+# Self-skip ohne pdf4tcllib
+if {[catch {package require pdf4tcllib 0.1}]} {
+    puts "SKIP test-emoji-sanitize.tcl: pdf4tcllib not available"
+    exit 0
+}
 
 catch {::pdf4tcllib::fonts::init}
 

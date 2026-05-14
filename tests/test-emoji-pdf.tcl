@@ -13,7 +13,11 @@
 set scriptDir [file dirname [file normalize [info script]]]
 source [file join $scriptDir _paths.tcl]
 
-package require mdstack::pdf 0.2
+# Self-skip ohne pdf4tcl (das Modul mdstack::pdf braucht es)
+if {[catch {package require mdstack::pdf 0.2}]} {
+    puts "SKIP test-emoji-pdf.tcl: pdf4tcl/mdstack::pdf not available"
+    exit 0
+}
 
 set mdFile [file join $scriptDir test-emoji.md]
 set outFile [file join $scriptDir test-emoji.pdf]

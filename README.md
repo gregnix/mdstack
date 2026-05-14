@@ -41,8 +41,12 @@ components are used directly:
 | `docir::rendererTk` | docir repo | DocIR → Tk text widget |
 | `docir::html` | docir repo | DocIR → HTML *(internally via the mdstack::html adapter)* |
 
-The docir repo is found automatically via `lib/docir-loader.tcl`
-(sibling, `$DOCIR_HOME`, or `auto_path` lookup).
+The application using mdstack must arrange for docir to be on its
+`tcl::tm::path` (e.g. system install under
+`/usr/local/lib/tcltk/docir/`, user install at `~/lib/tcltk/docir/`,
+or `$DOCIR_HOME` set explicitly). The mdstack-test setup helper
+`tests/_paths.tcl` shows the search order used for development from
+a sibling-repo checkout.
 
 #### mdhtml consolidation (Phase 2 Session 7, 2026-05-06)
 
@@ -55,8 +59,8 @@ mdparser → mdstack::html::render → docir::md::fromAst
 ```
 
 The public API is backwards-compatible — callers (mdserver, demos)
-need no changes. The original V0.1 implementation lives on as a
-`mdhtml-0.1.tm.legacy` backup if needed.
+need no changes. The original V0.1 was removed after the Phase 2
+cutover in May 2026; git history retains it for reference.
 
 **Benefits of the consolidation:**
 - Code duplication removed (~600 lines were parallel to docir::html)
@@ -76,8 +80,8 @@ mdparser → mdstack::pdf::export → docir::md::fromAst
                          → PDF
 ```
 
-The public API is backwards-compatible. Original V0.2 kept as a
-`mdpdf-0.2.tm.legacy` backup. **Deliberately NOT ported:** PDF/A,
+The public API is backwards-compatible. The original V0.2 was removed
+after the Phase 3 cutover; git history retains it. **Deliberately NOT ported:** PDF/A,
 AES-128 encryption, automatic TOC with PDF outlines. 
 
 **What docir::pdf gained in Phase 3:**
@@ -123,10 +127,28 @@ an editor widget. Both remain standalone.
 
 ## Requirements
 
-- Tcl 8.6+ (Tcl 9.x compatible)
-- Tk 8.6+  (for mdstack::viewer, mdstack::text and UI modules)
-- pdf4tcl  (for mdstack::pdf -- optional)
-- tls      (for mdserver HTTPS -- optional)
+- **Tcl 8.6+** (Tcl 9.x compatible)
+- **Tk 8.6+** -- for `mdstack::viewer`, `mdstack::text`, UI modules
+- **docir** (sibling repo or system install) -- for `mdstack::html` and `mdstack::pdf`
+- **pdf4tcl 0.9.4+** -- for `mdstack::pdf` (optional, PDF tests skip otherwise)
+- **pdf4tcllib 0.1+** -- for `mdstack::pdf` emoji/font handling
+- **tls 1.7+** -- for `mdserver` HTTPS (optional)
+
+### Consumer matrix
+
+| Module | Hard dep | Soft dep |
+|--------|----------|----------|
+| `mdstack::parser` | -- | -- |
+| `mdstack::model` | -- | -- |
+| `mdstack::validator` | -- | -- |
+| `mdstack::viewer` | Tk | docir::rendererTk (recommended) |
+| `mdstack::html` | `docir::mdSource`, `docir::html` | -- |
+| `mdstack::pdf` | `docir::mdSource`, `docir::pdf`, `pdf4tcl` | `pdf4tcllib` |
+| `mdstack::text` | Tk | -- |
+
+If a soft/hard dep is unavailable, the affected tests self-skip
+rather than crash the runner. See `tests/_paths.tcl` for how docir
+is located during development.
 
 ---
 
@@ -193,8 +215,13 @@ tclsh all.tcl --gui
 tclsh all.tcl --pdf
 ```
 
-Headless (no Tk): **445 tests, 0 failures**  
-With Tk: additional 21 GUI tests
+Without external deps (`--core` only, no Tk, no docir, no pdf4tcl):
+**532 tests passing**. Tests that depend on docir, pdf4tcl, or Tk
+self-skip with a clear message rather than crashing the runner.
+
+With docir installed: additional ~50 renderer tests via `mdstack::html`
+adapter. With Tk: additional ~21 GUI tests. With pdf4tcl: additional
+PDF tests.
 
 ---
 
@@ -202,16 +229,19 @@ With Tk: additional 21 GUI tests
 
 ```
 mdstack-0.3.x/
-  lib/           -- Tcl modules (.tm)
+  lib/           -- Tcl modules (.tm) -- mdstack-0.1.tm + mdstack/*.tm
   demo/          -- Demo scripts and examples
-  tests/         -- Test suite
+  tests/         -- Test suite (group A core, B renderer, C GUI, D PDF)
   doc/
     manuals/     -- Module documentation
   tools/
-    mdserver/    -- HTTP/HTTPS Markdown server
-  vendors/
-    tm/          -- Vendor modules (pdf4tcllib)
+    mdserver/    -- HTTP/HTTPS Markdown server (uses tls if available)
+    generate-pkgindex.tcl -- regenerate lib/pkgIndex.tcl
+    nroff2md.tcl          -- nroff to Markdown converter (uses TIP-700)
 ```
+
+*(No `vendors/` subtree -- since 2026-05 all dependencies (`docir`,
+`pdf4tcl`, `pdf4tcllib`) are loaded via standard `package require`.)*
 
 ---
 

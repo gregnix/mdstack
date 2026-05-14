@@ -12,6 +12,14 @@ set projectRoot [file dirname $dir]
 # Pfade zu mdstack + docir konfigurieren
 source [file join $dir _paths.tcl]
 
+# Self-skip wenn docir nicht verfuegbar (nur mdstack-Tests sollen
+# dann laufen, die docir-Konsument-Tests sind System-Setup-abhaengig)
+if {![haveDocir]} {
+    puts "SKIP test-docir-md.tcl: docir not installed/findable"
+    puts "  (set \$DOCIR_HOME or place docir as sibling repo)"
+    exit 0
+}
+
 # Module via Standard Tcl Module System laden
 package require mdstack::parser
 package require docir::mdSource
