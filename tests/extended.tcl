@@ -199,4 +199,123 @@ test supports-4 "supports inline image" -body {
     expr {"inline:image" in [mdstack::parser::supports {}]}
 } -result {1}
 
+# --- Setext-Headings (v0.2.10) ---
+
+test setext-1 "Setext H1 with === underline" -body {
+    set md "My Title\n========\n\nBody text."
+    set ast [mdstack::parser::parse $md]
+    set h [lindex [dict get $ast blocks] 0]
+    list [dict get $h type] [dict get $h level]
+} -result {heading 1}
+
+test setext-2 "Setext H2 with --- underline" -body {
+    set md "My Subtitle\n-----------\n\nBody."
+    set ast [mdstack::parser::parse $md]
+    set h [lindex [dict get $ast blocks] 0]
+    list [dict get $h type] [dict get $h level]
+} -result {heading 2}
+
+test setext-3 "Setext anchor generated" -body {
+    set md "Hello World\n===========\n"
+    set ast [mdstack::parser::parse $md]
+    set h [lindex [dict get $ast blocks] 0]
+    dict get $h anchor
+} -result {hello-world}
+
+test setext-4 "Hr still works when prev line empty" -body {
+    set md "\n---\n"
+    set ast [mdstack::parser::parse $md]
+    set b [lindex [dict get $ast blocks] 0]
+    dict get $b type
+} -result {hr}
+
+test setext-5 "Setext H2 beats Hr when text precedes" -body {
+    set md "Title\n---\n\nBody."
+    set ast [mdstack::parser::parse $md]
+    set b [lindex [dict get $ast blocks] 0]
+    list [dict get $b type] [dict get $b level]
+} -result {heading 2}
+
+# --- Math (v0.2.10) ---
+
+test math-inline-1 "parse inline math" -body {
+    set md {The formula $E = mc^2$ is famous.}
+    set ast [mdstack::parser::parse $md]
+    set p [lindex [dict get $ast blocks] 0]
+    set inlines [dict get $p content]
+    # Find math inline
+    set found ""
+    foreach i $inlines {
+        if {[dict get $i type] eq "math"} {
+            set found [dict get $i text]
+            break
+        }
+    }
+    set found
+} -result {E = mc^2}
+
+test math-inline-2 "inline math display flag is 0" -body {
+    set md {Use $x$ here.}
+    set ast [mdstack::parser::parse $md]
+    set p [lindex [dict get $ast blocks] 0]
+    set inlines [dict get $p content]
+    set found ""
+    foreach i $inlines {
+        if {[dict get $i type] eq "math"} {
+            set found [dict get $i display]
+            break
+        }
+    }
+    set found
+} -result {0}
+
+test math-inline-3 "no false match: dollar prices" -body {
+    set md {Costs $5 and $10 total.}
+    set ast [mdstack::parser::parse $md]
+    set p [lindex [dict get $ast blocks] 0]
+    set inlines [dict get $p content]
+    set hasMath 0
+    foreach i $inlines {
+        if {[dict get $i type] eq "math"} { set hasMath 1 }
+    }
+    set hasMath
+} -result {0}
+
+test math-block-1 "display math block" -body {
+    set md "Before.\n\n\$\$\nx = y\n\$\$\n\nAfter."
+    set ast [mdstack::parser::parse $md]
+    # Find math_block
+    set found ""
+    foreach b [dict get $ast blocks] {
+        if {[dict get $b type] eq "math_block"} {
+            set found [dict get $b content]
+            break
+        }
+    }
+    string trim $found
+} -result {x = y}
+
+test math-block-2 "display math block display flag" -body {
+    set md "\$\$\na + b\n\$\$"
+    set ast [mdstack::parser::parse $md]
+    set b [lindex [dict get $ast blocks] 0]
+    list [dict get $b type] [dict get $b display]
+} -result {math_block 1}
+
+test math-block-3 "single line dollar-dollar" -body {
+    set md "\$\$E=mc^2\$\$"
+    set ast [mdstack::parser::parse $md]
+    set b [lindex [dict get $ast blocks] 0]
+    list [dict get $b type] [dict get $b content]
+} -result {math_block E=mc^2}
+
+# --- Mermaid (just verifies language is preserved) ---
+
+test mermaid-1 "fenced code with mermaid language" -body {
+    set md "\`\`\`mermaid\ngraph TD\n  A --> B\n\`\`\`"
+    set ast [mdstack::parser::parse $md]
+    set b [lindex [dict get $ast blocks] 0]
+    list [dict get $b type] [dict get $b language]
+} -result {code_block mermaid}
+
 cleanupTests

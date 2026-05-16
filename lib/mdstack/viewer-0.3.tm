@@ -444,6 +444,17 @@ proc mdstack::viewer::renderBlock {path block} {
                 $t insert end "\n"
             }
         }
+        math_block {
+            # Display-Math: als pre-Block mit math-Tag rendern.
+            # In Tk koennen wir kein LaTeX rendern -- wir zeigen den
+            # Raw-LaTeX als monospace mit visuellem $$-Wrapper.
+            set content [dict get $block content]
+            set mathStart [$t index "end -1 chars"]
+            $t insert end "\$\$\n"
+            $t insert end $content
+            $t insert end "\n\$\$\n"
+            $t tag add math $mathStart "end -1 chars"
+        }
         default {
             # ignore unknown blocks
         }
@@ -611,6 +622,18 @@ proc mdstack::viewer::renderInline {path node {parentFormatTag ""}} {
                     $t see "fn_$fnId"
                 }
             }} $t $fnId]
+        }
+        math {
+            # Inline-Math: $...$ als monospace (kein LaTeX-Rendering im Tk).
+            # Wir zeigen den Raw-LaTeX-Code mit $-Wrappern, damit klar ist
+            # was Math-Markup ist.
+            set txt [expr {[dict exists $node text] ? [dict get $node text] : ""}]
+            set disp [expr {[dict exists $node display] ? [dict get $node display] : 0}]
+            if {$disp} {
+                $t insert end "\$\$${txt}\$\$" codeinline
+            } else {
+                $t insert end "\$${txt}\$" codeinline
+            }
         }
         default {
             # ignore
@@ -884,6 +907,13 @@ proc mdstack::viewer::initTags {t fp} {
         -foreground #666666 -lmargin1 20
     $t tag configure codeblock  -font ${fp}_mono -background #e8e8e8 \
         -lmargin1 20 -lmargin2 20 -rmargin 20
+
+    # ── 8c. Math (display block) ──
+    # Display-Math wird als monospace mit dezentem Hintergrund gerendert.
+    # Reines Tk kann LaTeX nicht rendern; der Raw-Code ist mit $$
+    # gewrappt zur visuellen Kennzeichnung.
+    $t tag configure math -font ${fp}_mono_italic -background #f4f4ee \
+        -lmargin1 20 -lmargin2 20 -rmargin 20 -foreground #2c3e50
 
     # ── 8b. Syntax-Highlighting (innerhalb codeblock) ──
     $t tag configure syn_keyword  -foreground #1a5276

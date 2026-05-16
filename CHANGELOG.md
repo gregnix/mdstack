@@ -1,5 +1,51 @@
 # mdstack — Changelog
 
+## 2026-05-16 — Parser v0.2.10: Setext headings + math
+
+### Added
+
+- **Setext-style headings** in `parser-0.2.tm`:
+  - `Title\n=====` → `heading level 1`
+  - `Subtitle\n-----` → `heading level 2`
+  - Setext check runs before HR check, so `Text\n---` is heading,
+    not HR.
+  - Standalone `---` (after blank line) remains an HR as before.
+- **Inline math** (`$...$`) parsed as new inline node
+  `{type math display 0 text "..."}`. Conservative regex rules
+  prevent false positives like `$5 and $10`:
+  - No space/digit directly after opening `$`
+  - No digit directly after closing `$`
+  - No nested `$` characters
+- **Display math** (`$$...$$`) parsed as new block node
+  `{type math_block display 1 content "..."}`. Supports:
+  - Single-line: `$$E=mc^2$$`
+  - Multi-line: `$$` on own line, content lines, `$$` on own line
+  - Content can start on same line as opening `$$`
+
+### Changed
+
+- **`parser-0.2.tm`** version bumped from 0.2.9 to 0.2.10 in the
+  history comment.
+- **`tests/extended.tcl`** extended with 11 new tests (setext-1..5,
+  math-inline-1..3, math-block-1..3, mermaid-1). Total: 30 tests,
+  all passing.
+
+### Notes on Mermaid
+
+The parser already recognized fenced code blocks with the `mermaid`
+language tag (because every fenced code retains its `language`
+field). No parser change was needed. Rendering as
+`<pre class="mermaid">` is done in `docir::html` (see DocIR
+CHANGES 2026-05-16).
+
+### Compatibility
+
+No public API changes. The new inline `math` and block `math_block`
+node types are additive — consumers that don't handle them fall
+through their default branches (rendered as text or skipped).
+
+---
+
 ## 2026-05-13 — Repo hygiene + test stability
 
 **Affected consumers:** no API changes. Consumers (man-viewer,

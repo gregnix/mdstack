@@ -33,6 +33,7 @@
 # v0.2.7  AST field name alignment (Spec v0.1), structural refactoring
 # v0.2.8  Bracketed spans [t]{.c} (TIP 700), shortcut reference links [t]
 # v0.2.9  YAML frontmatter, fenced divs (::: {.class} ... :::)
+# v0.2.10 Setext-Headings (=== / ---), inline math ($...$), display math ($$...$$)
 #
 package provide mdstack::parser 0.2
 
@@ -247,6 +248,37 @@ proc mdstack::parser::isDefList {line nextLine} {
           [regexp {^:[[:space:]]+} $nextLine]}
 }
 
+# isSetextHeading: aktuelle Zeile + Underline-Zeile (=== oder ---)
+# Liefert 0 wenn der Lookahead nicht passt, sonst 1.
+# Subtle: --- ist auch HR-Pattern. Setext-Check kommt zuerst, also gewinnt
+# Setext, wenn die aktuelle Zeile Text enthaelt.
+proc mdstack::parser::isSetextHeading {linesVar iVar} {
+    upvar $linesVar lines $iVar i
+    set n [llength $lines]
+    if {[expr {$i + 1}] >= $n} { return 0 }
+    set line [string trim [lindex $lines $i]]
+    if {$line eq ""} { return 0 }
+    # Die aktuelle Zeile darf kein anderer Block sein, der hier eh
+    # erkannt wurde. Da isSetextHeading nach isFencedCode/isHeading
+    # gerufen wird, kommt sie nur hin, wenn die aktuelle Zeile nicht
+    # diese sind. Aber wir muessen List-Items / Blockquotes / etc.
+    # ausschliessen, sonst wuerde --- nach einem List-Item das ganze
+    # zerstoeren.
+    if {[mdstack::parser::isBlockquote $line]} { return 0 }
+    if {[mdstack::parser::isListItem $line]}  { return 0 }
+    if {[mdstack::parser::isTableStart $line]} { return 0 }
+    set next [string trim [lindex $lines [expr {$i + 1}]]]
+    if {[regexp {^=+$} $next]} { return 1 }
+    if {[regexp {^-{2,}$} $next]} { return 1 }
+    return 0
+}
+
+# isMathBlock: Display-Math beginnt mit $$ in eigener Zeile
+proc mdstack::parser::isMathBlock {line} {
+    set t [string trim $line]
+    expr {$t eq "$$" || [regexp {^\$\$.*$} $t]}
+}
+
 proc mdstack::parser::isPandocDiv {line} {
     regexp {^:{3,}} $line
 }
@@ -346,8 +378,20 @@ proc mdstack::parser::parseBlocks {linesVar refDefLinesVar} {
             continue
         }
 
+        if {[mdstack::parser::isMathBlock $line]} {
+            lappend blocks [mdstack::parser::parseMathBlock lines i]
+            continue
+        }
+
         if {[mdstack::parser::isHeading $line]} {
             lappend blocks [mdstack::parser::parseHeading lines i]
+            continue
+        }
+
+        # Setext-Heading: aktueller Text + Underline-Zeile (=== oder ---)
+        # Muss VOR isHr stehen, weil --- sonst als HR interpretiert wuerde.
+        if {[mdstack::parser::isSetextHeading lines i]} {
+            lappend blocks [mdstack::parser::parseSetextHeading lines i]
             continue
         }
 
@@ -445,6 +489,60 @@ proc mdstack::parser::parseHeading {linesVar iVar} {
     return [dict create type heading level $level \
         anchor $anchor \
         content [mdstack::parser::parseInlines $title]]
+}
+
+# Setext-Heading: Text-Zeile + Underline (=== fuer H1, --- fuer H2)
+proc mdstack::parser::parseSetextHeading {linesVar iVar} {
+    upvar $linesVar lines $iVar i
+    set title [string trim [lindex $lines $i]]
+    set under [string trim [lindex $lines [expr {$i + 1}]]]
+    set level [expr {[string index $under 0] eq "=" ? 1 : 2}]
+    set anchor [mdstack::parser::anchorize $title]
+    incr i 2
+    return [dict create type heading level $level \
+        anchor $anchor \
+        content [mdstack::parser::parseInlines $title]]
+}
+
+# Display-Math-Block: $$ ... $$ (eine oder mehrere Zeilen)
+proc mdstack::parser::parseMathBlock {linesVar iVar} {
+    upvar $linesVar lines $iVar i
+    set n [llength $lines]
+    set first [string trim [lindex $lines $i]]
+    set buf {}
+
+    # Fall 1: $$...$$ alles auf einer Zeile
+    if {[regexp {^\$\$(.+)\$\$$} $first -> inner]} {
+        incr i
+        return [dict create type math_block display 1 content $inner]
+    }
+
+    # Fall 2: $$ am Anfang, dann Content, dann $$ am Ende
+    # $$ kann mit Content auf derselben Zeile starten: $$E=mc^2
+    if {[regexp {^\$\$(.*)$} $first -> rest]} {
+        if {$rest ne ""} { lappend buf $rest }
+    }
+    incr i
+    while {$i < $n} {
+        set ln [lindex $lines $i]
+        set trimmed [string trim $ln]
+        if {$trimmed eq "$$"} {
+            incr i
+            return [dict create type math_block display 1 \
+                content [join $buf "\n"]]
+        }
+        if {[regexp {^(.*)\$\$$} $trimmed -> head]} {
+            if {$head ne ""} { lappend buf $head }
+            incr i
+            return [dict create type math_block display 1 \
+                content [join $buf "\n"]]
+        }
+        lappend buf $ln
+        incr i
+    }
+    # Kein schliessendes $$ gefunden -- als Block trotzdem zurueckgeben
+    return [dict create type math_block display 1 \
+        content [join $buf "\n"]]
 }
 
 proc mdstack::parser::parseHr {linesVar iVar} {
@@ -1081,6 +1179,29 @@ proc mdstack::parser::_tryEmphasis {rest idx} {
     return {}
 }
 
+# Inline-Math: $...$ (Pandoc-Style)
+# Konservative Regeln um false positives bei "$5 vs $10" zu vermeiden:
+#   - oeffnendes $ darf nicht von space/digit gefolgt sein
+#   - schliessendes $ darf nicht von digit gefolgt sein
+#   - keine geschachtelten $-Zeichen
+proc mdstack::parser::_tryMath {s rest idx} {
+    if {[string index $rest 0] ne "\$"} { return {} }
+    # Display math $$...$$ (inline) -- selten, aber moeglich
+    if {[regexp {^\$\$([^\$]+)\$\$} $rest -> inner]} {
+        return [list [expr {$idx + [string length $inner] + 4}] \
+            [dict create type math display 1 text $inner]]
+    }
+    # Konservativer Inline-Match: $X$ wo X kein space/digit am Anfang
+    # und das schliessende $ nicht von digit gefolgt.
+    if {![regexp {^\$([^\s\$][^\$]*[^\s\$]|[^\s\$])\$(.*)$} $rest -> inner after]} {
+        return {}
+    }
+    # Verhindere $5$, wenn nach dem zweiten $ noch eine Ziffer kommt
+    if {[regexp {^[0-9]} $after]} { return {} }
+    return [list [expr {$idx + [string length $inner] + 2}] \
+        [dict create type math display 0 text $inner]]
+}
+
 proc mdstack::parser::_tryStrike {rest idx} {
     if {[regexp {^~~(.+?)~~} $rest -> inner]} {
         set d [dict create type strike content [mdstack::parser::parseInlines $inner]]
@@ -1180,6 +1301,9 @@ proc mdstack::parser::parseInlines {s} {
         if {$match eq {} && $c eq "h"} {
             set match [mdstack::parser::_tryAutolink $s $rest $idx]
         }
+        if {$match eq {} && $c eq "\$"} {
+            set match [mdstack::parser::_tryMath $s $rest $idx]
+        }
 
         if {$match ne {}} {
             lassign $match idx node
@@ -1191,7 +1315,7 @@ proc mdstack::parser::parseInlines {s} {
         set plainEnd $idx
         while {$plainEnd < $len} {
             set pc [string index $s $plainEnd]
-            if {$pc in {! \[ ` * ~ \x00 \\ <}} { break }
+            if {$pc in {! \[ ` * ~ \x00 \\ < $}} { break }
             if {$pc eq "h" && [string range $s $plainEnd [expr {$plainEnd + 6}]] in {http:// https:/}} {
                 break
             }
