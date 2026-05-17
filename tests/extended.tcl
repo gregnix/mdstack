@@ -281,6 +281,45 @@ test math-inline-3 "no false match: dollar prices" -body {
     set hasMath
 } -result {0}
 
+test math-inline-4 "no false match: explanatory paragraph with backtick-dollar" -body {
+    # Genau der Bug aus extended-markdown.md: $10 schaltet ... `$`
+    # wurde faelschlich als ein riesiger Math-Block geparst.
+    set md {Bei Preisen wie $5 oder $10 schaltet der Parser nicht in den Math-Modus -- das ist intentional. Die Erkennung verlangt, dass nach dem oeffnenden `$` kein Leerzeichen kommt.}
+    set ast [mdstack::parser::parse $md]
+    set p [lindex [dict get $ast blocks] 0]
+    set hasMath 0
+    foreach i [dict get $p content] {
+        if {[dict get $i type] eq "math"} { set hasMath 1 }
+    }
+    set hasMath
+} -result {0}
+
+test math-inline-5 "no false match: dollar followed by space" -body {
+    set md {Cost: $ 5 here.}
+    set ast [mdstack::parser::parse $md]
+    set p [lindex [dict get $ast blocks] 0]
+    set hasMath 0
+    foreach i [dict get $p content] {
+        if {[dict get $i type] eq "math"} { set hasMath 1 }
+    }
+    set hasMath
+} -result {0}
+
+test math-inline-6 "math with digits inside still works" -body {
+    set md {Solve $x = 5$ here.}
+    set ast [mdstack::parser::parse $md]
+    set p [lindex [dict get $ast blocks] 0]
+    set hasMath 0
+    set txt ""
+    foreach i [dict get $p content] {
+        if {[dict get $i type] eq "math"} {
+            set hasMath 1
+            set txt [dict get $i text]
+        }
+    }
+    list $hasMath $txt
+} -result {1 {x = 5}}
+
 test math-block-1 "display math block" -body {
     set md "Before.\n\n\$\$\nx = y\n\$\$\n\nAfter."
     set ast [mdstack::parser::parse $md]

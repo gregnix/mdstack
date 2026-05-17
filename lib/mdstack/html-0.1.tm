@@ -52,12 +52,14 @@ namespace eval mdstack::html {
 proc mdstack::html::render {ast args} {
     # Optionen parsen (key-value-Liste)
     set opts [dict create \
-        -title    "" \
-        -css      "" \
-        -toc      0 \
-        -lang     de \
-        -theme    default \
-        -encoding utf-8]
+        -title         "" \
+        -css           "" \
+        -toc           0 \
+        -lang          de \
+        -theme         default \
+        -encoding      utf-8 \
+        -enableMath    0 \
+        -enableMermaid 0]
 
     foreach {k v} $args {
         dict set opts $k $v
@@ -68,10 +70,12 @@ proc mdstack::html::render {ast args} {
 
     # docir-html-Optionen aus mdhtml-Optionen ableiten
     set htmlOpts [dict create \
-        title       [dict get $opts -title] \
-        lang        [dict get $opts -lang] \
-        theme       [dict get $opts -theme] \
-        includeToc  [expr {[dict get $opts -toc] ? 1 : 0}]]
+        title         [dict get $opts -title] \
+        lang          [dict get $opts -lang] \
+        theme         [dict get $opts -theme] \
+        includeToc    [expr {[dict get $opts -toc] ? 1 : 0}] \
+        enableMath    [expr {[dict get $opts -enableMath] ? 1 : 0}] \
+        enableMermaid [expr {[dict get $opts -enableMermaid] ? 1 : 0}]]
 
     # CSS-Datei nur setzen wenn nicht-leer
     set css [dict get $opts -css]

@@ -1180,24 +1180,28 @@ proc mdstack::parser::_tryEmphasis {rest idx} {
 }
 
 # Inline-Math: $...$ (Pandoc-Style)
-# Konservative Regeln um false positives bei "$5 vs $10" zu vermeiden:
-#   - oeffnendes $ darf nicht von space/digit gefolgt sein
+# Strikte Regeln gegen false positives:
+#   - oeffnendes $ darf nicht von space/digit/backtick gefolgt sein
+#   - content darf keine newlines, keine backticks, keine weiteren $
+#   - letztes Zeichen vor schliessendem $ darf nicht space/backtick sein
 #   - schliessendes $ darf nicht von digit gefolgt sein
-#   - keine geschachtelten $-Zeichen
+#   - max 200 Zeichen Content (false-positive-Limit)
 proc mdstack::parser::_tryMath {s rest idx} {
     if {[string index $rest 0] ne "\$"} { return {} }
-    # Display math $$...$$ (inline) -- selten, aber moeglich
-    if {[regexp {^\$\$([^\$]+)\$\$} $rest -> inner]} {
+    # Display math $$...$$ (inline, single-line) -- selten, aber moeglich
+    if {[regexp {^\$\$([^\$\n]+)\$\$} $rest -> inner]} {
         return [list [expr {$idx + [string length $inner] + 4}] \
             [dict create type math display 1 text $inner]]
     }
-    # Konservativer Inline-Match: $X$ wo X kein space/digit am Anfang
-    # und das schliessende $ nicht von digit gefolgt.
-    if {![regexp {^\$([^\s\$][^\$]*[^\s\$]|[^\s\$])\$(.*)$} $rest -> inner after]} {
+    # Inline-Math $X$ mit strikten Regeln
+    if {![regexp {^\$([^\s\$\d`\n][^\$`\n]*[^\s\$`\n]|[^\s\$\d`\n])\$(.*)$} \
+            $rest -> inner after]} {
         return {}
     }
-    # Verhindere $5$, wenn nach dem zweiten $ noch eine Ziffer kommt
+    # Verhindere $X = 5$2 (digit nach schliessendem $)
     if {[regexp {^[0-9]} $after]} { return {} }
+    # False-positive-Limit: Inline-Math sollte kurz sein
+    if {[string length $inner] > 200} { return {} }
     return [list [expr {$idx + [string length $inner] + 2}] \
         [dict create type math display 0 text $inner]]
 }

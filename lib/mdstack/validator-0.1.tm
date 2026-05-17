@@ -148,6 +148,8 @@ proc mdstack::validator::validateBlock {node} {
         table      { validateTable $node }
         deflist    { validateDeflist $node }
         div        { validateDiv $node }
+        math_block { }
+        footnote_section { }
         default    { addWarning "Unknown Block-Typ '$type'" }
     }
 
@@ -404,6 +406,8 @@ proc mdstack::validator::validateInline {node} {
         strike      { validateStrike $node }
         linebreak   { }
         span        { validateSpan $node }
+        math        { }
+        footnote_ref { }
         default     { addWarning "Unknown Inline-Typ '$type'" }
     }
 

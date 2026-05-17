@@ -4,6 +4,15 @@
 # Eigene Module aus dem Repo (Tests laufen aus dem Repo)
 if {![info exists ::_setup_done]} {
     lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    # docir::util ist eine .tm-Datei -- braucht tcl::tm::path zusaetzlich
+    # zum auto_path. Sibling-Repo: ../../docir/lib/tm
+    foreach p [list \
+        [file normalize [file join [file dirname [info script]] .. .. docir lib tm]] \
+        [file normalize [file join $::env(HOME) lib tcltk docir lib tm]]] {
+        if {[file isdirectory $p]} {
+            ::tcl::tm::path add $p
+        }
+    }
     set ::_setup_done 1
 }
 
@@ -36,7 +45,8 @@ proc makePng {path} {
     close $fh
 }
 
-set workDir [file join /tmp test-mdhtml-assets-[pid]]
+package require docir::util
+set workDir [file join [docir::util::tmpdir] test-mdhtml-assets-[pid]]
 set srcDir [file join $workDir src]
 set outDir [file join $workDir out]
 file mkdir $srcDir [file join $srcDir icons] $outDir
