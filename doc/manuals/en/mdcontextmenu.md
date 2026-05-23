@@ -27,7 +27,7 @@ Attaches the context menu to an mdstack::text editor.
 
 ```tcl
 package require mdstack::text        0.1
-package require mdstack::mdstack::uicontextmenu 0.1
+package require mdstack::uicontextmenu 0.1
 package require mdstack::contextmenu 0.1
 
 set editor [mdstack::text::create .editor]
