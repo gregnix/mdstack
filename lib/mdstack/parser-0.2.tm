@@ -421,9 +421,9 @@ proc mdstack::parser::parseBlocks {linesVar refDefLinesVar} {
         }
 
         if {[mdstack::parser::isIndentedCode $line]} {
-            set node [mdstack::parser::parseIndentedCode lines i]
-            if {$node ne ""} {
-                lappend blocks $node
+            set nodes [mdstack::parser::parseIndentedCode lines i]
+            if {[llength $nodes] > 0} {
+                lappend blocks {*}$nodes
                 continue
             }
         }
@@ -708,14 +708,26 @@ proc mdstack::parser::parseIndentedCode {linesVar iVar} {
         set body [lrange $body 0 end-1]
     }
 
-    if {[llength $body] > 0} {
-        return [dict create type code_block language "" \
-            text [join $body "\n"]]
+    if {[llength $body] == 0} {
+        # Nothing useful found -- restore position
+        set i $savedI
+        return {}
     }
 
-    # Nothing useful found -- restore position
-    set i $savedI
-    return ""
+    # If the de-indented region actually begins with a code fence, it is
+    # fenced content that merely sat under an indent (e.g. a code example
+    # indented under a definition-list item). Re-parse it so the ``` fences
+    # and any surrounding prose are handled properly, not kept literally.
+    set firstNonBlank ""
+    foreach b $body { if {[string trim $b] ne ""} { set firstNonBlank $b; break } }
+    if {[regexp {^```} $firstNonBlank]} {
+        set subLines $body
+        set subRef {}
+        return [mdstack::parser::parseBlocks subLines subRef]
+    }
+
+    return [list [dict create type code_block language "" \
+        text [join $body "\n"]]]
 }
 
 proc mdstack::parser::parseDefList {linesVar iVar} {
