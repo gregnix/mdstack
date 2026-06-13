@@ -1,5 +1,21 @@
 # mdstack — Changelog
 
+## 2026-06-14 — Viewer: wheel scrolling over frame-mode tables
+
+### Fixed
+
+- `viewer-0.3.tm`: mouse-wheel scrolling stopped while the pointer was over a
+  frame-mode table (`-tablemode frame`). Embedded table frames and their cell
+  widgets swallowed `<MouseWheel>`/`<Button-4>`/`<Button-5>`; they are now
+  forwarded to the viewer text widget. New helper `_wheelToText`, called after
+  the table's `window create`.
+
+### Changed
+
+- `_wheelToText` prefers `tkutils::tkuwheel::redirect` when that package is
+  available (shared implementation) and falls back to an inline binding
+  otherwise, so mdstack stays usable without tkutils.
+
 ## 2026-05-16 — Parser v0.2.10: Setext headings + math
 
 ### Added

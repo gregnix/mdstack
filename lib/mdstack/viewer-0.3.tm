@@ -1071,6 +1071,16 @@ proc mdstack::viewer::renderTable {path block} {
 # Disadvantage: no copy-paste of table contents.
 # Activated via:  mdstack::viewer::configure $path -tablemode frame
 
+# Forward mouse-wheel events from an embedded widget and all its descendants to
+# the viewer text widget. Embedded windows (frame-mode tables) otherwise swallow
+# the wheel event, so scrolling stops while the pointer is over the table.
+proc mdstack::viewer::_wheelToText {t w} {
+    bind $w <MouseWheel> "$t yview scroll \[expr {-%D/30}] units"
+    bind $w <Button-4>   "$t yview scroll -3 units"
+    bind $w <Button-5>   "$t yview scroll 3 units"
+    foreach child [winfo children $w] { mdstack::viewer::_wheelToText $t $child }
+}
+
 proc mdstack::viewer::renderTableFrame {path block} {
     # Seit A.3 Lesart 2 (2026-05-07):
     # Block-Schema = {type table content {tableRow*} meta {columns N alignments {...} hasHeader 0|1}}
@@ -1183,6 +1193,8 @@ proc mdstack::viewer::renderTableFrame {path block} {
     }
 
     $t window create end -window $tf -padx 5 -pady 5
+    # keep wheel scrolling working while the pointer is over the embedded table
+    mdstack::viewer::_wheelToText $t $tf
     $t insert end "\n"
 }
 
