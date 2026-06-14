@@ -405,6 +405,7 @@ proc mdstack::validator::validateInline {node} {
         image       { validateImage $node "inline" }
         strike      { validateStrike $node }
         linebreak   { }
+        softbreak   { }
         span        { validateSpan $node }
         math        { }
         footnote_ref { }

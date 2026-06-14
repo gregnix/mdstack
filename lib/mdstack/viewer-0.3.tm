@@ -517,6 +517,9 @@ proc mdstack::viewer::renderInline {path node {parentFormatTag ""}} {
         linebreak {
             $t insert end "\n"
         }
+        softbreak {
+            $t insert end " "
+        }
         inline_code {
             # Context tag: code_t in tables, codeinline otherwise
             if {$ctx eq "table"} {
@@ -1075,6 +1078,12 @@ proc mdstack::viewer::renderTable {path block} {
 # the viewer text widget. Embedded windows (frame-mode tables) otherwise swallow
 # the wheel event, so scrolling stops while the pointer is over the table.
 proc mdstack::viewer::_wheelToText {t w} {
+    # Prefer the shared tkutils helper when available (DRY); fall back to an
+    # inline implementation so mdstack stays usable without tkutils.
+    if {![catch {package require tkutils::tkuwheel}]} {
+        ::tkutils::tkuwheel::redirect $t $w
+        return
+    }
     bind $w <MouseWheel> "$t yview scroll \[expr {-%D/30}] units"
     bind $w <Button-4>   "$t yview scroll -3 units"
     bind $w <Button-5>   "$t yview scroll 3 units"

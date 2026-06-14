@@ -133,4 +133,18 @@ test supports-linebreak-1 "supports lists inline:linebreak" -body {
     expr {"inline:linebreak" in [mdstack::parser::supports {}]}
 } -result {1}
 
+test hardbreak-eob-spaces "two trailing spaces at end of block produce NO linebreak" -body {
+    set inlines [dict get [lindex [dict get [mdstack::parser::parse "foo  "] blocks] 0] content]
+    set hasBr 0
+    foreach n $inlines { if {[dict get $n type] eq "linebreak"} { set hasBr 1 } }
+    set hasBr
+} -result {0}
+
+test hardbreak-eob-backslash "trailing backslash at end of block produces NO linebreak" -body {
+    set inlines [dict get [lindex [dict get [mdstack::parser::parse "foo\\"] blocks] 0] content]
+    set hasBr 0
+    foreach n $inlines { if {[dict get $n type] eq "linebreak"} { set hasBr 1 } }
+    set hasBr
+} -result {0}
+
 cleanupTests

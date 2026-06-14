@@ -2,21 +2,7 @@
 
 ## 0.5.0 — 2026-06-14
 
-### Fixed
-- **Indented code keeps trailing spaces.** `parseIndentedCode` no longer
-  trims trailing whitespace from code lines (`    foo  ` -> `foo  `), matching
-  CommonMark. Indented code blocks 66.7->75.0 %.
-
 ### Added
-- **Soft line breaks are now structured nodes.** A soft line break between two
-  lines of a paragraph emits a `softbreak` inline node (mirroring the existing
-  `linebreak` for hard breaks) instead of being flattened to a space at parse
-  time. Renderers decide the presentation: docir HTML emits a newline
-  (CommonMark; visually identical to a space in a browser), while PDF / ODT /
-  roff / Tk viewer / plain text render a space -- so non-HTML output is
-  unchanged. This was the single largest conformance lever: Paragraphs 50->100 %,
-  Soft line breaks 0->100 %, Setext 59.3->77.8 % (multi-line content now
-  matches), Indented code +1; overall strict 39.1->43.1 %, lenient 45.8->49.9 %.
 - **Link destinations rewritten (`_tryLink`).** The destination is now parsed
   with a hand-written scanner instead of a single regex: it supports
   backslash-escaped characters, balanced parentheses (`[x](foo(and(bar)))` ->
@@ -91,10 +77,6 @@
   opens only when left-flanking and closes only when right-flanking
   (`a * foo*`, `*foo *`, `a*"foo"*` are literal; intraword `foo*bar*baz` and
   line-start `*(foo)*` still emphasise). New test `parser-emphasis-flanking.tcl`.
-- `mdstack::viewer` 0.3 and `mdstack::validator` 0.1 now handle the new
-  `softbreak` inline node — the viewer renders it as a space (so multi-line
-  paragraphs keep word spacing in the Tk view) and the validator accepts it
-  as a known inline type.
 
 ### docir side (paired, implemented additively)
 - `docir::md::_mapList` + `docir::html` now render loose lists correctly:

@@ -118,6 +118,10 @@ if {$runCore} {
         parser-inline-features.tcl
         parser-inline-fixes.tcl
         parser-emphasis-flanking.tcl
+        parser-loose-lists.tcl
+        parser-link-features.tcl
+        parser-backslash.tcl
+        parser-code-spans.tcl
         parser-multiline-list.tcl
         parser-nested-lists.tcl
         parser-phase2.tcl

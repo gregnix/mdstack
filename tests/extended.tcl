@@ -236,6 +236,184 @@ test setext-5 "Setext H2 beats Hr when text precedes" -body {
     list [dict get $b type] [dict get $b level]
 } -result {heading 2}
 
+test setext-6 "Indented (4-space) title is code block, not setext heading" -body {
+    # "    foo\n---" -> indented code + thematic break, NOT <h2>foo</h2>
+    set md "    foo\n---"
+    set ast [mdstack::parser::parse $md]
+    set types {}
+    foreach b [dict get $ast blocks] { lappend types [dict get $b type] }
+    set types
+} -result {code_block hr}
+
+test setext-7 "4-space-indented underline is not a setext underline" -body {
+    # underline indented 4+ -> paragraph continuation, no heading
+    set md "Foo\n    ---"
+    set ast [mdstack::parser::parse $md]
+    set b [lindex [dict get $ast blocks] 0]
+    expr {[dict get $b type] eq "heading"}
+} -result {0}
+
+test setext-8 "Underline indented 0-3 still produces a setext heading" -body {
+    set md "  Title\n  ---"
+    set ast [mdstack::parser::parse $md]
+    set b [lindex [dict get $ast blocks] 0]
+    list [dict get $b type] [dict get $b level]
+} -result {heading 2}
+
+# --- Thematic breaks ---
+
+test hr-spaced-markers "spaced markers like '** * ** * **' are a thematic break" -body {
+    set ast [mdstack::parser::parse " **  * ** * ** * **"]
+    set b [lindex [dict get $ast blocks] 0]
+    dict get $b type
+} -result {hr}
+
+test hr-multispace-dashes "dashes with multiple spaces are a thematic break" -body {
+    set ast [mdstack::parser::parse "-     -      -      -"]
+    set b [lindex [dict get $ast blocks] 0]
+    dict get $b type
+} -result {hr}
+
+test hr-indented4-is-code "4-space-indented marker is indented code, not a thematic break" -body {
+    set ast [mdstack::parser::parse "    ***"]
+    set b [lindex [dict get $ast blocks] 0]
+    dict get $b type
+} -result {code_block}
+
+test hr-two-chars-not-hr "two markers are not a thematic break" -body {
+    set ast [mdstack::parser::parse "--"]
+    set b [lindex [dict get $ast blocks] 0]
+    dict get $b type
+} -result {paragraph}
+
+# --- Numeric character references ---
+
+proc _firstInlineText {md} {
+    set ast [mdstack::parser::parse $md]
+    set b0 [lindex [dict get $ast blocks] 0]
+    set v ""
+    foreach n [dict get $b0 content] {
+        if {[dict get $n type] eq "text"} { append v [dict get $n value] }
+    }
+    return $v
+}
+
+test entity-dec "decimal &#35; decodes to #" -body {
+    _firstInlineText "&#35;"
+} -result {#}
+
+test entity-hex "hex &#x22; decodes to a double quote" -body {
+    _firstInlineText "&#x22;"
+} -result {"}
+
+test entity-zero-fffd "invalid &#0; maps to U+FFFD" -body {
+    scan [_firstInlineText "&#0;"] %c cp
+    format 0x%X $cp
+} -result {0xFFFD}
+
+test entity-star-literal "&#42; decodes to a literal '*', not emphasis" -body {
+    set ast [mdstack::parser::parse "&#42;foo&#42;"]
+    set b0 [lindex [dict get $ast blocks] 0]
+    set hasEm 0
+    foreach n [dict get $b0 content] {
+        if {[dict get $n type] in {emphasis strong}} { set hasEm 1 }
+    }
+    list [_firstInlineText "&#42;foo&#42;"] $hasEm
+} -result {*foo* 0}
+
+test entity-toobig-literal "&#87654321; is too large -> left literal" -body {
+    string match "*&#87654321;*" [_firstInlineText "&#87654321;"]
+} -result {1}
+
+test entity-named-decode "named entity &amp; decodes to '&'" -body {
+    _firstInlineText "Tom &amp; Jerry"
+} -result {Tom & Jerry}
+
+test entity-named-multi "&ngE; decodes to two codepoints (8807, 824)" -body {
+    set out {}
+    foreach ch [split [_firstInlineText "&ngE;"] ""] { scan $ch %c c; lappend out $c }
+    set out
+} -result {8807 824}
+
+test entity-named-unknown "unknown named entity stays literal" -body {
+    string match "*&ThisIsNotDefined;*" [_firstInlineText "&ThisIsNotDefined;"]
+} -result {1}
+
+test entity-named-nosemicolon "named entity without ';' is not decoded" -body {
+    string match "*&nbsp*" [_firstInlineText "&nbsp x"]
+} -result {1}
+
+# --- Link destination: backslash escapes ---
+
+proc _linkUrl {md} {
+    set b0 [lindex [dict get [mdstack::parser::parse $md] blocks] 0]
+    foreach n [dict get $b0 content] {
+        if {[dict get $n type] eq "link"} { return [dict get $n url] }
+    }
+    return "<no-link>"
+}
+
+test "linkdest-escaped-parens" {escaped parens in destination} -body {
+    _linkUrl {[link](\(foo\))}
+} -result {(foo)}
+
+test "linkdest-escaped-mixed" {escaped parens and colon} -body {
+    _linkUrl {[link](foo\)\:)}
+} -result {foo):}
+
+test "linkdest-plain-unchanged" {plain destination is unchanged} -body {
+    _linkUrl {[link](/uri)}
+} -result {/uri}
+
+test "linkdest-balanced-parens" {balanced parentheses in destination} -body {
+    _linkUrl {[link](foo(and(bar)))}
+} -result {foo(and(bar))}
+
+test "linkdest-unbalanced-not-link" {unbalanced parens -> not a link} -body {
+    set b0 [lindex [dict get [mdstack::parser::parse {[link](foo(and(bar))}] blocks] 0]
+    set isLink 0
+    foreach n [dict get $b0 content] { if {[dict get $n type] eq "link"} { set isLink 1 } }
+    set isLink
+} -result {0}
+
+# --- Standalone images reuse _tryImage (angle dest, title, plain alt) ---
+
+test "image-standalone-angle" {standalone image with <url> destination} -body {
+    set b [lindex [dict get [mdstack::parser::parse {![Alt](<http://ex/img.png>)}] blocks] 0]
+    list [dict get $b type] [dict get $b url]
+} -result {image http://ex/img.png}
+
+test "image-standalone-title" {standalone image separates the title} -body {
+    set b [lindex [dict get [mdstack::parser::parse {![Alt](pic.jpg "Caption")}] blocks] 0]
+    list [dict get $b url] [dict get $b title]
+} -result {pic.jpg Caption}
+
+test "image-standalone-plain-alt" {standalone alt is plain text (markup stripped)} -body {
+    set b [lindex [dict get [mdstack::parser::parse {![**bold** alt](pic.jpg)}] blocks] 0]
+    dict get $b alt
+} -result {bold alt}
+
+test "indented-code-trailing-spaces" {indented code keeps trailing spaces} -body {
+    set b [lindex [dict get [mdstack::parser::parse "    foo  "] blocks] 0]
+    list [dict get $b type] [dict get $b text]
+} -result {code_block {foo  }}
+
+# --- Soft breaks (parser emits a softbreak node between paragraph lines) ---
+
+test "softbreak-node" {a soft line break produces a softbreak inline node} -body {
+    set b0 [lindex [dict get [mdstack::parser::parse "aaa\nbbb"] blocks] 0]
+    set types {}
+    foreach n [dict get $b0 content] { lappend types [dict get $n type] }
+    set types
+} -result {text softbreak text}
+
+test "softbreak-vs-hardbreak" {two trailing spaces give a hard linebreak, not softbreak} -body {
+    set b0 [lindex [dict get [mdstack::parser::parse "aaa  \nbbb"] blocks] 0]
+    set types {}
+    foreach n [dict get $b0 content] { lappend types [dict get $n type] }
+    set types
+} -result {text linebreak text}
+
 # --- Math (v0.2.10) ---
 
 test math-inline-1 "parse inline math" -body {

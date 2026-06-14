@@ -206,7 +206,7 @@ Note: `style` is `"ordered"` or `"unordered"` (not a boolean).
 
 | Field | Content |
 |-------|---------|
-| `type` | `text` `strong` `emphasis` `inline_code` `link` `image` `span` `strike` `linebreak` |
+| `type` | `text` `strong` `emphasis` `inline_code` `link` `image` `span` `strike` `linebreak` `softbreak` |
 | `value` | text content (type=text, strong, emphasis, inline_code, strike) |
 | `url` | URL (type=link, image) |
 | `title` | title attribute (type=link, image) |
