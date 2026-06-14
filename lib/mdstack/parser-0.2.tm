@@ -1171,20 +1171,45 @@ proc mdstack::parser::_tryCode {s rest idx} {
     return {}
 }
 
-proc mdstack::parser::_tryEmphasis {rest idx} {
+# CommonMark flanking rules for '*' delimiter runs (whitespace + punctuation).
+# A line edge counts as whitespace. inner is the lazy-captured content; dl is the
+# delimiter length (1 emphasis, 2 strong, 3 bold+italic).
+proc mdstack::parser::_isWs {c}    { expr {$c eq "" || [regexp {\s} $c]} }
+proc mdstack::parser::_isPunct {c} { expr {$c ne "" && [regexp {[[:punct:]]} $c]} }
+proc mdstack::parser::_canOpen {prev next} {
+    # left-flanking: not followed by ws, and (not followed by punct OR preceded by ws/punct)
+    expr {![mdstack::parser::_isWs $next]
+          && (![mdstack::parser::_isPunct $next]
+              || [mdstack::parser::_isWs $prev] || [mdstack::parser::_isPunct $prev])}
+}
+proc mdstack::parser::_canClose {prev next} {
+    # right-flanking: not preceded by ws, and (not preceded by punct OR followed by ws/punct)
+    expr {![mdstack::parser::_isWs $prev]
+          && (![mdstack::parser::_isPunct $prev]
+              || [mdstack::parser::_isWs $next] || [mdstack::parser::_isPunct $next])}
+}
+proc mdstack::parser::_flank {s idx rest inner dl} {
+    set prevO [string index $s [expr {$idx - 1}]]
+    set nextO [string index $inner 0]
+    set prevC [string index $inner end]
+    set nextC [string index $rest [expr {$dl + [string length $inner] + $dl}]]
+    expr {[mdstack::parser::_canOpen $prevO $nextO] && [mdstack::parser::_canClose $prevC $nextC]}
+}
+
+proc mdstack::parser::_tryEmphasis {s rest idx} {
     # Bold+Italic
-    if {[regexp {^\*\*\*(.+?)\*\*\*} $rest -> inner]} {
+    if {[regexp {^\*\*\*(.+?)\*\*\*} $rest -> inner] && [mdstack::parser::_flank $s $idx $rest $inner 3]} {
         set d [dict create type strong content [list \
             [dict create type emphasis content [mdstack::parser::parseInlines $inner]]]]
         return [list [expr {$idx + [string length $inner] + 6}] $d]
     }
     # Strong
-    if {[regexp {^\*\*(.+?)\*\*} $rest -> inner]} {
+    if {[regexp {^\*\*(.+?)\*\*} $rest -> inner] && [mdstack::parser::_flank $s $idx $rest $inner 2]} {
         set d [dict create type strong content [mdstack::parser::parseInlines $inner]]
         return [list [expr {$idx + [string length $inner] + 4}] $d]
     }
     # Emphasis
-    if {[regexp {^\*(.+?)\*} $rest -> inner]} {
+    if {[regexp {^\*(.+?)\*} $rest -> inner] && [mdstack::parser::_flank $s $idx $rest $inner 1]} {
         set d [dict create type emphasis content [mdstack::parser::parseInlines $inner]]
         return [list [expr {$idx + [string length $inner] + 2}] $d]
     }
@@ -1306,7 +1331,7 @@ proc mdstack::parser::parseInlines {s} {
             set match [mdstack::parser::_tryCode $s $rest $idx]
         }
         if {$match eq {} && $c eq "*"} {
-            set match [mdstack::parser::_tryEmphasis $rest $idx]
+            set match [mdstack::parser::_tryEmphasis $s $rest $idx]
         }
         if {$match eq {} && $c eq "~"} {
             set match [mdstack::parser::_tryStrike $rest $idx]
