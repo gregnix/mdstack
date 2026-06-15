@@ -263,6 +263,7 @@ proc cmd::exportPdf {} {
         mdstack::pdf::export $ast $outFile \
             -title [file rootname [file tail $::currentFile]] \
             -toc 1 \
+            -cid 1 \
             -footer "- Page %p -" \
             -root [file dirname $::currentFile]
     } err]} {

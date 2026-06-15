@@ -27,6 +27,7 @@
 #   -ownerpassword -> IGNORIERT       (siehe NICHT-PORTIERT)
 #   -debug         -> IGNORIERT       (Diagnostics nicht in docir-pdf-API)
 #   -root          -> ignoriert       (Image-Resolution-Root, evtl. Phase 4)
+#   -cid           -> cid             (1 = volles Unicode-Subset/CID statt 256-Enc)
 #
 # NICHT PORTIERT (bewusst, vom Repo-Owner so entschieden):
 #   - PDF/A-Compliance
@@ -75,6 +76,7 @@ namespace eval mdstack::pdf {
         userpassword  ""
         ownerpassword ""
         theme         ""
+        cid           0
     }
 }
 
@@ -143,6 +145,8 @@ proc mdstack::pdf::_mapOptions {optsList} {
     if {$opts(footer) ne ""}   { dict set d footer   $opts(footer) }
     if {$opts(theme) ne ""}    { dict set d theme    $opts(theme) }
     if {$opts(root) ne ""}     { dict set d root     $opts(root) }
+
+    if {$opts(cid)} { dict set d cid 1 }
 
     if {$opts(pagesize) ne ""} {
         dict set d paper [string tolower $opts(pagesize)]

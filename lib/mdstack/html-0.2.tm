@@ -30,7 +30,7 @@
 # man's bräuchte. Der Cutover wurde in docir-Phase 2 gemacht
 # (siehe docir-CHANGES.md).
 
-package provide mdstack::html 0.1
+package provide mdstack::html 0.2
 
 # DocIR-Pipeline laden ueber das Standard Tcl Module System.
 # Der Aufrufer muss einen tcl::tm::path konfiguriert haben, in dem
@@ -163,6 +163,21 @@ proc mdstack::html::_collectImageUrls {ast} {
 
 proc mdstack::html::_collectImageUrlsFromBlock {block urlsVar} {
     upvar $urlsVar urls
+    # Definition-list items carry no "type" key (shape:
+    # {term termText definitions}). Collect image URLs from the term and
+    # from each definition (both are inline lists) and return, so the
+    # generic "dict get type" below never runs on a type-less item.
+    if {![dict exists $block type]} {
+        if {[dict exists $block term]} {
+            _collectImageUrlsFromInlines [dict get $block term] urls
+        }
+        if {[dict exists $block definitions]} {
+            foreach def [dict get $block definitions] {
+                _collectImageUrlsFromInlines $def urls
+            }
+        }
+        return
+    }
     set type [dict get $block type]
 
     # Block-Image
