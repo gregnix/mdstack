@@ -768,6 +768,13 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
                     incr i
                     continue
                 }
+                # Indented continuation paragraph (Pandoc multi-paragraph
+                # definition) belongs to the current list -> keep the list open.
+                if {[llength $dlItems] > 0 &&
+                    [regexp {^(    |\t)} [lindex $lines [expr {$i + 1}]]]} {
+                    incr i
+                    continue
+                }
                 if {[string trim $peek] ne "" &&
                     ![regexp {^:[[:space:]]+} $peek] &&
                     ($i + 2) < $n &&
@@ -789,6 +796,27 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
                 lset dlItems $lastIdx $lastItem
             }
             incr i
+        } elseif {[llength $dlItems] > 0 &&
+                  [regexp {^(    |\t)} [lindex $lines $i]]} {
+            # Indented continuation paragraph of the current definition list
+            # (Pandoc's multi-paragraph / "lazy" definition form). Collect the
+            # consecutive indented lines as one wrapped paragraph, de-indent
+            # them, and append as an additional definition of the last term.
+            # Without this the block would be misparsed as an indented code
+            # block and rendered as non-wrapping monospace.
+            set para {}
+            while {$i < $n &&
+                   [regexp {^(    |\t)(.*)$} [lindex $lines $i] -> _ rest]} {
+                lappend para [string trimright $rest]
+                incr i
+            }
+            set lastIdx [expr {[llength $dlItems] - 1}]
+            set lastItem [lindex $dlItems $lastIdx]
+            set defs [dict get $lastItem definitions]
+            lappend defs [mdstack::parser::parseInlines \
+                [string trim [join $para " "]]]
+            dict set lastItem definitions $defs
+            lset dlItems $lastIdx $lastItem
         } else {
             # Term-Zeile
             set termText [string trim $cur " \t"]
