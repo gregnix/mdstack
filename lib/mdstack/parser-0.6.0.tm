@@ -1,4 +1,8 @@
-# mdstack::parser 0.5.0
+# mdstack::parser 0.6.0
+#
+# 0.6.0 (2026-06-20): reflink comment-defs ([//NNN]: # (text)) consumed;
+#   indented deflist bodies kept in the list item; underscore emphasis/strong
+#   (_em_ / __strong__) with CommonMark intraword rules (snake_case stays literal).
 #
 # Markdown parser that produces a Tcl-friendly AST (Markdown-AST v1).
 #
@@ -35,7 +39,7 @@
 # v0.2.9  YAML frontmatter, fenced divs (::: {.class} ... :::)
 # v0.2.10 Setext-Headings (=== / ---), inline math ($...$), display math ($$...$$)
 #
-package provide mdstack::parser 0.5.0
+package provide mdstack::parser 0.6.0
 
 namespace eval mdstack::parser {
     namespace export parse validate supports anchorize
@@ -118,8 +122,13 @@ proc mdstack::parser::parse {markdown} {
             set i $j
             continue
         }
-        # Reference link definition
-        if {[regexp {^\[([^\]]+)\]:\s+(\S+)(?:\s+"([^"]*)")?\s*$} $line -> ref url title]} {
+        # Reference link definition. The title may be delimited by double
+        # quotes, single quotes, or parentheses (CommonMark). The parenthesized
+        # form is what doctools emits for its "[//NNN]: # (comment)" metadata
+        # lines, which must be consumed (hidden) rather than shown as text.
+        if {[regexp {^\[([^\]]+)\]:\s+(\S+)(?:\s+(?:"((?:\\.|[^"])*)"|'((?:\\.|[^'])*)'|\(((?:\\.|[^)])*)\)))?\s*$} \
+                $line -> ref url t1 t2 t3]} {
+            set title $t1$t2$t3
             set key [string tolower $ref]
             if {![dict exists $reflinks $key]} {
                 dict set reflinks $key [dict create url $url title $title label $ref]
@@ -187,12 +196,12 @@ proc mdstack::parser::supports {ast} {
         blocks:code_block blocks:code_indented blocks:hr
         blocks:image blocks:table blocks:blockquote blocks:deflist
         blocks:div blocks:footnote_def blocks:footnote_section
-        blocks:yaml_frontmatter
+        blocks:yaml_frontmatter blocks:html
 
         inline:text inline:strong inline:emphasis inline:strike
         inline:inline_code inline:link inline:image inline:linebreak
         inline:reflink inline:refimage
-        inline:span inline:footnote_ref
+        inline:span inline:footnote_ref inline:html
     }
 }
 
@@ -448,6 +457,17 @@ proc mdstack::parser::parseBlocks {linesVar refDefLinesVar} {
             }
         }
 
+        # Block-level HTML (doctools navigation bar etc.): a line starting
+        # with a block-level tag begins a raw-HTML block that runs to the next
+        # blank line. We interpret it (not show raw) -- see parseHtmlBlock.
+        if {[mdstack::parser::isHtmlBlockStart $line]} {
+            set nodes [mdstack::parser::parseHtmlBlock lines i]
+            if {[llength $nodes] > 0} {
+                lappend blocks {*}$nodes
+                continue
+            }
+        }
+
         # Fallback: Paragraph
         lappend blocks {*}[mdstack::parser::parseParagraph lines i refDefLines]
     }
@@ -458,6 +478,56 @@ proc mdstack::parser::parseBlocks {linesVar refDefLinesVar} {
 # ============================================================
 # Block parsers (parseXxx) -- each advances i past consumed lines
 # ============================================================
+
+# A line begins a block-level HTML block when its first non-space content is
+# a block-level tag or an HTML comment (CommonMark HTML block, type 6/7).
+# Inline-only tags (e.g. <a ...>) are NOT block starters -- they are handled
+# inside paragraphs by _tryHtmlInline.
+proc mdstack::parser::isHtmlBlockStart {line} {
+    return [regexp -nocase \
+        {^\s*<(?:!--|/?(?:hr|div|table|thead|tbody|tfoot|tr|td|th|p|h[1-6]|ul|ol|li|dl|dt|dd|blockquote|pre|section|article|aside|header|footer|nav|figure|figcaption|form|fieldset|address|details|summary|main|center)\y)} \
+        $line]
+}
+
+# Collect a raw-HTML block (until the next blank line) and interpret it into
+# DocIR-compatible nodes: every <hr> becomes an `hr` block, and the text
+# between rules is run through the inline parser (so embedded <a href> links
+# and HTML entities are resolved). Lines are joined with spaces first so tags
+# that doctools wraps across several lines are reassembled.
+proc mdstack::parser::parseHtmlBlock {linesVar iVar} {
+    upvar $linesVar lines $iVar i
+    set n [llength $lines]
+    set buf {}
+    while {$i < $n} {
+        set l [lindex $lines $i]
+        if {[string trim $l] eq ""} { break }
+        lappend buf [string trim $l]
+        incr i
+    }
+    set joined [join $buf " "]
+    set marked [regsub -all -nocase {<hr\s*/?>} $joined "\x01"]
+    set nodes {}
+    set first 1
+    foreach seg [split $marked "\x01"] {
+        if {!$first} { lappend nodes [dict create type hr] }
+        set first 0
+        set seg [string trim $seg]
+        if {$seg eq ""} continue
+        set inl [mdstack::parser::parseInlines $seg]
+        # Drop a segment that carries no visible content (only stripped tags).
+        set visible 0
+        foreach node $inl {
+            set t [dict get $node type]
+            if {$t eq "text"} {
+                if {[string trim [dict get $node value]] ne ""} { set visible 1; break }
+            } else { set visible 1; break }
+        }
+        if {$visible} {
+            lappend nodes [dict create type paragraph content $inl]
+        }
+    }
+    return $nodes
+}
 
 proc mdstack::parser::parseFencedCode {linesVar iVar} {
     upvar $linesVar lines $iVar i
@@ -652,6 +722,19 @@ proc mdstack::parser::parseListBlock {linesVar iVar} {
     regexp {^([[:space:]]*)} $firstLine -> _ws
     set baseIndent [string length $_ws]
 
+    # Content column of the list item = marker indent + marker width + spaces
+    # after the marker. Continuation lines (incl. blank-separated paragraphs
+    # and nested lists) belong to the item when indented to at least this
+    # column. doctools definition lists use "  - " (content column 4), so the
+    # 4-space body must stay with the item rather than become indented code.
+    if {[regexp {^([[:space:]]*)(\*|-|[0-9]+\.)([[:space:]]+)} \
+            $firstLine -> _cw _cm _cs]} {
+        set contentIndent [expr {[string length $_cw] + [string length $_cm] \
+            + [string length $_cs]}]
+    } else {
+        set contentIndent [expr {$baseIndent + 2}]
+    }
+
     while {$i < $n} {
         set cur [string trimright [lindex $lines $i]]
         if {[regexp {^([[:space:]]*)(\*|-|[0-9]+\.)[[:space:]]+} $cur -> lineWs]} {
@@ -679,11 +762,16 @@ proc mdstack::parser::parseListBlock {linesVar iVar} {
                     }
                     lappend listLines ""
                     incr i
-                } elseif {[regexp {^[[:space:]]{2,}\S} $next]
-                          && ![regexp {^(    |\t)} $next]} {
-                    # blank line followed by an indented continuation (2-3 spaces,
-                    # not a 4-space/tab indented-code line): the list stays open
-                    # as a loose / multi-paragraph item
+                } elseif {[regexp {^([[:space:]]+)\S} $next -> nextCont]
+                          && (($baseIndent > 0
+                               && [string length $nextCont] >= $contentIndent)
+                              || ($baseIndent == 0
+                                  && ![regexp {^(    |\t)} $next]))} {
+                    # blank line followed by a continuation. For an indented
+                    # list (doctools "  - ", content column >= 4) we keep the
+                    # item open when the line reaches the content column. For a
+                    # top-level list we keep the historical rule (2-3 spaces,
+                    # a 4-space/tab line starts indented code instead).
                     lappend listLines ""
                     incr i
                 } else {
@@ -1452,6 +1540,49 @@ proc mdstack::parser::_tryEmphasis {s rest idx} {
     return {}
 }
 
+# Underscore emphasis/strong. Unlike '*', '_' must NOT open or close emphasis
+# inside a word (CommonMark: intraword underscores are literal, protecting
+# identifiers like foo_bar). doctools-generated Markdown uses __name__ for bold
+# pervasively, so this is required to render tcllib docs correctly.
+proc mdstack::parser::_flankUnderscore {s idx rest inner dl} {
+    set prevO [string index $s [expr {$idx - 1}]]
+    set nextO [string index $inner 0]
+    set prevC [string index $inner end]
+    set nextC [string index $rest [expr {$dl + [string length $inner] + $dl}]]
+    # Opener: left-flanking AND (not right-flanking OR preceded by punctuation).
+    set lfO [mdstack::parser::_canOpen  $prevO $nextO]
+    set rfO [mdstack::parser::_canClose $prevO $nextO]
+    set openOK [expr {$lfO && (!$rfO || [mdstack::parser::_isPunct $prevO])}]
+    # Closer: right-flanking AND (not left-flanking OR followed by punctuation).
+    set lfC [mdstack::parser::_canOpen  $prevC $nextC]
+    set rfC [mdstack::parser::_canClose $prevC $nextC]
+    set closeOK [expr {$rfC && (!$lfC || [mdstack::parser::_isPunct $nextC])}]
+    expr {$openOK && $closeOK}
+}
+
+proc mdstack::parser::_tryEmphasisUnderscore {s rest idx} {
+    # Bold+Italic ___...___
+    if {[regexp {^___(.+?)___} $rest -> inner] \
+            && [mdstack::parser::_flankUnderscore $s $idx $rest $inner 3]} {
+        set d [dict create type strong content [list \
+            [dict create type emphasis content [mdstack::parser::parseInlines $inner]]]]
+        return [list [expr {$idx + [string length $inner] + 6}] $d]
+    }
+    # Strong __...__
+    if {[regexp {^__(.+?)__} $rest -> inner] \
+            && [mdstack::parser::_flankUnderscore $s $idx $rest $inner 2]} {
+        set d [dict create type strong content [mdstack::parser::parseInlines $inner]]
+        return [list [expr {$idx + [string length $inner] + 4}] $d]
+    }
+    # Emphasis _..._
+    if {[regexp {^_(.+?)_} $rest -> inner] \
+            && [mdstack::parser::_flankUnderscore $s $idx $rest $inner 1]} {
+        set d [dict create type emphasis content [mdstack::parser::parseInlines $inner]]
+        return [list [expr {$idx + [string length $inner] + 2}] $d]
+    }
+    return {}
+}
+
 # Inline-Math: $...$ (Pandoc-Style)
 # Strikte Regeln gegen false positives:
 #   - oeffnendes $ darf nicht von space/digit/backtick gefolgt sein
@@ -1544,6 +1675,49 @@ proc mdstack::parser::_entityNode {cp} {
     }
     return [dict create type text value [format %c $cp]]
 }
+# Inline HTML (interpret, do not show raw). doctools-generated Markdown embeds
+# real HTML: <a href="..."> links, <a name='...'></a> anchors, <br>, and the
+# navigation bar. We map <a href> to a link inline, <br> to a linebreak, and
+# strip every other tag (keeping the surrounding text) so nothing renders as
+# literal "<...>". HTML entities are handled separately by _tryEntity.
+proc mdstack::parser::_tryHtmlInline {s rest idx len} {
+    # HTML comment
+    if {[regexp -indices {^<!--.*?-->} $rest mr]} {
+        return [list [expr {$idx + [lindex $mr 1] + 1}] [dict create type text value ""]]
+    }
+    # <a ...> -- with href becomes a link; otherwise the tag is dropped
+    if {[regexp -nocase -indices {^<a\s[^>]*>} $rest openRange]} {
+        set openTag [string range $rest 0 [lindex $openRange 1]]
+        if {[regexp -nocase {href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s">]+))} \
+                $openTag -> h1 h2 h3]} {
+            set url $h1$h2$h3
+            set afterOpen [expr {[lindex $openRange 1] + 1}]
+            set restAfter [string range $rest $afterOpen end]
+            if {[regexp -nocase -indices {</a\s*>} $restAfter closeRange]} {
+                set inner [string range $restAfter 0 [expr {[lindex $closeRange 0] - 1}]]
+                set consumed [expr {$afterOpen + [lindex $closeRange 1] + 1}]
+                set label [mdstack::parser::parseInlines $inner]
+                if {[llength $label] == 0} {
+                    set label [list [dict create type text value $url]]
+                }
+                set d [dict create type link label $label url $url]
+                return [list [expr {$idx + $consumed}] $d]
+            }
+        }
+        return [list [expr {$idx + [lindex $openRange 1] + 1}] \
+            [dict create type text value ""]]
+    }
+    # <br> / <br/>
+    if {[regexp -nocase -indices {^<br\s*/?>} $rest mr]} {
+        return [list [expr {$idx + [lindex $mr 1] + 1}] [dict create type linebreak]]
+    }
+    # any other opening/closing tag -> drop the tag, keep surrounding text
+    if {[regexp -indices {^</?[a-zA-Z][^>]*>} $rest mr]} {
+        return [list [expr {$idx + [lindex $mr 1] + 1}] [dict create type text value ""]]
+    }
+    return {}
+}
+
 proc mdstack::parser::_tryEntity {s idx len} {
     set rest [string range $s $idx end]
     # Hex must be checked before decimal because both start with "&#".
@@ -1609,6 +1783,9 @@ proc mdstack::parser::parseInlines {s} {
         if {$match eq {} && $c eq "*"} {
             set match [mdstack::parser::_tryEmphasis $s $rest $idx]
         }
+        if {$match eq {} && $c eq "_"} {
+            set match [mdstack::parser::_tryEmphasisUnderscore $s $rest $idx]
+        }
         if {$match eq {} && $c eq "~"} {
             set match [mdstack::parser::_tryStrike $rest $idx]
         }
@@ -1617,6 +1794,9 @@ proc mdstack::parser::parseInlines {s} {
         }
         if {$match eq {} && $c eq "<"} {
             set match [mdstack::parser::_tryAutolink $s $rest $idx]
+            if {$match eq {}} {
+                set match [mdstack::parser::_tryHtmlInline $s $rest $idx $len]
+            }
         }
         if {$match eq {} && $c eq "h"} {
             set match [mdstack::parser::_tryAutolink $s $rest $idx]
@@ -1635,7 +1815,7 @@ proc mdstack::parser::parseInlines {s} {
         set plainEnd $idx
         while {$plainEnd < $len} {
             set pc [string index $s $plainEnd]
-            if {$pc in {! \[ ` * ~ \x00 \\ < $ &}} { break }
+            if {$pc in {! \[ ` * _ ~ \x00 \\ < $ &}} { break }
             if {$pc eq "h" && [string range $s $plainEnd [expr {$plainEnd + 6}]] in {http:// https:/}} {
                 break
             }

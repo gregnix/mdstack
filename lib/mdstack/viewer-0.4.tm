@@ -1,4 +1,4 @@
-# mdviewer-0.3.tm
+# mdviewer-0.4.tm
 #
 # Tk widget to render Markdown-AST v1.
 #
@@ -52,7 +52,7 @@
 #   mdstack::viewer::setFontSize $path $size   → reconfigure all tag fonts
 #
 package require Tk
-package provide mdstack::viewer 0.3
+package provide mdstack::viewer 0.4
 
 namespace eval mdstack::viewer {
     namespace export create widget clear render renderModel configure cget \
@@ -88,6 +88,7 @@ proc mdstack::viewer::create {path args} {
     set state($path,onclick) ""
     set state($path,fontsize) 10
     set state($path,tablemode) "text"
+    set state($path,tableFrameMax) 12
     set state($path,tableCounter) 0
 
     # Create named fonts (per instance, for independent font size)
@@ -129,6 +130,7 @@ proc mdstack::viewer::configure {path args} {
             -root     { set state($path,root) $v }
             -fontsize  { mdstack::viewer::setFontSize $path $v }
             -tablemode { set state($path,tablemode) $v }
+            -tableframemax { set state($path,tableFrameMax) $v }
             default    { error "mdstack::viewer::configure: unknown option $k" }
         }
     }
@@ -144,6 +146,7 @@ proc mdstack::viewer::cget {path option} {
         -root     { return $state($path,root) }
         -fontsize  { return $state($path,fontsize) }
         -tablemode { return $state($path,tablemode) }
+        -tableframemax { return $state($path,tableFrameMax) }
         default    { error "mdstack::viewer::cget: unknown option $option" }
     }
 }
@@ -385,7 +388,13 @@ proc mdstack::viewer::renderBlock {path block} {
         }
         table {
             variable state
-            if {$state($path,tablemode) eq "frame"} {
+            # Frame tables embed one widget per cell, which is far too slow for
+            # large tables (e.g. the tcllib keyword index with ~900 rows takes
+            # ~20 s). Above a row threshold, render such tables in the fast text
+            # mode instead. The threshold is configurable via -tableframemax.
+            set rowCount [llength [dict get $block content]]
+            if {$state($path,tablemode) eq "frame"
+                    && $rowCount <= $state($path,tableFrameMax)} {
                 mdstack::viewer::renderTableFrame $path $block
             } else {
                 set tableStart [$t index "end -1 chars"]

@@ -1,6 +1,41 @@
 # mdstack — Changelog
 
-## 0.5.0 — 2026-06-14
+## 0.6.0
+
+Doctools-oriented parser fixes (rendering of tcllib `embedded/md` pages) plus a
+viewer performance option. Paired with **DocIR 0.1.1 + renderer-tk 0.2**.
+
+### parser 0.6.0
+
+#### Fixed
+- **Reference-link comment definitions no longer leak into the output.**
+  doctools metadata lines of the form `[//NNN]: # (text)` were emitted as a
+  paragraph because the reflink regex only accepted `"…"` titles. It now also
+  accepts `'…'` and `(…)` titles (with backslash escapes), so these definition
+  lines are consumed instead of shown.
+- **Indented definition-list bodies stay inside the list item.** A doctools
+  entry `  - __cmd__` (marker col 2, content col 4) followed by a 4-space
+  indented body kept its continuation as the item's body instead of detaching
+  it into an indented code block. Top-level lists keep their previous closing
+  behaviour (no regression).
+
+#### Added
+- **Underscore emphasis / strong (`_em_`, `__strong__`).** Underscore emphasis
+  now follows the CommonMark intraword rules: a `_` inside a word does not
+  toggle, so `snake_case` stays literal, while `__name__` becomes strong.
+  doctools uses `__name__` extensively for command names — these now render
+  bold. (Complements the `*`-flanking work from 0.5.0.)
+
+### viewer 0.4
+
+#### Added
+- **`-tableframemax` option (default 12).** In `-tablemode frame`, tables with
+  more rows than the threshold fall back to fast text rendering — one label
+  widget per cell is O(n²) on `grid`. `-tableframemax 0` forces text for all
+  tables (fastest). The tcllib keyword index dropped from ~21 s to ~1.5 s.
+  Added to `create` / `configure` / `cget`.
+
+## 0.5.0
 
 ### Fixed
 - **Indented code keeps trailing spaces.** `parseIndentedCode` no longer

@@ -11,11 +11,11 @@ by design it knows no concrete modules and is intentionally *not* a loader.
 
 | module | ver | tier | declared requires | dedicated test | doc |
 |--------|-----|------|-------------------|----------------|-----|
-| parser | 0.2 | core | *(none)* | indirect | — |
+| parser | 0.6.0 | core | *(none)* | indirect | — |
 | model | 0.1 | core | *(none)* | indirect | — |
 | theme | 0.1 | core | *(none)* | — | — |
 | text | 0.1 | Tk\* | *(none)* | indirect | — |
-| viewer | 0.3 | Tk | Tk · *opt:* tkutils::tkuwheel, Img, tksvg | **viewer.tcl** | — |
+| viewer | 0.4 | Tk | Tk · *opt:* tkutils::tkuwheel, Img, tksvg | **viewer.tcl** | — |
 | outline | 0.1 | Tk | Tk, mdstack::text 0.1 | — | — |
 | search | 0.1 | Tk | Tk (+ self-require — review) | indirect | — |
 | contextmenu | 0.1 | Tk | Tk, mdstack::uicontextmenu 0.1 | indirect | — |

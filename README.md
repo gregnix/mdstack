@@ -2,7 +2,7 @@
 
 A complete Markdown processing stack for Tcl/Tk applications.
 
-**Version:** 0.3.4  
+**Version:** 0.6.0  
 **Status:** Stable
 
 ---
@@ -13,7 +13,7 @@ A complete Markdown processing stack for Tcl/Tk applications.
 
 | Module | Version | Description |
 |--------|---------|-------------|
-| `mdstack::parser` | 0.2 | Markdown → AST parser (CommonMark subset + TIP-700) |
+| `mdstack::parser` | 0.6.0 | Markdown → AST parser (CommonMark subset + TIP-700) |
 | `mdstack` | 0.1 | Orchestrator / stack manager |
 | `mdstack::model` | 0.1 | Document model |
 | `mdstack::validator` | 0.1 | AST validator |
@@ -22,7 +22,7 @@ A complete Markdown processing stack for Tcl/Tk applications.
 
 | Module | Version | Description |
 |--------|---------|-------------|
-| `mdstack::viewer` | 0.3 | Markdown viewer (Tk text widget) |
+| `mdstack::viewer` | 0.4 | Markdown viewer (Tk text widget) |
 | `mdstack::pdf` | 0.2 | Markdown → PDF *(adapter to DocIR pipeline since May 2026)* |
 | `mdstack::html` | 0.1 | Markdown → HTML *(adapter to DocIR pipeline since May 2026)* |
 
