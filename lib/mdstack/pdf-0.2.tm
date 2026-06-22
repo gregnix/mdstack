@@ -77,6 +77,7 @@ namespace eval mdstack::pdf {
         ownerpassword ""
         theme         ""
         cid           0
+        flowFont      ""
     }
 }
 
@@ -147,6 +148,10 @@ proc mdstack::pdf::_mapOptions {optsList} {
     if {$opts(root) ne ""}     { dict set d root     $opts(root) }
 
     if {$opts(cid)} { dict set d cid 1 }
+
+    if {[info exists opts(flowFont)] && $opts(flowFont) ne ""} {
+        dict set d flowFont $opts(flowFont)
+    }
 
     if {$opts(pagesize) ne ""} {
         dict set d paper [string tolower $opts(pagesize)]
