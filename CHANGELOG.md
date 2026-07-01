@@ -1,5 +1,23 @@
 # mdstack — Changelog
 
+## Unreleased — mdstack::pdf 0.3 (Adapter)
+
+`lib/mdstack/pdf-0.3.tm` (was `pdf-0.2.tm`); pkgIndex bumped to 0.3.
+
+- **PDF/A and AES encryption restored.** `-pdfa` (`1b`/`2b`/`3b`),
+  `-userpassword` and `-ownerpassword` are forwarded to `docir::pdf`, which
+  threads them to `pdf4tcl::new`. Since the 2026-05-06 DocIR cutover these had
+  been silently dropped, so callers received plain / unencrypted PDFs without
+  any notice.
+- **`-toc` wired to docir-pdf's two-pass TOC** (`generateToc`, with page
+  numbers). Previously ignored.
+- Requesting PDF/A together with a password now raises a clear error — the two
+  are mutually exclusive — instead of emitting an invalid encrypted-yet-PDF/A
+  file.
+- Requires **docir::pdf 0.3** and **pdf4tcllib 0.3**.
+- With this, nothing from the original `mdpdf` renderer remains unported.
+
+
 ## 0.6.0
 
 Doctools-oriented parser fixes (rendering of tcllib `embedded/md` pages) plus a

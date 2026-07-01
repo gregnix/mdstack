@@ -1,4 +1,4 @@
-# mdpdf-0.2.tm -- Markdown AST zu PDF Renderer
+# mdstack-pdf-0.3.tm -- Markdown AST zu PDF (Adapter zur DocIR-Pipeline)
 #
 # CUTOVER 2026-05-06: Adapter zur DocIR-Pipeline.
 #
@@ -20,19 +20,20 @@
 #   -theme         -> theme           (1:1, mdstack::theme::toPdfOpts)
 #   -fontdir       -> ignoriert       (TTF-Pfade nun explizit)
 #   -creator       -> author          (mappt auf author-meta)
-#   -toc           -> IGNORIERT       (kein TOC in docir-pdf - siehe NICHT-PORTIERT)
+#   -toc           -> generateToc     (docir-pdf 2-Pass-TOC mit Seitenzahlen)
 #   -compress      -> IGNORIERT       (pdf4tcl-Default)
-#   -pdfa          -> IGNORIERT       (siehe NICHT-PORTIERT)
-#   -userpassword  -> IGNORIERT       (siehe NICHT-PORTIERT)
-#   -ownerpassword -> IGNORIERT       (siehe NICHT-PORTIERT)
+#   -pdfa          -> pdfa           (an docir::pdf -> pdf4tcl::new)
+#   -userpassword  -> userpassword   (an docir::pdf -> pdf4tcl::new)
+#   -ownerpassword -> ownerpassword  (an docir::pdf -> pdf4tcl::new)
 #   -debug         -> IGNORIERT       (Diagnostics nicht in docir-pdf-API)
 #   -root          -> ignoriert       (Image-Resolution-Root, evtl. Phase 4)
 #   -cid           -> cid             (1 = volles Unicode-Subset/CID statt 256-Enc)
 #
-# NICHT PORTIERT (bewusst, vom Repo-Owner so entschieden):
-#   - PDF/A-Compliance
-#   - AES-128 Encryption (User/Owner-Passwords)
-#   - TOC-Generation (mdpdf hatte automatische TOC mit Outlines)
+# NICHT PORTIERT: nichts mehr.
+#
+# Seit 0.3 sind alle mdpdf-Optionen abgedeckt:
+#   -pdfa/-userpassword/-ownerpassword -> docir::pdf -> pdf4tcl (Pass-through)
+#   -toc                               -> docir::pdf generateToc (2-Pass-TOC)
 #
 # Wenn diese Features benoetigt werden, kann mdpdf-0.2.tm.legacy
 # (das Original) reaktiviert werden.
@@ -43,14 +44,14 @@
 #   mdstack::pdf::exportFile  mdFile outFile ?options?
 #   mdstack::pdf::exportModel doc outFile ?options?
 
-package provide mdstack::pdf 0.2
+package provide mdstack::pdf 0.3
 
 # DocIR-Pipeline laden ueber das Standard Tcl Module System.
 # Der Aufrufer muss einen tcl::tm::path konfiguriert haben, in dem
 # docir-0.1.tm (Hub) und docir/pdf-0.1.tm + docir/mdSource-0.1.tm
 # auffindbar sind.
 package require docir::mdSource
-package require docir::pdf
+package require docir::pdf 0.3
 
 namespace eval mdstack::pdf {
     namespace export export exportFile exportModel configure
@@ -156,6 +157,16 @@ proc mdstack::pdf::_mapOptions {optsList} {
     if {$opts(pagesize) ne ""} {
         dict set d paper [string tolower $opts(pagesize)]
     }
+
+    # PDF/A conformance and AES encryption are pdf4tcl-level features; docir::pdf
+    # threads them straight through to pdf4tcl::new. Only forward when set.
+    if {$opts(pdfa) ne ""}          { dict set d pdfa          $opts(pdfa) }
+    if {$opts(userpassword) ne ""}  { dict set d userpassword  $opts(userpassword) }
+    if {$opts(ownerpassword) ne ""} { dict set d ownerpassword $opts(ownerpassword) }
+
+    # -toc uses docir-pdf's own two-pass TOC (with page numbers). tocTitle /
+    # tocDepth keep docir's defaults ("Inhaltsverzeichnis", depth 2).
+    if {$opts(toc)} { dict set d generateToc 1 }
 
     return $d
 }
