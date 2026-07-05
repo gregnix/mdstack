@@ -7,7 +7,7 @@ package ifneeded mdstack::editorkit               0.2      [list source -encodin
 package ifneeded mdstack::html                    0.2      [list source -encoding utf-8 [file join $dir mdstack html-0.2.tm]]
 package ifneeded mdstack::model                   0.1      [list source -encoding utf-8 [file join $dir mdstack model-0.1.tm]]
 package ifneeded mdstack::outline                 0.1      [list source -encoding utf-8 [file join $dir mdstack outline-0.1.tm]]
-package ifneeded mdstack::parser                  0.6.0    [list source -encoding utf-8 [file join $dir mdstack parser-0.6.0.tm]]
+package ifneeded mdstack::parser                  0.6.1    [list source -encoding utf-8 [file join $dir mdstack parser-0.6.1.tm]]
 package ifneeded mdstack::pdf                     0.3      [list source -encoding utf-8 [file join $dir mdstack pdf-0.3.tm]]
 package ifneeded mdstack::search                  0.1      [list source -encoding utf-8 [file join $dir mdstack search-0.1.tm]]
 package ifneeded mdstack::stacknoteskit           0.1      [list source -encoding utf-8 [file join $dir mdstack stacknoteskit-0.1.tm]]

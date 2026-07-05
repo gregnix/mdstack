@@ -1,4 +1,4 @@
-# mdstack::parser 0.6.0
+# mdstack::parser 0.6.1
 #
 # 0.6.0 (2026-06-20): reflink comment-defs ([//NNN]: # (text)) consumed;
 #   indented deflist bodies kept in the list item; underscore emphasis/strong
@@ -38,8 +38,10 @@
 # v0.2.8  Bracketed spans [t]{.c} (TIP 700), shortcut reference links [t]
 # v0.2.9  YAML frontmatter, fenced divs (::: {.class} ... :::)
 # v0.2.10 Setext-Headings (=== / ---), inline math ($...$), display math ($$...$$)
+# v0.6.1  CommonMark: _isPunct follows P+S (symbol/currency flanking); '+'
+#         bullets and 'N)' ordered markers; new list on marker/delimiter change
 #
-package provide mdstack::parser 0.6.0
+package provide mdstack::parser 0.6.1
 
 namespace eval mdstack::parser {
     namespace export parse validate supports anchorize
@@ -246,7 +248,7 @@ proc mdstack::parser::isBlockquote {line} {
 }
 
 proc mdstack::parser::isListItem {line} {
-    regexp {^([[:space:]]*)(\*|-|[0-9]+\.)[[:space:]]+} $line
+    regexp {^([[:space:]]*)(\*|-|\+|[0-9]+[.)])[[:space:]]+} $line
 }
 
 proc mdstack::parser::isIndentedCode {line} {
@@ -706,6 +708,15 @@ proc mdstack::parser::parseBlockquote {linesVar iVar} {
         blocks [dict get $innerAst blocks]]
 }
 
+# Marker identity for the "new list on marker/delimiter change" rule: bullet
+# lists differ by their bullet char (* - +), ordered lists by their delimiter
+# (. or )). A change at the same indent starts a new list (CommonMark).
+proc mdstack::parser::_markerId {line} {
+    if {[regexp {^[[:space:]]*[0-9]+([.)])[[:space:]]+} $line -> d]} { return "o$d" }
+    if {[regexp {^[[:space:]]*(\*|-|\+)[[:space:]]+} $line -> b]} { return "b$b" }
+    return ""
+}
+
 proc mdstack::parser::parseListBlock {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set n [llength $lines]
@@ -718,7 +729,8 @@ proc mdstack::parser::parseListBlock {linesVar iVar} {
 
     # Determine type and base indent of first marker
     set firstLine [string trimright [lindex $lines $i]]
-    set curOrdered [regexp {^[[:space:]]*[0-9]+\.[[:space:]]+} $firstLine]
+    set curOrdered [regexp {^[[:space:]]*[0-9]+[.)][[:space:]]+} $firstLine]
+    set curMark [mdstack::parser::_markerId $firstLine]
     regexp {^([[:space:]]*)} $firstLine -> _ws
     set baseIndent [string length $_ws]
 
@@ -727,7 +739,7 @@ proc mdstack::parser::parseListBlock {linesVar iVar} {
     # and nested lists) belong to the item when indented to at least this
     # column. doctools definition lists use "  - " (content column 4), so the
     # 4-space body must stay with the item rather than become indented code.
-    if {[regexp {^([[:space:]]*)(\*|-|[0-9]+\.)([[:space:]]+)} \
+    if {[regexp {^([[:space:]]*)(\*|-|\+|[0-9]+[.)])([[:space:]]+)} \
             $firstLine -> _cw _cm _cs]} {
         set contentIndent [expr {[string length $_cw] + [string length $_cm] \
             + [string length $_cs]}]
@@ -737,14 +749,14 @@ proc mdstack::parser::parseListBlock {linesVar iVar} {
 
     while {$i < $n} {
         set cur [string trimright [lindex $lines $i]]
-        if {[regexp {^([[:space:]]*)(\*|-|[0-9]+\.)[[:space:]]+} $cur -> lineWs]} {
+        if {[regexp {^([[:space:]]*)(\*|-|\+|[0-9]+[.)])[[:space:]]+} $cur -> lineWs]} {
             set lineIndent [string length $lineWs]
-            set lineOrdered [regexp {^[[:space:]]*[0-9]+\.[[:space:]]+} $cur]
-            # Break on type mismatch only at top-level indent (sublist markers
-            # may freely differ from the outer list type)
+            set lineMark [mdstack::parser::_markerId $cur]
+            # New list on marker / delimiter change (CommonMark). Only at
+            # top-level indent -- nested markers may differ freely.
             if {[llength $listLines] > 0
                     && $lineIndent <= $baseIndent
-                    && $lineOrdered != $curOrdered} {
+                    && $lineMark ne $curMark} {
                 break
             }
             lappend listLines $cur
@@ -754,10 +766,10 @@ proc mdstack::parser::parseListBlock {linesVar iVar} {
             # the same type
             if {($i + 1) < $n} {
                 set next [string trimright [lindex $lines [expr {$i + 1}]]]
-                if {[regexp {^([[:space:]]*)(\*|-|[0-9]+\.)[[:space:]]+} $next -> nextWs]} {
+                if {[regexp {^([[:space:]]*)(\*|-|\+|[0-9]+[.)])[[:space:]]+} $next -> nextWs]} {
                     set nextIndent [string length $nextWs]
-                    set nextOrdered [regexp {^[[:space:]]*[0-9]+\.[[:space:]]+} $next]
-                    if {$nextIndent <= $baseIndent && $nextOrdered != $curOrdered} {
+                    set nextMark [mdstack::parser::_markerId $next]
+                    if {$nextIndent <= $baseIndent && $nextMark ne $curMark} {
                         break
                     }
                     lappend listLines ""
@@ -1015,8 +1027,8 @@ proc mdstack::parser::parseListLines {lines} {
     regexp {^([[:space:]]*)} [lindex $lines 0] -> baseWs
     set baseIndent [string length $baseWs]
 
-    regexp {^[[:space:]]*(\*|-|[0-9]+\.)[[:space:]]+} [lindex $lines 0] -> firstMarker
-    set ordered [expr {[regexp {^[0-9]+\.$} $firstMarker]}]
+    regexp {^[[:space:]]*(\*|-|\+|[0-9]+[.)])[[:space:]]+} [lindex $lines 0] -> firstMarker
+    set ordered [expr {[regexp {^[0-9]+[.)]$} $firstMarker]}]
 
     set items {}
     set curParas {}
@@ -1031,10 +1043,10 @@ proc mdstack::parser::parseListLines {lines} {
     foreach line $lines {
         regexp {^([[:space:]]*)} $line -> ws
         set lineIndent [string length $ws]
-        set hasMarker [regexp {^[[:space:]]*(\*|-|[0-9]+\.)[[:space:]]+} $line]
+        set hasMarker [regexp {^[[:space:]]*(\*|-|\+|[0-9]+[.)])[[:space:]]+} $line]
 
         if {$lineIndent <= $baseIndent && $hasMarker &&
-            [regexp {^[[:space:]]*(\*|-|[0-9]+\.)[[:space:]]+(.*)$} $line -> _m itemText]} {
+            [regexp {^[[:space:]]*(\*|-|\+|[0-9]+[.)])[[:space:]]+(.*)$} $line -> _m itemText]} {
             if {$hasItem} {
                 if {$curText ne ""} { lappend curParas $curText; set curText "" }
                 lappend items [mdstack::parser::_mkListItem $curParas $subLines $currentChecked]
@@ -1499,7 +1511,17 @@ proc mdstack::parser::_tryCode {s rest idx} {
 # A line edge counts as whitespace. inner is the lazy-captured content; dl is the
 # delimiter length (1 emphasis, 2 strong, 3 bold+italic).
 proc mdstack::parser::_isWs {c}    { expr {$c eq "" || [regexp {\s} $c]} }
-proc mdstack::parser::_isPunct {c} { expr {$c ne "" && [regexp {[[:punct:]]} $c]} }
+proc mdstack::parser::_isPunct {c} {
+    # CommonMark counts Unicode P (punctuation) AND S (symbol) as "punctuation"
+    # for emphasis flanking. Tcl's [[:punct:]] omits the ASCII symbols
+    # $ + < = > ^ ` | ~ and all Unicode symbols (currency, math, ...), so add
+    # them explicitly; otherwise e.g. *$*alpha. is wrongly emphasised.
+    expr {$c ne "" && (
+        [regexp {[[:punct:]]} $c] ||
+        [regexp "\[\$+<=>^`|~\]" $c] ||
+        [regexp {[\u00A1-\u00BF\u00D7\u00F7\u2010-\u2027\u2030-\u206F\u20A0-\u20CF\u2100-\u2BFF]} $c]
+    )}
+}
 proc mdstack::parser::_canOpen {prev next} {
     # left-flanking: not followed by ws, and (not followed by punct OR preceded by ws/punct)
     expr {![mdstack::parser::_isWs $next]

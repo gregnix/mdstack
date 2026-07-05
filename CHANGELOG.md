@@ -1,5 +1,21 @@
 # mdstack — Changelog
 
+## Unreleased — mdstack::parser 0.6.1
+
+`lib/mdstack/parser-0.6.1.tm` (was `parser-0.6.0.tm`).
+
+- **Emphasis flanking: symbol/currency punctuation.** `_isPunct` now follows
+  CommonMark's "Unicode P *and* S" punctuation definition, so delimiters next to
+  `$` `£` `€` and the ASCII symbols `+ < = > ^ ` + "`" + ` | ~` flank correctly —
+  e.g. `*$*alpha.` stays literal instead of emphasising `$`.
+- **`+` bullets and `N)` ordered markers** are now recognised (previously a
+  line like `+ item` or `3) item` became a paragraph).
+- **New list on marker / delimiter change** (CommonMark): `- a` then `+ b` are
+  two `<ul>`s; `1.` then `3)` two `<ol>`s, instead of the second marker
+  becoming a paragraph.
+- Conformance (structural): 269 -> 270 / 655; Lists 19.2 -> 23.1 %. No
+  regressions in the parser test suite.
+
 ## Unreleased — mdstack::pdf 0.3 (Adapter)
 
 `lib/mdstack/pdf-0.3.tm` (was `pdf-0.2.tm`); pkgIndex bumped to 0.3.
