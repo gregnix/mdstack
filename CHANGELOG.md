@@ -1,5 +1,21 @@
 # mdstack — Changelog
 
+## Unreleased — mdstack::parser 0.6.3
+
+`lib/mdstack/parser-0.6.3.tm` (was `parser-0.6.2.tm`).
+
+- **List items can hold nested blocks.** Indented code, block quotes and
+  fenced blocks that belong to a list item (indented to the item's content
+  column) are now parsed *inside* the item (`_mkListItem` runs the item body
+  through `parseBlocks`) instead of being flattened. Renders nested in the
+  docir html/pdf/roff renderers (odt keeps them flat).
+- **Deliberate behaviour preserved:** a 4-space-indented block after a tight
+  list still forms a *separate* code block (the collection rule only pulls in
+  genuine sub-blocks — code at content-col+4, quotes, fences, sub-list markers),
+  so `parser-loose-lists` / `parser-indented` / `parser-multiline-list` are
+  unchanged.
+- Conformance: List items 14 -> 16 / 48 (lenient 323 -> 325).
+
 ## Unreleased — mdstack::parser 0.6.2
 
 `lib/mdstack/parser-0.6.2.tm` (was `parser-0.6.1.tm`).
