@@ -1,4 +1,4 @@
-# mdstack::parser 0.6.1
+# mdstack::parser 0.6.2
 #
 # 0.6.0 (2026-06-20): reflink comment-defs ([//NNN]: # (text)) consumed;
 #   indented deflist bodies kept in the list item; underscore emphasis/strong
@@ -40,8 +40,9 @@
 # v0.2.10 Setext-Headings (=== / ---), inline math ($...$), display math ($$...$$)
 # v0.6.1  CommonMark: _isPunct follows P+S (symbol/currency flanking); '+'
 #         bullets and 'N)' ordered markers; new list on marker/delimiter change
+# v0.6.2  Ordered lists carry a 'start' when the first number != 1 (<ol start=N>)
 #
-package provide mdstack::parser 0.6.1
+package provide mdstack::parser 0.6.2
 
 namespace eval mdstack::parser {
     namespace export parse validate supports anchorize
@@ -1089,6 +1090,10 @@ proc mdstack::parser::parseListLines {lines} {
     set style [expr {$ordered ? "ordered" : "unordered"}]
     set result [dict create type list style $style items $items]
     if {$listLoose} { dict set result loose 1 }
+    if {$ordered && [regexp {^[[:space:]]*([0-9]+)[.)]} [lindex $lines 0] -> _sn]
+            && $_sn ne "1"} {
+        dict set result start $_sn
+    }
     return $result
 }
 

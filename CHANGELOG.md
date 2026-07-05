@@ -1,5 +1,14 @@
 # mdstack — Changelog
 
+## Unreleased — mdstack::parser 0.6.2
+
+`lib/mdstack/parser-0.6.2.tm` (was `parser-0.6.1.tm`).
+
+- **Ordered lists preserve their start number.** A list beginning at a number
+  other than 1 now carries `start N`, rendered as `<ol start="N">` (e.g.
+  `123456789. ok`, `5) x`). Requires the matching docir mdSource/html change.
+- Conformance (structural): 270 -> 274 / 655; List items 20.8 -> 27.1 %.
+
 ## Unreleased — mdstack::parser 0.6.1
 
 `lib/mdstack/parser-0.6.1.tm` (was `parser-0.6.0.tm`).
