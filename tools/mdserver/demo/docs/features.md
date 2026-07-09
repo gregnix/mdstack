@@ -1,6 +1,6 @@
 # Markdown Features
 
-Diese Seite demonstriert alle von mdhtml unterstuetzten Markdown-Elemente.
+Diese Seite demonstriert alle von mdstack::html unterstuetzten Markdown-Elemente.
 
 ## Textformatierung
 

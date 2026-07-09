@@ -1,15 +1,15 @@
 #!/usr/bin/env tclsh
-# mdserver.tcl -- Markdown-Web-Server (Starter)
+# mdserver.tcl -- Markdown web server (launcher)
 # ============================================================================
-# Startet den mdserver. Benoetigt mdserver-0.1.tm im Modulpfad.
+# Starts mdserver. Requires mdserver-0.2.tm on the module path.
 #
 # Usage:
-#   tclsh mdserver.tcl ?--port 8080? ?--root /pfad? ?--theme hell?
+#   tclsh mdserver.tcl ?--port 8080? ?--root /path? ?--theme hell?
 #
-# Requires: mdserver 0.1 (mdserver-0.1.tm)
+# Requires: mdserver 0.2 (mdserver-0.2.tm)
 # ============================================================================
 
-package require Tcl 8.6
+package require Tcl 8.6 9
 
 # Modul-Pfad: lib/ relativ zum Skript (Regelbuch-Konvention)
 set _scriptDir [file dirname [file normalize [info script]]]
@@ -19,14 +19,14 @@ foreach _candidate {lib ../lib} {
 }
 unset -nocomplain _scriptDir _candidate _d
 
-if {[catch {package require mdserver 0.1} err]} {
-    puts stderr "ERROR: mdserver 0.1 nicht gefunden: $err"
-    puts stderr "       mdserver-0.1.tm muss in lib/ liegen."
+if {[catch {package require mdserver 0.2} err]} {
+    puts stderr "ERROR: mdserver 0.2 nicht gefunden: $err"
+    puts stderr "       mdserver-0.2.tm muss in lib/ liegen."
     exit 1
 }
 
 # ============================================================
-# CLI -- Argumente parsen
+# CLI -- parse arguments
 # ============================================================
 
 proc parseArgs {argv} {
@@ -42,6 +42,11 @@ proc parseArgs {argv} {
             --toc     -
             --cert    -
             --key     -
+            --control -
+            --style   -
+            --stylesdir -
+            --navbg   -
+            --navfg   -
             --tlsport { lappend args $arg [lindex $argv [incr i]] }
             --no-log  { lappend args --log 0 }
             --help {
@@ -55,6 +60,11 @@ proc parseArgs {argv} {
                 puts "  --cert    FILE    TLS certificate (.crt/.pem)"
                 puts "  --key     FILE    TLS private key (.key)"
                 puts "  --tlsport PORT    HTTPS port (default: 8443)"
+                puts "  --control PORT    Control port (localhost; stop/ping)"
+                puts "  --style   NAME    TOC style: plain|sidebar|sticky|collapsible"
+                puts "  --stylesdir DIR   CSS style directory (default: ../styles)"
+                puts "  --navbg   COLOR   Nav bar background color"
+                puts "  --navfg   COLOR   Nav bar text color"
                 puts ""
                 puts "Troubleshooting:"
                 puts "  Port belegt: fuser -k 8080/tcp"
@@ -67,7 +77,7 @@ proc parseArgs {argv} {
 }
 
 # ============================================================
-# Server starten
+# Start the server
 # ============================================================
 
 set server [mdserver::Server new {*}[parseArgs $argv]]
@@ -79,12 +89,12 @@ try {
     exit 1
 }
 
-# bgerror -- globaler Fehler-Handler fuer Event-Loop Fehler (Tk-Konvention)
+# bgerror -- global error handler for event-loop errors (Tk convention)
 proc bgerror {msg} {
     puts stderr "Background error: $msg"
 }
 
-catch { ;# intentional: signal nicht auf allen Plattformen verfuegbar
+catch { ;# intentional: signal is not available on all platforms
     signal trap SIGINT {
         puts "\nShutting down."
         exit 0

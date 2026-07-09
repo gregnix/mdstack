@@ -11,10 +11,10 @@ by design it knows no concrete modules and is intentionally *not* a loader.
 
 | module | ver | tier | declared requires | dedicated test | doc |
 |--------|-----|------|-------------------|----------------|-----|
-| parser | 0.6.0 | core | *(none)* | indirect | — |
-| model | 0.1 | core | *(none)* | indirect | — |
-| theme | 0.1 | core | *(none)* | — | — |
-| text | 0.1 | Tk\* | *(none)* | indirect | — |
+| parser | 0.6.3 | core | Tcl 8.6- | indirect | — |
+| model | 0.1 | core | Tcl 8.6- | indirect | — |
+| theme | 0.1 | core | Tcl 8.6- | — | — |
+| text | 0.1 | Tk | Tcl 8.6-, Tk 8.6- | indirect | — |
 | viewer | 0.4 | Tk | Tk · *opt:* tkutils::tkuwheel, Img, tksvg | **viewer.tcl** | — |
 | outline | 0.1 | Tk | Tk, mdstack::text 0.1 | — | — |
 | search | 0.1 | Tk | Tk (+ self-require — review) | indirect | — |
@@ -32,13 +32,16 @@ Tiers: **core** = pure Tcl, no Tk; **Tk** = needs Tk; **export** = needs docir
 
 ## Parity gaps (vs tclutils/tkutils)
 
-1. **Missing version pins.** parser, model, theme, text declare no
-   `package require Tcl 8.6-` (and text/several GUI modules omit
-   `package require Tk 8.6-`). tclutils/tkutils mandate both. Adding them is
-   cheap and prevents silent runs on incompatible interpreters.
-2. **No per-module docs.** `docs/manuals/` is empty; there is no `docs/<mod>.md`
-   single source and no man-page pipeline as in tkutils. The parser/viewer/html
-   public APIs are the highest-value to document first.
+1. **Version pins — core done.** parser, model, theme now declare
+   `package require Tcl 8.6-`; text declares `Tcl 8.6-` **and** `Tk 8.6-`
+   (verified loading on 8.6.14 and 9.0.2). Remaining: audit the other GUI
+   modules (viewer, outline, search, contextmenu, editorkit) for a missing
+   `Tk 8.6-` and add where absent.
+2. **Per-module docs — partly present.** `doc/manuals/en/` now holds per-module
+   manuals (parser, pdf, html, viewer, model, theme, outline, search, validator,
+   contextmenu, editorkit, stacknoteskit, mdstack). What is still missing versus
+   tkutils is the single-source-`md` + `md2man` **pipeline** (these are
+   hand-written manuals, not generated) and man-page output.
 3. **Thin dedicated test coverage.** Only `viewer` and `validator` have their own
    test files. `outline`, `stacknoteskit`, `theme` have no coverage even
    indirectly; the rest are only exercised through parser/other suites.

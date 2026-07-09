@@ -1,17 +1,20 @@
 #!/usr/bin/env tclsh
-# start.tcl -- Demo-Site starten
+# start.tcl -- start the demo site
 # ============================================================================
 # Usage:
 #   tclsh start.tcl                   -- HTTP only
-#   tclsh start.tcl --https           -- HTTP + HTTPS (Zertifikat auto)
+#   tclsh start.tcl --https           -- HTTP + HTTPS (certificate auto)
 #   tclsh start.tcl --https --cn meinserver.local
 #   tclsh start.tcl --port 8080 --theme dunkel
+#   tclsh start.tcl --style sidebar          -- TOC as sidebar
+#   tclsh start.tcl --control 8099            -- control port (stop/ping)
+#   tclsh start.tcl --navbg "#800000"         -- colour the nav bar
 #
-# --https: Erzeugt Zertifikat automatisch via mkcert.tcl falls noetig.
-#          Zertifikat wird in ../server.crt gespeichert (tools/mdserver/)
-#          damit es nicht in mdserver-demo/ landet.
+# --https: generates a certificate automatically via mkcert.tcl if needed.
+#          the certificate is stored in ../server.crt (tools/mdserver/)
+#          so it does not end up in mdserver-demo/.
 #
-# .gitignore: server.crt und server.key sollten ignoriert werden:
+# .gitignore: server.crt and server.key should be ignored:
 #   echo "tools/mdserver/server.crt" >> .gitignore
 #   echo "tools/mdserver/server.key" >> .gitignore
 # ============================================================================
@@ -19,7 +22,7 @@
 set scriptDir [file dirname [file normalize [info script]]]
 set docsDir   [file join $scriptDir docs]
 
-# mdserver.tcl und mkcert.tcl suchen
+# locate mdserver.tcl and mkcert.tcl
 proc findScript {scriptDir name} {
     foreach candidate [list \
         $name \
@@ -39,14 +42,14 @@ if {$mdserverScript eq ""} {
     exit 1
 }
 
-# Zertifikat-Standardpfad: eine Ebene hoeher (tools/mdserver/)
-# damit server.crt/key nicht in mdserver-demo/ landen
+# default certificate path: one level up (tools/mdserver/)
+# so server.crt/key do not end up in mdserver-demo/
 set certDir  [file normalize [file join $scriptDir ".."]]
 set certFile [file join $certDir server.crt]
 set keyFile  [file join $certDir server.key]
 
 # ============================================================
-# CLI-Argumente parsen
+# parse CLI arguments
 # ============================================================
 
 set useHttps  0
@@ -54,6 +57,8 @@ set cn        "localhost"
 set port      8080
 set tlsport   8443
 set extraArgs {}
+set style     ""
+set ctrlPort  ""
 
 set i 0
 while {$i < [llength $argv]} {
@@ -63,6 +68,9 @@ while {$i < [llength $argv]} {
         --cn      { set cn       [lindex $argv [incr i]] }
         --port    { set port     [lindex $argv [incr i]] }
         --tlsport { set tlsport  [lindex $argv [incr i]] }
+        --style   { set style    [lindex $argv [incr i]] }
+        --stylesdir { lappend extraArgs --stylesdir [lindex $argv [incr i]] }
+        --control { set ctrlPort [lindex $argv [incr i]] }
         --cert    { set certFile [file normalize [lindex $argv [incr i]]] }
         --key     { set keyFile  [file normalize [lindex $argv [incr i]]] }
         --help {
@@ -74,6 +82,10 @@ while {$i < [llength $argv]} {
             puts "  --cert  FILE      Vorhandenes Zertifikat verwenden"
             puts "  --key   FILE      Vorhandener Key verwenden"
             puts "  --theme NAME      Theme: hell|dunkel|solarized"
+            puts "  --style NAME      TOC-Stil: plain|sidebar|sticky|collapsible"
+            puts "  --control PORT    Control-Port (localhost; stop/ping)"
+            puts "  --navbg COLOR     Navi-Leiste Hintergrundfarbe"
+            puts "  --navfg COLOR     Navi-Leiste Textfarbe"
             puts ""
             puts "Zertifikat wird gespeichert in:"
             puts "  $certFile"
@@ -145,7 +157,7 @@ if {$useHttps} {
 }
 
 # ============================================================
-# mdserver starten
+# start mdserver
 # ============================================================
 
 set args [list \
@@ -155,6 +167,9 @@ set args [list \
 
 foreach a $extraArgs { lappend args $a }
 
+if {$style    ne ""} { lappend args --style   $style }
+if {$ctrlPort ne ""} { lappend args --control $ctrlPort }
+
 if {$useHttps} {
     lappend args --cert $certFile --key $keyFile --tlsport $tlsport
 }
@@ -163,6 +178,8 @@ puts ""
 puts "mdserver Demo-Site"
 puts "  Docs:  $docsDir"
 puts "  HTTP:  http://localhost:$port/"
+if {$style    ne ""} { puts "  Style: $style" }
+if {$ctrlPort ne ""} { puts "  Ctrl:  localhost:$ctrlPort (echo stop | nc localhost $ctrlPort)" }
 if {$useHttps} {
     puts "  HTTPS: https://localhost:$tlsport/"
     puts "  Cert:  $certFile"

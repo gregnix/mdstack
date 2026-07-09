@@ -7,6 +7,8 @@
 # - anchors map (anchor -> heading dict)
 # - find (regexp search)
 #
+package require Tcl 8.6-
+
 package provide mdstack::model 0.1
 
 namespace eval mdstack::model {

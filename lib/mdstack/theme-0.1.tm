@@ -12,6 +12,8 @@
 #   mdstack::theme::applyToViewer path   -> Apply colors to mdviewer
 #   mdstack::theme::applyToText widget   -> Apply colors to text widget
 
+package require Tcl 8.6-
+
 package provide mdstack::theme 0.1
 
 namespace eval mdstack::theme {

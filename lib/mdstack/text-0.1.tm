@@ -13,6 +13,9 @@
 # - Feature flags (all can be disabled)
 #
 
+package require Tcl 8.6-
+package require Tk 8.6-
+
 package provide mdstack::text 0.1
 
 namespace eval mdstack::text {

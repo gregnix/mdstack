@@ -18,7 +18,8 @@ meinprojekt/
   tools/
     mdserver/
       lib/
-        mdserver-0.1.tm
+        mdserver-0.2.tm
+      styles/           <- TOC-CSS (sidebar/sticky-top/collapsible)
       mdserver.tcl
       mkcert.tcl
       start.tcl         <- optional, bequemer Starter
@@ -42,6 +43,42 @@ Oder mit Titelangabe:
 
 ```bash
 tclsh mdserver.tcl --root ../../docs --title "Mein Projekt" --theme hell
+```
+
+---
+
+## TOC als Sidebar + sauberes Beenden
+
+Standardmaessig steht das Inhaltsverzeichnis als Block oben. Als feste Sidebar
+(bleibt beim Scrollen sichtbar):
+
+```bash
+tclsh mdserver.tcl --root ../../docs --style sidebar
+```
+
+Die CSS-Stile liegen in `tools/mdserver/styles/` (neben `lib/`). Pro Seite geht
+auch `...?style=sidebar` in der URL.
+
+Fuer einen dauerlaufenden Server einen Control-Port mitgeben, dann laesst er sich
+sauber beenden (statt den Prozess zu killen):
+
+```bash
+tclsh mdserver.tcl --root ../../docs --control 8099
+echo stop | nc localhost 8099
+```
+
+---
+
+## Navigation: Startseite, Gesamt-Index, Navi-Leiste
+
+Auf jeder Seite liegt oben eine Navi-Leiste (**Start** / **Alle Dokumente**).
+**Start** fuehrt zur `index.md` der Wurzel; **Alle Dokumente** (`?nav=index`)
+zeigt einen Baum aller `.md`.
+
+Farben der Leiste anpassen:
+
+```bash
+tclsh mdserver.tcl --root ../../docs --navbg "#800000" --navfg "#ffdd00"
 ```
 
 ---

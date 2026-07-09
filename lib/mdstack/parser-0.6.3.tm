@@ -44,6 +44,8 @@
 # v0.6.3  List items hold nested blocks (indented code / block quote) via
 #         parseBlocks; the deliberate 4-space-after-list = code behaviour kept
 #
+package require Tcl 8.6-
+
 package provide mdstack::parser 0.6.3
 
 namespace eval mdstack::parser {

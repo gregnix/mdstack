@@ -1,0 +1,107 @@
+/* glossary-html-styles/sidebar.css  (v4)
+ *
+ * TOC as a fixed left sidebar, main content on the right.
+ * Like ReadTheDocs / classic documentation layouts.
+ *
+ * v4 fix: force body children explicitly into column 2 so they are not
+ * distributed alternately across column 1 (TOC) and column 2
+ * (otherwise ~50% of the content is hidden behind the sidebar).
+ */
+
+* { box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "DejaVu Sans", "Symbola", "Segoe UI Symbol", sans-serif;
+    margin: 0;
+    padding-top: 3em;
+    line-height: 1.5;
+    color: #222;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    align-content: start;
+    min-height: 100vh;
+}
+
+/* Nav bar as a full-width top row above sidebar + content */
+.mdserver-nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+}
+
+/* TOC fixed in column 1, across all rows */
+nav.toc {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: start;
+    background: #f5f5f5;
+    border-right: 1px solid #ddd;
+    padding: 1.5em 1em;
+    overflow-y: auto;
+    max-height: calc(100vh - 3em);
+    position: sticky;
+    top: 3em;
+}
+
+nav.toc ul { margin: 0; padding-left: 1em; list-style: none; }
+nav.toc > ul { padding-left: 0; }
+nav.toc li { margin: 0.2em 0; }
+nav.toc li.toc-level-1 { font-weight: bold; margin-top: 0.5em; }
+nav.toc li.toc-level-2 { padding-left: 0.5em; }
+nav.toc li.toc-level-3 { padding-left: 1.5em; font-size: 0.9em; }
+nav.toc a { color: #0055aa; text-decoration: none; display: block; padding: 0.1em 0.3em; }
+nav.toc a:hover { background: #e0e8f0; border-radius: 3px; }
+
+/* IMPORTANT: stack all other body children explicitly in column 2,
+ * otherwise the grid distributes them alternately across columns 1 and 2.
+ */
+body > *:not(nav.toc):not(.mdserver-nav) {
+    grid-column: 2;
+    padding: 0 2em;
+    max-width: 50em;
+}
+
+/* First top-level children get a little breathing room at the top */
+body > h1:first-of-type,
+body > p:first-of-type {
+    padding-top: 1.5em;
+}
+
+h1 { font-size: 1.6em; border-bottom: 2px solid #888; padding-bottom: 0.2em; }
+h2 { font-size: 1.3em; border-bottom: 1px solid #ccc; padding-bottom: 0.15em; }
+h3 { font-size: 1.1em; }
+a { color: #0055aa; }
+a:hover { text-decoration: underline; }
+code { background: #f5f5f5; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+pre { background: #f5f5f5; padding: 1em; border-radius: 4px; overflow-x: auto; }
+
+/* Mobile: sidebar on top instead of on the left */
+@media (max-width: 800px) {
+    body {
+        grid-template-columns: 1fr;
+    }
+    nav.toc {
+        grid-column: 1;
+        grid-row: auto;
+        border-right: none;
+        border-bottom: 1px solid #ddd;
+        height: auto;
+        max-height: 30vh;
+        position: relative;
+    }
+    body > *:not(nav.toc):not(.mdserver-nav) {
+        grid-column: 1;
+    }
+}
+
+/* Limit emoji/symbol height so color-emoji fonts (if
+ * present) do not inflate the line spacing.
+ */
+p, li, dd, dt {
+    line-height: 1.5 !important;
+}
+
+/* Anchor jumps: keep headings from scrolling under the fixed nav bar */
+h1, h2, h3, h4, h5, h6 { scroll-margin-top: 3.5em; }

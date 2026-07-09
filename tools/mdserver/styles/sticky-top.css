@@ -1,0 +1,55 @@
+/* glossary-html-styles/sticky-top.css
+ *
+ * TOC sticks to the top while scrolling. Body flows underneath.
+ * Usage:
+ *   tclsh /path/to/mdhelp ... -css sticky-top.css
+ *   or for direct calls: mdstack::html::export ... -css ".../sticky-top.css"
+ */
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "DejaVu Sans", "Symbola", "Segoe UI Symbol", sans-serif;
+    max-width: 50em;
+    margin: 0 auto;
+    padding: 0 1em 4em 1em;
+    line-height: 1.5;
+    color: #222;
+}
+
+/* TOC pinned to the top */
+nav.toc {
+    position: sticky;
+    top: 0;
+    background: #f9f9f9;
+    border-bottom: 2px solid #888;
+    margin: 0 -1em;
+    padding: 0.5em 1em;
+    max-height: 40vh;
+    overflow-y: auto;
+    z-index: 100;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+nav.toc ul { margin: 0; padding-left: 1.2em; }
+nav.toc li { margin: 0.1em 0; font-size: 0.9em; }
+nav.toc a { color: #0055aa; text-decoration: none; }
+nav.toc a:hover { text-decoration: underline; }
+
+/* Headings/body as default */
+h1 { font-size: 1.6em; border-bottom: 2px solid #888; padding-bottom: 0.2em; }
+h2 { font-size: 1.3em; border-bottom: 1px solid #ccc; padding-bottom: 0.15em; }
+h3 { font-size: 1.1em; }
+a { color: #0055aa; }
+a:hover { text-decoration: underline; }
+code { background: #f5f5f5; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+pre { background: #f5f5f5; padding: 1em; border-radius: 4px; overflow-x: auto; }
+
+/* Limit emoji/symbol height so color-emoji fonts (if
+ * present) do not inflate the line spacing.
+ * line-height: 1.5 stays fixed regardless of content.
+ */
+p, li, dd, dt {
+    line-height: 1.5 !important;
+}
+
+/* Anchor jumps below the sticky TOC */
+h1, h2, h3, h4, h5, h6 { scroll-margin-top: 4em; }

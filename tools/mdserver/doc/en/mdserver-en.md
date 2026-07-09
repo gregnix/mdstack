@@ -1,6 +1,7 @@
 # mdserver
 
-> Version 0.4
+> Version 0.2 (module) -- concurrent (coroutine), slow-loris resistant,
+> Range / Conditional-GET, control port, TOC styles.
 
 ## Purpose
 
@@ -8,12 +9,18 @@
 It serves Markdown files as HTML on the fly.
 
 - No Tk, no display, no fonts needed
+- **Concurrent**: one coroutine per connection, non-blocking I/O
+  (multiple users at once; a slow client does not block others)
 - HTTP always active, HTTPS optional with TLS certificate
-- Theme selection via URL parameter
+- Theme and **TOC style** selection via URL parameter
+- **Navigation**: home page, site-wide document index, fixed nav bar
+- **Range requests (206)** -- large PDFs/images seekable in the browser
+- **Conditional GET (304)** -- unchanged files are not resent
+- **Control port** -- clean shutdown without `fuser -k`
 - Static files served directly
 - Directory index with automatic file listing
 
-**Location:** `tools/mdserver/mdserver.tcl`
+**Location:** `tools/mdserver/mdserver.tcl`, module `lib/mdserver-0.2.tm`
 
 ---
 
@@ -21,15 +28,18 @@ It serves Markdown files as HTML on the fly.
 
 | Package | Version | Required |
 |---------|---------|----------|
-| `mdparser` | 0.2 | yes |
-| `mdhtml` | 0.1 | yes |
-| `mdtheme` | 0.1 | recommended |
+| `Tcl` | 8.6 or 9 | yes |
+| `mdstack::parser` | 0.2 | yes |
+| `mdstack::html` | 0.1 | yes |
+| `mdstack::theme` | 0.1 | recommended |
 | `tls` | — | HTTPS only |
 
 ```bash
 # Install tls (Debian/Ubuntu)
 apt install tcl-tls
 ```
+
+Runs unchanged on Tcl/Tk **8.6 and 9.0**.
 
 ---
 
@@ -44,8 +54,13 @@ tclsh mdserver.tcl [options]
 | `--port` | `8080` | HTTP port |
 | `--root` | `.` | Document root |
 | `--theme` | `hell` | Theme: `hell`, `dunkel`, `solarized` |
+| `--style` | `plain` | TOC style: `plain`, `sidebar`, `sticky`, `collapsible` |
+| `--stylesdir` | `../styles` | Directory holding the CSS styles |
+| `--navbg` | `#2c3e50` | Nav bar background color |
+| `--navfg` | `#ffffff` | Nav bar text color |
 | `--title` | `mdserver` | Site title |
 | `--toc` | `1` | Table of contents (0\|1) |
+| `--control` | `""` | Control port (localhost only; `stop`/`ping`) |
 | `--no-log` | — | Disable logging |
 | `--cert` | `""` | TLS certificate (.crt/.pem) |
 | `--key` | `""` | TLS private key (.key) |
@@ -57,39 +72,102 @@ tclsh mdserver.tcl [options]
 ## HTTP usage
 
 ```bash
-# Current directory
-tclsh mdserver.tcl
-
-# Specific directory
 tclsh mdserver.tcl --root /path/to/docs
-
-# Custom port and theme
 tclsh mdserver.tcl --port 9000 --theme dunkel
+tclsh mdserver.tcl --root docs --style sidebar --control 8099
 ```
+
+---
+
+## Concurrency (LAN use)
+
+Since 0.2 each connection is served in its own **coroutine** with non-blocking
+reads/writes. Multiple clients are served at once; a client that connects and
+sends nothing (slow-loris) does not freeze the server (a read timeout discards
+it); large files do not block other connections. Suitable for serving manuals
+on a company LAN. For public servers put a reverse proxy in front.
+
+---
+
+## TOC styles (`?style=`)
+
+The table of contents (`<nav class="toc">`) can be displayed differently via CSS
+styles -- the same styles as mdhelp's HTML export:
+
+| Style | Effect |
+|-------|--------|
+| `plain` | default block at the top |
+| `sidebar` | fixed left sidebar, stays visible while scrolling |
+| `sticky` | TOC sticks to the top edge |
+| `collapsible` | collapsible TOC |
+
+Per request: `http://localhost:8080/doc.md?style=sidebar`
+As default: `tclsh mdserver.tcl --root docs --style sidebar`
+
+**CSS location:** the styles live in `styles/` next to `lib/`
+(`tools/mdserver/styles/`). Override with `--stylesdir`. The server injects the
+chosen style as an extra `<style>` block after the default CSS (cascade wins);
+if the file is missing it serves unstyled (no error).
+
+---
+
+## Navigation
+
+A slim **nav bar** is injected at the top of every page, plus a **site-wide
+index** of all documents.
+
+**Home** is the root `index.md`; the **Start** link always returns there (`/`).
+
+**Site index** via the route **`?nav=index`**: recursively lists every `.md`
+under the root as a tree (titles from the first `# H1`, directories bold),
+reached via the **Alle Dokumente** link.
+
+Customise colours via CLI, links/icons via the constructor:
+
+```bash
+tclsh mdserver.tcl --root docs --navbg "#800000" --navfg "#ffdd00"
+```
+
+```tcl
+mdserver::Server new -root docs -navlinks {
+    {{&#127968; Start} /}
+    {{&#128218; Alle Dokumente} /?nav=index}
+}
+```
+
+Disable with the `nav 0` option (constructor). In the sidebar style the bar is a
+fixed top bar.
+
+---
+
+## Control port
+
+`--control PORT` opens a localhost-only control channel:
+
+```bash
+echo stop | nc localhost 8099    # clean shutdown
+echo ping | nc localhost 8099    # -> pong
+```
+
+Recommended way to stop a long-running server (no `fuser -k`, no PID lookup).
 
 ---
 
 ## HTTPS usage
 
 ```bash
-# 1. Generate certificate with mkcert.tcl
-tclsh mkcert.tcl
+# 1. Generate certificate
 tclsh mkcert.tcl --cn myserver.local --days 730
 
-# 2. Start server (HTTP on 8080 + HTTPS on 8443)
-tclsh mdserver.tcl \
-    --root /path/to/docs \
-    --cert server.crt \
-    --key  server.key
+# 2. Start (HTTP 8080 + HTTPS 8443)
+tclsh mdserver.tcl --root /path/to/docs --cert server.crt --key server.key
 ```
 
-Or with openssl:
+Without `--cert`/`--key` only HTTP runs (no error). The TLS handshake is driven
+through the non-blocking coroutine. Test a self-signed cert with
+`curl -k https://localhost:8443/`.
 
-```bash
-openssl req -x509 -newkey rsa:4096 \
-    -keyout server.key -out server.crt \
-    -days 365 -nodes -subj "/CN=localhost"
-```
+TLS 1.2 / 1.3 active; SSL2/3 and TLS 1.0/1.1 disabled.
 
 ---
 
@@ -99,6 +177,15 @@ openssl req -x509 -newkey rsa:4096 \
 |-----------|--------|-------------|
 | `?theme=` | `hell`, `dunkel`, `solarized` | Override theme per request |
 | `?toc=` | `0`, `1` | Override TOC per request |
+| `?style=` | `plain`, `sidebar`, `sticky`, `collapsible` | Override TOC style per request |
+
+---
+
+## File serving
+
+- **`Range` / 206 Partial Content**: `bytes=0-99`, `bytes=1000-`, `bytes=-50`;
+  invalid -> `416`. With `Accept-Ranges: bytes` and `Content-Range`.
+- **`If-Modified-Since` / 304 Not Modified**: `Last-Modified` on all files.
 
 ---
 
@@ -113,7 +200,7 @@ openssl req -x509 -newkey rsa:4096 \
 | `/` | Directory index or `index.md` |
 
 **Clean URLs** allow links without `.md` extension (e.g. `/dict`, `/array`).
-This is used by `nroff2md --linkmode server` for SEE ALSO cross-references.
+Used by `nroff2md --linkmode server` for SEE ALSO cross-references.
 
 ---
 
@@ -121,44 +208,32 @@ This is used by `nroff2md --linkmode server` for SEE ALSO cross-references.
 
 ### Port already in use
 
-```
-ERROR: Cannot bind to HTTP port 8080: address already in use
-```
-
-Another process (e.g. a previous mdserver instance) is still holding the port.
+Prefer the control port for a clean stop. Otherwise:
 
 ```bash
-# Release port 8080 immediately
 fuser -k 8080/tcp
-
-# Or: check first, then decide
-fuser 8080/tcp        # shows PID
-kill <PID>
-
-# Alternative with lsof
 lsof -ti:8080 | xargs kill
 ```
 
-Then restart the server.
+### `?style=sidebar` has no effect
+
+Server cannot find the CSS styles. Ensure `tools/mdserver/styles/` exists (or set
+`--stylesdir`).
+
+### HTTPS `unexpected eof` / `self-signed certificate`
+
+- `unexpected eof`: HTTP port addressed with `https://` -- check scheme/port.
+- `self-signed certificate (18)`: handshake fine, curl distrusts the cert -> `curl -k`.
 
 ---
 
 ## Security notes
 
-- Self-signed certificates trigger browser warnings (use `mkcert` for trusted dev certs)
-- No authentication built in — restrict access at network level for sensitive docs
-- `--root` limits file access to the specified directory
-
----
-
-## .gitignore
-
-Add generated certificate files:
-
-```
-server.crt
-server.key
-```
+- Directory traversal blocked (safePath check)
+- Control port binds to `127.0.0.1` only
+- Self-signed certificates trigger browser warnings (dev only)
+- No authentication built in -- restrict at network level for sensitive docs
+- Suitable for preview and LAN; put a reverse proxy in front for public use
 
 ---
 
@@ -166,9 +241,22 @@ server.key
 
 ```
 tools/mdserver/
-  mdserver.tcl       -- HTTP/HTTPS server
-  mkcert.tcl         -- certificate helper
-  test/
-    test-mdserver.tcl  -- 47 tests
-  mdserver-demo/     -- demo site
+  mdserver.tcl        -- CLI launcher
+  lib/mdserver-0.2.tm -- server module
+  styles/             -- TOC CSS styles (sidebar/sticky-top/collapsible)
+  mkcert.tcl          -- certificate helper
+  test/               -- test suite
+  mdserver-demo/      -- demo site
 ```
+
+---
+
+## Changelog
+
+**0.2 (2026-07-09)** -- coroutine/non-blocking concurrency, slow-loris timeout,
+Range (206), Conditional GET (304), control port (`--control`), TOC styles
+(`--style` / `?style=`), navigation bar + site index (`?nav=index`,
+`navbg`/`navfg`/`navlinks`), non-blocking TLS handshake, Tcl 9.
+
+**0.1** -- HTTP/HTTPS, Markdown->HTML, directory index, `?theme=`/`?toc=`,
+static files, `mkcert.tcl`, `start.tcl`.
