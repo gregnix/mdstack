@@ -1,0 +1,3 @@
+tclsh bookkit/tools/book-webindex.tcl docir/doc/en/book/
+mdstack/tools/mdserver/demo$ tclsh ../mdindexgen.tcl 
+mdstack/tools/mdserver/demo$ tclsh start.tcl --https 1 --style sidebar

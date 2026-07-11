@@ -81,6 +81,16 @@ Farben der Leiste anpassen:
 tclsh mdserver.tcl --root ../../docs --navbg "#800000" --navfg "#ffdd00"
 ```
 
+Zusaetzlich haengt die Leiste automatisch die **Top-Level-Ordner** der Wurzel
+als Links an -- Hauptbereiche sind so von jeder Seite erreichbar, nicht nur
+ueber *Alle Dokumente* (Abschalten: Config `navsections 0`).
+
+**Buecher.** Liegt in einem Ordner eine `book.tcl` oder eine per
+`book-webindex.tcl` (bookkit) erzeugte `index.md`, bekommen die Kapitelseiten
+eine **Kapitel-Navigation** (voriges/naechstes) und im `?style=sidebar`-Modus
+eine **Kapitel-Sidebar** mit der ganzen Kapitelliste. Details in
+`mdserver-de.md`.
+
 ---
 
 ## 2. index.md als Startseite

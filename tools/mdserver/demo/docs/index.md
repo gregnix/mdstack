@@ -71,3 +71,11 @@ TLS-Paket falls noetig: `apt install tcl-tls`.
 ---
 
 *Ausgeliefert mit mdstack (parser/html/theme) -- reiner Tcl-Stack, dual 8.6/9.*
+
+
+<!-- mdindexgen:begin -->
+## Contents
+
+ - [Markdown Features](features.md)
+ - [DocIR — Handbook](book/index.md)
+<!-- mdindexgen:end -->

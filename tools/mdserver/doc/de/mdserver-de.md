@@ -175,6 +175,13 @@ Erreichbar ueber den Link **Alle Dokumente**:
 http://localhost:8080/?nav=index
 ```
 
+**Sektionen automatisch.** Zusaetzlich haengt die Leiste die **Top-Level-Ordner**
+der Wurzel als Links an (Label aus der Sektions-`index.md`-H1, sonst Ordnername)
+-- Bereiche wie `Programmiersprachen/` sind so von jeder Seite einen Klick
+entfernt, nicht nur ueber *Alle Dokumente*. Ein Ordner erscheint, wenn er
+transitiv irgendeine `.md` enthaelt. Abschaltbar mit der Config-Option
+`navsections 0`.
+
 **Navi-Leiste anpassen.** Farben per CLI, Links/Icons programmatisch:
 
 ```bash
@@ -194,6 +201,29 @@ mdserver::Server new -root docs -navlinks {
 Ausschalten mit der Config-Option `nav 0` (Konstruktor). Die Leiste wird nach
 `<body>` eingefuegt und liegt ueber die volle Breite links; im Sidebar-Stil ist
 sie eine feste Top-Leiste (`position: fixed`).
+
+---
+
+## Buecher (Kapitel-Navigation & -Sidebar)
+
+Ein **Buch** ist ein Ordner mit einer `book.tcl` **oder** einer `index.md`, die
+einen `<!-- bookkit:toc:begin -->`-Block enthaelt (siehe bookkit). In Buechern
+bietet `mdserver` zwei Extras:
+
+**Kapitel-Navigation** (Config `chapternav`, Standard 1). Am Fuss jeder
+Kapitelseite eine Leiste **<- voriges | ^ Uebersicht | naechstes ->**. Die
+Reihenfolge kommt aus `book.tcl` (`chapters`), sonst aus dem bookkit-TOC-Block
+der `index.md`, sonst aus der `NNN-`-Praefix-Ordnung. Die Buch-`index.md` selbst
+bekommt keine.
+
+**Kapitel-Sidebar** (nur `?style=sidebar`). In einem Buch zeigt die linke
+Sidebar die **komplette Kapitelliste** (aktuelles Kapitel hervorgehoben) statt
+des Seiten-TOC. Auf schmalen Schirmen (<= 800px) klappt sie zu einer tippbaren
+Leiste **Kapitel** zusammen (reines CSS, kein JavaScript).
+
+Beide Features passen zur Web-Ausgabe von bookkit (`book-webindex.tcl`), das die
+`index.md` (Kapitel-TOC) und `stichwortverzeichnis.md` schreibt. Bucherkennung:
+`book.tcl` oder ein `bookkit:toc`-Block in der `index.md`.
 
 ---
 
@@ -307,6 +337,7 @@ Teilbereichs-Unterstuetzung ausgeliefert:
 | `/` | `index.md` wenn vorhanden, sonst Verzeichnis-Listing |
 | `/datei.md` | Markdown → HTML |
 | `/datei` | Clean URL: versucht automatisch `/datei.md` |
+| `/verzeichnis` | 301-Redirect auf `/verzeichnis/` (korrekte relative Links) |
 | `/verzeichnis/` | `index.md` oder Verzeichnis-Listing |
 | `.css`, `.js`, `.png`, `.jpg`, `.gif`, `.svg`, `.pdf` | Statische Datei |
 | Nicht gefunden | 404-Seite |
@@ -324,6 +355,9 @@ Verzeichnis-Listing mit:
 - Unterverzeichnissen
 - Markdown-Dateien (Titel aus erstem H1)
 - Link zur uebergeordneten Ebene
+
+Das Listing wird ueber **mdstack** gerendert -- gleicher Look und `?style=` wie
+alle anderen Seiten (kein separater HTML-Pfad).
 
 ---
 

@@ -122,6 +122,12 @@ index** of all documents.
 under the root as a tree (titles from the first `# H1`, directories bold),
 reached via the **Alle Dokumente** link.
 
+**Sections automatically.** The bar also appends the **top-level folders** of
+the root as links (label from the section's `index.md` H1, else the folder
+name) -- areas like `Programmiersprachen/` are one click away from every page,
+not only via *Alle Dokumente*. A folder appears if it transitively contains any
+`.md`. Disable with the `navsections 0` option.
+
 Customise colours via CLI, links/icons via the constructor:
 
 ```bash
@@ -137,6 +143,28 @@ mdserver::Server new -root docs -navlinks {
 
 Disable with the `nav 0` option (constructor). In the sidebar style the bar is a
 fixed top bar.
+
+---
+
+## Books (chapter navigation & sidebar)
+
+A **book** is a folder with a `book.tcl` **or** an `index.md` that carries a
+`<!-- bookkit:toc:begin -->` block (see bookkit). In books `mdserver` adds two
+extras:
+
+**Chapter navigation** (`chapternav` option, default 1). At the foot of each
+chapter page a bar **<- previous | ^ Overview | next ->**. The order comes from
+`book.tcl` (`chapters`), else the bookkit TOC block in `index.md`, else the
+`NNN-` prefix order. The book's own `index.md` gets none.
+
+**Chapter sidebar** (`?style=sidebar` only). In a book the left sidebar shows the
+**full chapter list** (current chapter highlighted) instead of the per-page TOC.
+On narrow screens (<= 800px) it collapses into a tappable **Kapitel** bar (pure
+CSS, no JavaScript).
+
+Both features pair with bookkit's web output (`book-webindex.tcl`), which writes
+`index.md` (chapter TOC) and `stichwortverzeichnis.md`. Book detection:
+`book.tcl` or a `bookkit:toc` block in `index.md`.
 
 ---
 
@@ -197,6 +225,8 @@ TLS 1.2 / 1.3 active; SSL2/3 and TLS 1.0/1.1 disabled.
 | `/file` | Clean URL: tries `/file.md` automatically |
 | `/file.html` | Served as-is |
 | `/image.png` | Served with correct MIME type |
+| `/dir` | 301 redirect to `/dir/` (correct relative links) |
+| `/dir/` | Directory index or `index.md` |
 | `/` | Directory index or `index.md` |
 
 **Clean URLs** allow links without `.md` extension (e.g. `/dict`, `/array`).
@@ -252,6 +282,11 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+**0.2 (2026-07-11)** -- nav bar auto-sections (`navsections`), trailing-slash
+redirect for directories, directory listing rendered via mdstack, chapter
+navigation in books (`chapternav`), book chapter sidebar (`?style=sidebar`,
+collapsible on mobile), Content-Length counted in UTF-8 bytes.
 
 **0.2 (2026-07-09)** -- coroutine/non-blocking concurrency, slow-loris timeout,
 Range (206), Conditional GET (304), control port (`--control`), TOC styles

@@ -89,6 +89,7 @@ oo::class create mdserver::Request {
     # Public accessors
     method method  {} { return $_method  }
     method path    {} { return $_path    }
+    method query   {} { return $_query   }
     method headers {} { return $_headers }
     method params  {} { return $_params  }
 
@@ -195,88 +196,41 @@ oo::class create mdserver::Renderer {
         return "$html$block"
     }
 
-    method index {dirPath urlPath theme} {
-        set mdFiles {}
-        set subdirs {}
+    # Directory listing (when a directory has no index.md): build a small
+    # Markdown document and render it through mdstack -- the same path every
+    # other page uses, so the look stays consistent (no hand-built HTML).
+    method index {dirPath urlPath theme {cssFile ""}} {
+        set base [string trimright $urlPath /]
+        set h1 [expr {$base eq "" ? $_title : "[file tail $base]/"}]
 
-        foreach f [lsort [glob -nocomplain -directory $dirPath *.md]] {
-            lappend mdFiles [file tail $f]
+        set items {}
+        if {$urlPath ne "/"} {
+            lappend items "- \[..\](../)"
         }
         foreach d [lsort [glob -nocomplain -directory $dirPath -type d *]] {
             set name [file tail $d]
-            if {$name ni {. ..}} { lappend subdirs $name }
+            if {$name in {. ..}} continue
+            lappend items "- \[$name/\]($name/)"
+        }
+        foreach f [lsort [glob -nocomplain -directory $dirPath *.md]] {
+            lappend items "- \[[my _mdTitle $f]\]([file tail $f])"
         }
 
-        # CSS
-        set css ""
-        catch {set css [mdstack::theme::toCSS $theme]} ;# intentional: mdstack::theme is optional
-        if {$css eq ""} { set css [mdstack::html::_defaultCss] }
+        set md "# $h1
 
-        set title "$_title -- [string trimright $urlPath /]/"
-        set esc   [mdstack::html::escapeHtml $title]
-        set body  "<h1>Index: [mdstack::html::escapeHtml $urlPath]</h1>\n"
-
-        # Parent link
-        if {$urlPath ne "/"} {
-            set parent [file dirname [string trimright $urlPath /]]
-            if {$parent eq ""} { set parent "/" }
-            append body "<p><a href=\"$parent\">.. (up)</a></p>\n"
+"
+        if {[llength $items] == 0} {
+            append md "_No documents found._
+"
+        } else {
+            append md [join $items "
+"] "
+"
         }
 
-        # Subdirectories
-        if {[llength $subdirs] > 0} {
-            append body "<h2>Directories</h2>\n<ul class=\"dirlist\">\n"
-            foreach d $subdirs {
-                set href [string trimright $urlPath /]/$d/
-                append body "<li><a href=\"$href\">$d/</a></li>\n"
-            }
-            append body "</ul>\n"
-        }
-
-        # Markdown files
-        if {[llength $mdFiles] > 0} {
-            append body "<h2>Documents</h2>\n<ul class=\"filelist\">\n"
-            foreach f $mdFiles {
-                set href   [string trimright $urlPath /]/$f
-                set fpath  [file join $dirPath $f]
-                set ftitle $f
-                catch { ;# intentional: title extraction optional, errors ignored
-                    foreach line [split [my _readFile $fpath] "\n"] {
-                        set line [string trim $line]
-                        if {[string match "# *" $line]} {
-                            set ftitle [string range $line 2 end]
-                            break
-                        }
-                    }
-                }
-                append body "<li><a href=\"$href\">[mdstack::html::escapeHtml $ftitle]</a> "
-                append body "<small>($f)</small></li>\n"
-            }
-            append body "</ul>\n"
-        }
-
-        if {[llength $mdFiles] == 0 && [llength $subdirs] == 0} {
-            append body "<p><em>No Markdown files found.</em></p>\n"
-        }
-
-        return "<!DOCTYPE html>
-<html lang=\"de\">
-<head>
-<meta charset=\"utf-8\">
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-<title>$esc</title>
-<style>
-$css
-.dirlist li::before { content: \"📁 \"; }
-.filelist li::before { content: \"📄 \"; }
-small { color: #888; font-size: 0.85em; }
-</style>
-</head>
-<body>
-<article>
-$body</article>
-</body>
-</html>"
+        set ast  [mdstack::parser::parse $md]
+        set html [mdstack::html::render $ast -theme $theme -toc 0 -lang de]
+        return [my _injectCss $html $cssFile]
     }
 
     # Site index: all .md under rootDir as a recursive tree.
@@ -371,6 +325,8 @@ oo::class create mdserver::Server {
             navbg      "#2c3e50"
             navfg      "#ffffff"
             navlinks   {{{&#127968; Start} /} {{&#128218; Alle Dokumente} /?nav=index}}
+            navsections 1
+            chapternav  1
         }
         # Read arguments
         foreach {k v} $args {
@@ -478,6 +434,191 @@ oo::class create mdserver::Server {
     }
 
     # Insert the nav bar (Start + site index) at the top of every page.
+    # Top-level sections of the doc root as {label url} pairs, for the nav bar.
+    # A section is shown if it (transitively) contains any .md; the label is the
+    # section index.md H1, else the folder name.
+    method _sectionLinks {} {
+        set out {}
+        set root [my cfg root]
+        foreach d [lsort -dictionary [glob -nocomplain -directory $root -type d *]] {
+            set name [file tail $d]
+            if {[string index $name 0] eq "."} continue
+            if {![my _dirHasAnyMd $d]} continue
+            set label $name
+            set idx [file join $d index.md]
+            if {[file exists $idx]} {
+                set t [my _h1Title $idx]
+                if {$t ne ""} { set label $t }
+            }
+            set label [string map {& &amp; < &lt; > &gt;} $label]
+            lappend out [list $label "/$name/"]
+        }
+        return $out
+    }
+
+    # True if $dir contains any .md file (transitively).
+    method _dirHasAnyMd {dir} {
+        if {[llength [glob -nocomplain -directory $dir *.md]] > 0} { return 1 }
+        foreach d [glob -nocomplain -directory $dir -type d *] {
+            if {[string index [file tail $d] 0] eq "."} continue
+            if {[my _dirHasAnyMd $d]} { return 1 }
+        }
+        return 0
+    }
+
+    # First "# H1" of a Markdown file, or "" if none.
+    method _h1Title {file} {
+        set title ""
+        if {![catch {open $file r} fh]} {
+            fconfigure $fh -encoding utf-8
+            while {[gets $fh line] >= 0} {
+                if {[regexp {^#\s+(.+)$} $line -> t]} {
+                    set title [string trim $t]; break
+                }
+            }
+            close $fh
+        }
+        return $title
+    }
+
+    # Chapter list of a bookkit book (dir with book.tcl): the "chapters" list
+    # from book.tcl (safe interp), else numeric-prefix order.
+    method _bookChapters {dir} {
+        set chapters {}
+        set bt [file join $dir book.tcl]
+        if {[file exists $bt]} {
+            set ip [interp create -safe]
+            interp eval $ip {set chapters {}}
+            catch {
+                set fh [open $bt r]; fconfigure $fh -encoding utf-8
+                set script [read $fh]; close $fh
+                interp eval $ip $script
+                set chapters [interp eval $ip {set chapters}]
+            }
+            interp delete $ip
+        }
+        if {[llength $chapters] == 0} {
+            # bookkit web-index block in index.md: reuse its chapter links.
+            set idx [file join $dir index.md]
+            if {[file exists $idx]} {
+                set fh [open $idx r]; fconfigure $fh -encoding utf-8
+                set text [read $fh]; close $fh
+                if {[regexp {<!-- bookkit:toc:begin -->(.*?)<!-- bookkit:toc:end -->} $text -> blk]} {
+                    foreach {full url} [regexp -all -inline {\]\(([^)]+\.md)\)} $blk] {
+                        if {![string match "*/*" $url] && ![string match "http*" $url]} {
+                            lappend chapters $url
+                        }
+                    }
+                }
+            }
+        }
+        if {[llength $chapters] == 0} { set chapters [my _prefixOrdered $dir] }
+        return $chapters
+    }
+
+    # A directory is treated as a book if it has book.tcl or its index.md
+    # carries a bookkit web-index block.
+    method _isBookDir {dir} {
+        if {[file exists [file join $dir book.tcl]]} { return 1 }
+        set idx [file join $dir index.md]
+        if {[file exists $idx]} {
+            set fh [open $idx r]; fconfigure $fh -encoding utf-8
+            set text [read $fh]; close $fh
+            if {[string first "<!-- bookkit:toc:begin -->" $text] >= 0} { return 1 }
+        }
+        return 0
+    }
+
+    # Sidebar book navigation: the full chapter list (current one highlighted).
+    # Only in sidebar style and inside a book.
+    method _injectBookNav {html fsPath style} {
+        if {$style ne "sidebar"} { return $html }
+        set dir [file dirname $fsPath]
+        if {![my _isBookDir $dir]} { return $html }
+        set chapters [my _bookChapters $dir]
+        if {[llength $chapters] == 0} { return $html }
+        set cur [file tail $fsPath]
+        set items ""
+        foreach ch $chapters {
+            set label [my _chapterLabel [file join $dir $ch]]
+            set cls [expr {$ch eq $cur ? " class=\"cur\"" : ""}]
+            append items "<li$cls><a href=\"$ch\">$label</a></li>"
+        }
+        set nav "<nav class=\"mdserver-booknav\">\
+<input type=\"checkbox\" id=\"mdserver-booknav-toggle\" class=\"booknav-toggle\">\
+<label for=\"mdserver-booknav-toggle\" class=\"booknav-toggle-label\">&#128214; Kapitel</label>\
+<div class=\"booknav-title\"><a href=\"index.md\">&uarr; &Uuml;bersicht</a></div>\
+<ul>$items</ul></nav>\n"
+        if {[regexp -indices {<body[^>]*>} $html m]} {
+            set e [lindex $m 1]
+            return "[string range $html 0 $e]\n$nav[string range $html [expr {$e+1}] end]"
+        }
+        return "$nav$html"
+    }
+
+    # *.md ordered by numeric prefix (index.md / indexsub.md excluded).
+    method _prefixOrdered {dir} {
+        set withNum {}; set noNum {}
+        foreach fp [glob -nocomplain -directory $dir *.md] {
+            set name [file tail $fp]
+            if {$name in {index.md indexsub.md}} continue
+            if {[regexp {^(\d+)} $name -> p]} {
+                lappend withNum [list [scan $p %d] $name]
+            } else {
+                lappend noNum $name
+            }
+        }
+        set out {}
+        foreach pair [lsort -integer -index 0 $withNum] { lappend out [lindex $pair 1] }
+        foreach fp [lsort $noNum] { lappend out $fp }
+        return $out
+    }
+
+    # Chapter link label: cleaned H1, else file base name (HTML-escaped).
+    method _chapterLabel {file} {
+        set t [my _h1Title $file]
+        if {$t eq ""} { set t [file rootname [file tail $file]] }
+        regsub -all {\[([^\]]*)\]\{[^\}]*\}} $t {\1} t
+        regsub -all {\[([^\]]*)\]\([^)]*\)} $t {\1} t
+        regsub -all {\{[^\}]*\}} $t {} t
+        return [string map {& &amp; < &lt; > &gt;} [string trim $t]]
+    }
+
+    # In a book (dir with book.tcl), append a prev / up / next chapter bar to a
+    # chapter page. index.md and non-chapter files are left unchanged.
+    method _injectChapterNav {html fsPath} {
+        if {![my cfg chapternav]} { return $html }
+        set dir  [file dirname $fsPath]
+        set name [file tail $fsPath]
+        if {$name eq "index.md"} { return $html }
+        if {![my _isBookDir $dir]} { return $html }
+        set chapters [my _bookChapters $dir]
+        set i [lsearch -exact $chapters $name]
+        if {$i < 0} { return $html }
+
+        set link {color:#0055aa;text-decoration:none;}
+        if {$i > 0} {
+            set p [lindex $chapters [expr {$i - 1}]]
+            set prev "<a href=\"$p\" style=\"$link\">&larr; [my _chapterLabel [file join $dir $p]]</a>"
+        } else { set prev "<span></span>" }
+        if {$i < [expr {[llength $chapters] - 1}]} {
+            set n [lindex $chapters [expr {$i + 1}]]
+            set next "<a href=\"$n\" style=\"$link\">[my _chapterLabel [file join $dir $n]] &rarr;</a>"
+        } else { set next "<span></span>" }
+        set up "<a href=\"index.md\" style=\"$link\">&uarr; &Uuml;bersicht</a>"
+
+        set bar "<nav class=\"mdserver-chapnav\" style=\"display:flex;\
+justify-content:space-between;align-items:center;gap:1em;\
+margin:2.5em 0 0;padding:0.8em 0;border-top:1px solid #ccc;font-size:0.95em;\">\
+$prev$up$next</nav>\n"
+
+        set idx [string first "</body>" $html]
+        if {$idx >= 0} {
+            return "[string range $html 0 [expr {$idx - 1}]]$bar[string range $html $idx end]"
+        }
+        return "$html$bar"
+    }
+
     method _injectNav {html} {
         if {![my cfg nav]} { return $html }
         set bg [my cfg navbg]
@@ -487,6 +628,13 @@ oo::class create mdserver::Server {
         foreach link [my cfg navlinks] {
             lassign $link label url
             append links "<a href=\"$url\" style=\"color:$fg;text-decoration:none;\">$label</a>"
+        }
+        # Top-level sections, auto-derived from the document root.
+        if {[my cfg navsections]} {
+            foreach link [my _sectionLinks] {
+                lassign $link label url
+                append links "<a href=\"$url\" style=\"color:$fg;text-decoration:none;\">$label</a>"
+            }
         }
         set style "background:$bg;color:$fg;padding:0.5em 1em;\
 margin:0 calc(50% - 50vw) 1em;width:100vw;box-sizing:border-box;\
@@ -610,13 +758,23 @@ $bar[string range $html [expr {$e + 1}] end]"
             set fsPath [my _safePath $urlPath]
 
             if {[file isdirectory $fsPath]} {
+                # Directory without trailing slash: redirect so the browser
+                # resolves relative links against the directory, not its parent.
+                if {![string match "*/" $urlPath]} {
+                    set loc "$urlPath/"
+                    set q [$req query]
+                    if {$q ne ""} { append loc "?$q" }
+                    my _redirect $chan $loc
+                    return
+                }
                 set indexFile [file join $fsPath [my cfg index]]
                 if {[file exists $indexFile]} {
                     set html [$_renderer markdown $indexFile $theme $toc [my _styleCss $style]]
+                    set html [my _injectBookNav $html $indexFile $style]
                     my _log "  -> 200 (index.md)"
                     my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
                 } else {
-                    set html [$_renderer index $fsPath $urlPath $theme]
+                    set html [$_renderer index $fsPath $urlPath $theme [my _styleCss $style]]
                     my _log "  -> 200 (directory index)"
                     my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
                 }
@@ -628,6 +786,8 @@ $bar[string range $html [expr {$e + 1}] end]"
                 set ext [string tolower [file extension $fsPath]]
                 if {$ext eq ".md"} {
                     set html [$_renderer markdown $fsPath $theme $toc [my _styleCss $style]]
+                    set html [my _injectChapterNav $html $fsPath]
+                    set html [my _injectBookNav $html $fsPath $style]
                     my _log "  -> 200 (markdown)"
                     my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
                 } else {
@@ -749,6 +909,17 @@ $bar[string range $html [expr {$e + 1}] end]"
             [list "Accept-Ranges: bytes" "Last-Modified: $lastmod"]
         fconfigure $chan -translation binary
         puts -nonewline $chan $data
+    }
+
+    # 301 redirect (e.g. add a trailing slash to a directory URL).
+    method _redirect {chan location} {
+        my _log "  -> 301 $location"
+        puts $chan "HTTP/1.1 301 Moved Permanently"
+        puts $chan "Location: $location"
+        puts $chan "Content-Length: 0"
+        puts $chan "Connection: close"
+        puts $chan "Server: mdserver/0.5"
+        puts $chan ""
     }
 
     method _send {chan status contentType body} {
