@@ -1,4 +1,4 @@
-# mdstack::parser 0.6.5
+# mdstack::parser 0.8.0
 #
 # 0.6.0 (2026-06-20): reflink comment-defs ([//NNN]: # (text)) consumed;
 #   indented deflist bodies kept in the list item; underscore emphasis/strong
@@ -47,10 +47,16 @@
 #         literal pipe in the cell text (also inside code spans)
 # v0.6.5  '*' emphasis scans candidate closing runs instead of taking the first
 #         one the lazy regexp finds: '*italic **bold** text*' is emphasis again
+# v0.7.0  emphasis via the CommonMark DELIMITER STACK: runs are tokenised with
+#         their flanking flags, then matched in a second pass. Replaces the
+#         regexp-per-attempt scanner, which could not express opener flanking,
+#         the rule of 3, or intraword '_'.
+# v0.8.0  HTML blocks (CommonMark, all 7 start conditions) -- raw block HTML was
+#         previously DROPPED: <div>, <table> and friends vanished from the AST.
 #
 package require Tcl 8.6-
 
-package provide mdstack::parser 0.6.5
+package provide mdstack::parser 0.8.0
 
 namespace eval mdstack::parser {
     namespace export parse validate supports anchorize
@@ -207,7 +213,7 @@ proc mdstack::parser::supports {ast} {
         blocks:code_block blocks:code_indented blocks:hr
         blocks:image blocks:table blocks:blockquote blocks:deflist
         blocks:div blocks:footnote_def blocks:footnote_section
-        blocks:yaml_frontmatter blocks:html
+        blocks:yaml_frontmatter blocks:html blocks:html_block
 
         inline:text inline:strong inline:emphasis inline:strike
         inline:inline_code inline:link inline:image inline:linebreak
@@ -368,6 +374,125 @@ proc mdstack::parser::parsePandocDiv {linesVar iVar} {
 # Block dispatcher
 # ============================================================
 
+# ============================================================
+# HTML blocks (CommonMark, since 0.8.0)
+#
+# Seven start conditions, each with its own end condition. Everything between
+# is passed through VERBATIM -- no inline parsing, no escaping. Before 0.8.0
+# the parser had no notion of block HTML at all: the tags fell through to the
+# paragraph branch, were parsed as inline markup, and the block vanished.
+# ============================================================
+
+# Tag names that start a type-6 block (CommonMark's list, verbatim).
+namespace eval mdstack::parser {
+    variable htmlBlockTags {
+        address article aside base basefont blockquote body caption center col
+        colgroup dd details dialog dir div dl dt fieldset figcaption figure
+        footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe
+        legend li link main menu menuitem nav noframes ol optgroup option p
+        param search section summary table tbody td tfoot th thead title tr
+        track ul
+    }
+}
+
+# Two ways to treat block HTML:
+#
+#   raw       (default, CommonMark) -- the block is kept VERBATIM in an
+#             html_block node. Nothing is dropped; each sink decides what to do
+#             with it.
+#   interpret (legacy) -- the block is dismantled: <hr> becomes an hr node, the
+#             remaining text is run through the inline parser, tags are stripped.
+#             This is what the doctools navigation bars in converted man pages
+#             need, and it was the ONLY behaviour before 0.8.0 -- which is why
+#             a <div> or a <table> silently vanished from the AST.
+namespace eval mdstack::parser { variable htmlMode raw }
+
+proc mdstack::parser::setHtmlMode {mode} {
+    variable htmlMode
+    if {$mode ni {raw interpret}} {
+        return -code error -errorcode {MDSTACK PARSER HTMLMODE} \
+            "unknown HTML block mode \"$mode\": must be raw or interpret"
+    }
+    set htmlMode $mode
+}
+proc mdstack::parser::htmlMode {} {
+    variable htmlMode
+    return $htmlMode
+}
+
+# Which HTML block type does this line start? 0 = none.
+#
+# inParagraph: type 7 (any complete tag on a line of its own) may NOT interrupt
+# a paragraph -- otherwise a line like "<b>" inside running text would cut the
+# paragraph in half.
+proc mdstack::parser::htmlBlockType {line inParagraph} {
+    variable htmlBlockTags
+
+    # Up to three leading spaces are allowed; four make it indented code.
+    if {![regexp {^ {0,3}<} $line]} { return 0 }
+    set l [string trimleft $line]
+
+    # 1: <script, <pre, <style, <textarea
+    if {[regexp -nocase {^<(script|pre|style|textarea)([ \t>]|$)} $l]} { return 1 }
+    # 2: <!--   3: <?   4: <! + letter   5: <![CDATA[
+    #
+    # NOT via [string match]: '?' is a glob wildcard, so the pattern "<?*"
+    # happily matches "<div>" and every other tag. Prefix comparison instead.
+    if {[string range $l 0 3] eq "<!--"}                               { return 2 }
+    if {[string range $l 0 1] eq "<?"}                                 { return 3 }
+    if {[regexp {^<![A-Za-z]} $l]}                                     { return 4 }
+    if {[string range $l 0 8] eq "<!\[CDATA\["}                        { return 5 }
+    # 6: known block tag, open or closing
+    if {[regexp -nocase {^</?([A-Za-z][A-Za-z0-9-]*)([ \t/>]|$)} $l -> tag]} {
+        if {[string tolower $tag] in $htmlBlockTags}                   { return 6 }
+    }
+    # 7: a complete open or closing tag, alone on the line. Not script/pre/
+    #    style/textarea (those are type 1), and never inside a paragraph.
+    if {$inParagraph} { return 0 }
+    if {[regexp -nocase {^<(script|pre|style|textarea)\b} $l]}         { return 0 }
+    if {[regexp {^</[A-Za-z][A-Za-z0-9-]*\s*>\s*$} $l]}                { return 7 }
+    if {[regexp {^<[A-Za-z][A-Za-z0-9-]*(\s+[^<>]*?)?/?>\s*$} $l]}     { return 7 }
+    return 0
+}
+
+# Does this line end an HTML block of the given type?
+# Types 1-5 end ON the matching line (it belongs to the block); types 6 and 7
+# end at a blank line (which does NOT belong to it).
+proc mdstack::parser::_htmlBlockEnds {type line} {
+    # [string first], not [string match]: '?' and '[' are glob metacharacters.
+    switch -- $type {
+        1 { return [regexp -nocase {</(script|pre|style|textarea)>} $line] }
+        2 { return [expr {[string first "-->"  $line] >= 0}] }
+        3 { return [expr {[string first "?>"   $line] >= 0}] }
+        4 { return [expr {[string first ">"    $line] >= 0}] }
+        5 { return [expr {[string first "\]\]>" $line] >= 0}] }
+        default { return [expr {[string trim $line] eq ""}] }
+    }
+}
+
+proc mdstack::parser::parseHtmlBlockRaw {linesVar iVar} {
+    upvar $linesVar lines $iVar i
+    set n    [llength $lines]
+    set type [mdstack::parser::htmlBlockType [string trimright [lindex $lines $i]] 0]
+    set out  {}
+
+    while {$i < $n} {
+        set raw [string trimright [lindex $lines $i]]
+        if {$type >= 6 && [string trim $raw] eq ""} {
+            # blank line ends types 6/7 and is not part of the block
+            incr i
+            break
+        }
+        lappend out $raw
+        incr i
+        if {$type <= 5 && [mdstack::parser::_htmlBlockEnds $type $raw]} { break }
+    }
+
+    return [dict create type html_block \
+        content [join $out "\n"] \
+        meta    [dict create htmlBlockType $type]]
+}
+
 proc mdstack::parser::parseBlocks {linesVar refDefLinesVar} {
     upvar $linesVar lines $refDefLinesVar refDefLines
     set blocks {}
@@ -416,6 +541,24 @@ proc mdstack::parser::parseBlocks {linesVar refDefLinesVar} {
 
         if {[mdstack::parser::isHeading $line]} {
             lappend blocks [mdstack::parser::parseHeading lines i]
+            continue
+        }
+
+        # Raw HTML block. Must sit before the paragraph fallback, otherwise the
+        # tags are parsed as inline markup and the block structure is lost --
+        # which is exactly what happened before 0.8.0: <div>, <table>, comments
+        # and <script> simply disappeared from the AST.
+        if {[mdstack::parser::htmlBlockType $line 0] > 0} {
+            if {[mdstack::parser::htmlMode] eq "interpret"
+                    && [mdstack::parser::isHtmlBlockStart $line]} {
+                set nodes [mdstack::parser::parseHtmlBlockInterpreted lines i]
+                if {[llength $nodes] > 0} {
+                    lappend blocks {*}$nodes
+                    continue
+                }
+                continue
+            }
+            lappend blocks [mdstack::parser::parseHtmlBlockRaw lines i]
             continue
         }
 
@@ -468,17 +611,6 @@ proc mdstack::parser::parseBlocks {linesVar refDefLinesVar} {
             }
         }
 
-        # Block-level HTML (doctools navigation bar etc.): a line starting
-        # with a block-level tag begins a raw-HTML block that runs to the next
-        # blank line. We interpret it (not show raw) -- see parseHtmlBlock.
-        if {[mdstack::parser::isHtmlBlockStart $line]} {
-            set nodes [mdstack::parser::parseHtmlBlock lines i]
-            if {[llength $nodes] > 0} {
-                lappend blocks {*}$nodes
-                continue
-            }
-        }
-
         # Fallback: Paragraph
         lappend blocks {*}[mdstack::parser::parseParagraph lines i refDefLines]
     }
@@ -500,12 +632,12 @@ proc mdstack::parser::isHtmlBlockStart {line} {
         $line]
 }
 
-# Collect a raw-HTML block (until the next blank line) and interpret it into
-# DocIR-compatible nodes: every <hr> becomes an `hr` block, and the text
-# between rules is run through the inline parser (so embedded <a href> links
-# and HTML entities are resolved). Lines are joined with spaces first so tags
-# that doctools wraps across several lines are reassembled.
-proc mdstack::parser::parseHtmlBlock {linesVar iVar} {
+# Legacy mode "interpret": dismantle the block into DocIR-compatible nodes --
+# every <hr> becomes an `hr` block, the text between rules is run through the
+# inline parser (so embedded <a href> links and entities are resolved), and the
+# tags themselves are dropped. Lines are joined with spaces first so tags that
+# doctools wraps across several lines are reassembled.
+proc mdstack::parser::parseHtmlBlockInterpreted {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set n [llength $lines]
     set buf {}
@@ -1123,7 +1255,12 @@ proc mdstack::parser::parseListLines {lines} {
                 set curText [string trim $line " \t"]
                 set blankPending 0
             } else {
-                append curText " " [string trim $line " \t"]
+                # Keep the soft line break. Joining wrapped lines with a space
+                # threw it away: inside a list item a paragraph came out as one
+                # long line, while the very same paragraph at top level kept its
+                # softbreak. \x00SB is the sentinel parseParagraph uses and
+                # parseInlines turns back into a softbreak node.
+                append curText "\x00SB" [string trim $line " \t"]
             }
         } else {
             if {$hasMarker || [mdstack::parser::_isSubBlockLine $line $curContentIndent]} { set seenSubItem 1 }
@@ -1643,6 +1780,139 @@ proc mdstack::parser::_canClose {prev next} {
           && (![mdstack::parser::_isPunct $prev]
               || [mdstack::parser::_isWs $next] || [mdstack::parser::_isPunct $next])}
 }
+# ============================================================
+# Emphasis: CommonMark delimiter stack (since 0.7.0)
+# ============================================================
+
+# Flanking flags of one delimiter run.
+#
+#   '*': may open when left-flanking, may close when right-flanking.
+#   '_': additionally may not open when it is ALSO right-flanking unless
+#        preceded by punctuation, and may not close when it is ALSO
+#        left-flanking unless followed by punctuation. That single extra
+#        condition is what keeps snake_case and _foo_bar_baz_ intact -- the
+#        old scanner had no place to put it.
+proc mdstack::parser::_delimFlags {ch prevC nextC} {
+    set left  [mdstack::parser::_canOpen  $prevC $nextC]
+    set right [mdstack::parser::_canClose $prevC $nextC]
+    if {$ch eq "*"} {
+        return [list [expr {$left ? 1 : 0}] [expr {$right ? 1 : 0}]]
+    }
+    set canOpen  [expr {$left  && (!$right || [mdstack::parser::_isPunct $prevC])}]
+    set canClose [expr {$right && (!$left  || [mdstack::parser::_isPunct $nextC])}]
+    return [list [expr {$canOpen ? 1 : 0}] [expr {$canClose ? 1 : 0}]]
+}
+
+# Turn leftover delimiter nodes into plain text, and merge adjacent text nodes.
+#
+# A run that never paired up leaves its literal stars behind ("_foo_bar_baz_"
+# keeps two inner underscores). Without merging the AST would carry them as
+# separate text nodes -- correct when rendered, but noisy to read and to assert
+# on. One text node per contiguous run of text.
+proc mdstack::parser::_delimsToText {nodes} {
+    set out {}
+    foreach nd $nodes {
+        if {[dict get $nd type] eq "_delim"} {
+            set nd [dict create type text value [dict get $nd value]]
+        }
+        if {[dict get $nd type] eq "text" && [llength $out] > 0} {
+            set last [lindex $out end]
+            if {[dict get $last type] eq "text"} {
+                dict set last value "[dict get $last value][dict get $nd value]"
+                lset out end $last
+                continue
+            }
+        }
+        lappend out $nd
+    }
+    return $out
+}
+
+# Match openers and closers over the finished node list.
+#
+# For every closer, look back for the nearest opener of the same character.
+# The RULE OF 3 rejects a pair when one side can do both jobs and the sum of
+# the run lengths is a multiple of 3 (unless both are) -- that is what makes
+# a**"foo"** literal instead of a*<em>"foo"</em>*.
+#
+# Two delimiters are consumed per pass when both runs are at least 2 (strong),
+# otherwise one (emphasis). The runs shrink, so a run of 3 yields <em><strong>
+# in two passes, and the loop always terminates: every pass either consumes
+# delimiters or advances past the closer.
+proc mdstack::parser::_processEmphasis {nodes} {
+    set i 0
+    while {1} {
+        # next closer at or after $i
+        set closerIdx -1
+        for {set k $i} {$k < [llength $nodes]} {incr k} {
+            set nd [lindex $nodes $k]
+            if {[dict get $nd type] eq "_delim" && [dict get $nd canClose]} {
+                set closerIdx $k
+                break
+            }
+        }
+        if {$closerIdx < 0} { break }
+
+        set closer [lindex $nodes $closerIdx]
+        set ch     [dict get $closer char]
+        set cn     [dict get $closer n]
+
+        # nearest opener before it
+        set openerIdx -1
+        for {set k [expr {$closerIdx - 1}]} {$k >= 0} {incr k -1} {
+            set nd [lindex $nodes $k]
+            if {[dict get $nd type] ne "_delim"}      { continue }
+            if {[dict get $nd char] ne $ch}           { continue }
+            if {![dict get $nd canOpen]}              { continue }
+            set on [dict get $nd n]
+            if {([dict get $closer canOpen] || [dict get $nd canClose])
+                    && (($on + $cn) % 3 == 0)
+                    && !($on % 3 == 0 && $cn % 3 == 0)} {
+                continue    ;# rule of 3
+            }
+            set openerIdx $k
+            break
+        }
+
+        if {$openerIdx < 0} {
+            # No opener: a delimiter that cannot open either is literal text.
+            if {![dict get $closer canOpen]} {
+                lset nodes $closerIdx \
+                    [dict create type text value [dict get $closer value]]
+            }
+            set i [expr {$closerIdx + 1}]
+            continue
+        }
+
+        set opener [lindex $nodes $openerIdx]
+        set on     [dict get $opener n]
+        set use    [expr {($on >= 2 && $cn >= 2) ? 2 : 1}]
+
+        set inner [mdstack::parser::_delimsToText \
+            [lrange $nodes [expr {$openerIdx + 1}] [expr {$closerIdx - 1}]]]
+        set kind [expr {$use == 2 ? "strong" : "emphasis"}]
+        set node [dict create type $kind content $inner]
+
+        dict set opener n     [expr {$on - $use}]
+        dict set opener value [string repeat $ch [dict get $opener n]]
+        dict set closer n     [expr {$cn - $use}]
+        dict set closer value [string repeat $ch [dict get $closer n]]
+
+        set head [lrange $nodes 0 [expr {$openerIdx - 1}]]
+        set tail [lrange $nodes [expr {$closerIdx + 1}] end]
+        set mid  {}
+        if {[dict get $opener n] > 0} { lappend mid $opener }
+        lappend mid $node
+        if {[dict get $closer n] > 0} { lappend mid $closer }
+        set nodes [concat $head $mid $tail]
+
+        # Rescan from the opener position: the shrunken runs may still pair up
+        # (that is how ***x*** becomes <em><strong>x</strong></em>).
+        set i [llength $head]
+    }
+    return [mdstack::parser::_delimsToText $nodes]
+}
+
 proc mdstack::parser::_flank {s idx rest inner dl} {
     set prevO [string index $s [expr {$idx - 1}]]
     set nextO [string index $inner 0]
@@ -1960,11 +2230,24 @@ proc mdstack::parser::parseInlines {s} {
         if {$match eq {} && $c eq "`"} {
             set match [mdstack::parser::_tryCode $s $rest $idx]
         }
-        if {$match eq {} && $c eq "*"} {
-            set match [mdstack::parser::_tryEmphasis $s $rest $idx]
-        }
-        if {$match eq {} && $c eq "_"} {
-            set match [mdstack::parser::_tryEmphasisUnderscore $s $rest $idx]
+        if {$match eq {} && ($c eq "*" || $c eq "_")} {
+            # Emphasis is NOT resolved here. The whole delimiter run is
+            # tokenised with its flanking flags and pushed as a _delim node;
+            # _processEmphasis matches openers and closers afterwards, over the
+            # finished node list. That is the only way to express the rules the
+            # old scanner could not: flanking of the OPENER, the rule of 3, and
+            # intraword '_'.
+            set j $idx
+            while {$j < $len && [string index $s $j] eq $c} { incr j }
+            set n     [expr {$j - $idx}]
+            set prevC [expr {$idx == 0 ? "" : [string index $s [expr {$idx - 1}]]}]
+            set nextC [expr {$j >= $len ? "" : [string index $s $j]}]
+            lassign [mdstack::parser::_delimFlags $c $prevC $nextC] canOpen canClose
+            lappend out [dict create type _delim char $c n $n \
+                canOpen $canOpen canClose $canClose \
+                value [string repeat $c $n]]
+            set idx $j
+            continue
         }
         if {$match eq {} && $c eq "~"} {
             set match [mdstack::parser::_tryStrike $rest $idx]
@@ -2009,7 +2292,7 @@ proc mdstack::parser::parseInlines {s} {
             incr idx
         }
     }
-    return $out
+    return [mdstack::parser::_processEmphasis $out]
 }
 
 # ============================================================

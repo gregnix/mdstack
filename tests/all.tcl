@@ -116,6 +116,7 @@ if {$runCore} {
         parser-emphasis-flanking.tcl
         parser-link-features.tcl
         parser-loose-lists.tcl
+        parser-html-blocks.tcl
     }
 
     # assert-basiert

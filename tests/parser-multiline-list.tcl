@@ -25,10 +25,16 @@ proc assert {testName condition} {
 
 proc getBlock {ast idx} { lindex [dict get $ast blocks] $idx }
 proc getItem {lst idx} { lindex [dict get $lst items] $idx }
+# Since parser 0.8.0 a wrapped line inside a list item keeps its SOFT LINE
+# BREAK (a softbreak node) instead of being joined with a space -- the same
+# thing a wrapped paragraph at top level always did. For these tests, which
+# compare flat strings, a softbreak counts as a space: what they check is the
+# wording, not the line breaking.
 proc itemText {item} {
     set firstBlock [lindex [dict get $item blocks] 0]
     set txt ""
     foreach i [dict get $firstBlock content] {
+        if {[dict get $i type] eq "softbreak"} { append txt " " }
         if {[dict get $i type] eq "text"} { append txt [dict get $i value] }
         if {[dict get $i type] eq "strong"} {
             foreach si [dict get $i content] {

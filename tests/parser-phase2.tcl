@@ -176,8 +176,12 @@ set ast [mdstack::parser::parse {- Langer Text
 - Kurz.}]
 set lst [getBlock $ast 0]
 set para [lindex [dict get [getItem $lst 0] blocks] 0]
+# Since parser 0.8.0 the wrapped line keeps its soft line break (a softbreak
+# node) instead of being glued together with a space -- as a top-level
+# paragraph always did. Flattened for this assertion, a softbreak is a space.
 set flat ""
 foreach i [dict get $para content] {
+    if {[dict get $i type] eq "softbreak"} { append flat " " }
     if {[dict get $i type] eq "text"} { append flat [dict get $i value] }
 }
 assert "B8-multiline-joined" {$flat eq "Langer Text der continues here."}

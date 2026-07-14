@@ -1,5 +1,53 @@
 # mdstack — Changelog
 
+## Unreleased — mdstack::parser 0.8.0
+
+`lib/mdstack/parser-0.8.0.tm` (was `parser-0.7.0.tm`).
+
+### Added — HTML blocks (CommonMark), and an end to silent data loss
+
+Raw block HTML was **dropped**. A `<div>`, a `<table>`, a `<script>` fell
+through to the paragraph branch, the tags were parsed as inline markup and
+thrown away, and what reached the AST was the stripped text — the block itself
+was gone. Conformance said it plainly: **0 of 46**.
+
+- All seven CommonMark start conditions are recognised (`htmlBlockType`), each
+  with its own end condition: types 1–5 end on their closing line (`</script>`,
+  `-->`, `?>`, `>`, `]]>`), types 6 and 7 at a blank line. Type 7 may not
+  interrupt a paragraph.
+- The block is kept **verbatim** in an `html_block` node — no inline parsing,
+  no escaping.
+- **Two modes.** `raw` (new default, CommonMark) keeps the block. `interpret`
+  (the previous behaviour, now opt-in via `mdstack::parser::setHtmlMode
+  interpret`) dismantles it: `<hr>` becomes an `hr` node, the text between is
+  inline-parsed, tags are stripped. That is what the doctools navigation bars in
+  converted man pages want, and nothing else did.
+
+A trap worth naming: the type-3 check was first written as
+`[string match "<?*" $l]`, and **`?` is a glob wildcard** — so `<div>` matched
+as a processing instruction. Prefix comparison (`string range`) instead;
+likewise `string first` for the end conditions, where `?` and `[` would bite.
+
+### Also fixed — soft line breaks inside list items
+
+A wrapped line inside a list item was glued to the previous one **with a
+space**, throwing the soft line break away — while the very same paragraph at
+top level kept its `softbreak`. The item paragraph now uses the same `\x00SB`
+sentinel `parseParagraph` uses, so `parseInlines` turns it back into a
+`softbreak` node. Sinks already handle it (HTML emits a newline, PDF/ODT/txt a
+space), so nothing else had to change.
+
+### Numbers
+
+| | before | after |
+|---|---|---|
+| CommonMark HTML blocks | 0/46 | **39/46** |
+| CommonMark list items | 16/48 | **21/48** |
+| CommonMark lists | 8/26 | **11/26** |
+| CommonMark strict, overall | 321/655 (49.0%) | **367/655 (56.0%)** |
+| CommonMark lenient, overall | 363/655 | **417/655 (63.7%)** |
+| mdstack core suite | 648/0 | **661/0** (new `parser-html-blocks.tcl`, 13 tests) |
+
 ## Unreleased — mdstack::parser 0.7.0
 
 `lib/mdstack/parser-0.7.0.tm` (was `parser-0.6.5.tm`).
