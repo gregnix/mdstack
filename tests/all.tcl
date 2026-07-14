@@ -110,6 +110,12 @@ if {$runCore} {
         parser-hardbreak.tcl
         parser-indented.tcl
         parser-oratcl-style.tcl
+        parser-tables.tcl
+        parser-backslash.tcl
+        parser-code-spans.tcl
+        parser-emphasis-flanking.tcl
+        parser-link-features.tcl
+        parser-loose-lists.tcl
     }
 
     # assert-basiert
@@ -142,6 +148,7 @@ if {$runCore} {
     # ohne Renner abzubrechen.
     runCustom $dir {
         test-docir-md.tcl
+        test-html-assets.tcl
     }
 }
 
@@ -155,7 +162,9 @@ if {$runGui} {
         runTcltest $dir {
             mdtext.tcl
             ui-smoke-mdeditorkit.tcl
+            ui-smoke-mdeditwidget.tcl
             ui-parser-error.tcl
+            viewer.tcl
         }
         # Tk-Tests mit assert-Format
         runAssert $dir {

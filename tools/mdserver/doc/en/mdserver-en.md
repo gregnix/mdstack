@@ -58,6 +58,7 @@ tclsh mdserver.tcl [options]
 | `--stylesdir` | `../styles` | Directory holding the CSS styles |
 | `--navbg` | `#2c3e50` | Nav bar background color |
 | `--navfg` | `#ffffff` | Nav bar text color |
+| `--navmax` | `6` | Nav bar: max. sections shown inline; more fold into a dropdown (`0` = never) |
 | `--title` | `mdserver` | Site title |
 | `--toc` | `1` | Table of contents (0\|1) |
 | `--control` | `""` | Control port (localhost only; `stop`/`ping`) |
@@ -127,6 +128,20 @@ the root as links (label from the section's `index.md` H1, else the folder
 name) -- areas like `Programmiersprachen/` are one click away from every page,
 not only via *Alle Dokumente*. A folder appears if it transitively contains any
 `.md`. Disable with the `navsections 0` option.
+
+**Overflow: the section dropdown.** As the root grows, so would the bar -- with
+eight or ten sections and long titles it runs past the window edge. So more than
+`navmax` sections (default 6) fold into **one** menu, labelled by `navmore`
+(default `&#128193; Bereiche`). The bar stays a single line however many areas
+the root has. The dropdown is pure CSS (`<details>`/`<summary>`) -- no JavaScript.
+
+```bash
+tclsh mdserver.tcl --root docs --navmax 4      # 5 sections or more: dropdown
+tclsh mdserver.tcl --root docs --navmax 0      # never fold (0.2 behaviour)
+```
+
+The bar also wraps (`flex-wrap`) instead of overflowing when there are many
+fixed `navlinks`; the links themselves never break mid-title.
 
 Customise colours via CLI, links/icons via the constructor:
 
@@ -282,6 +297,12 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+**0.3** -- nav bar overflow: more than `navmax` sections (default 6) fold into a
+CSS-only dropdown (`navmore` label), bar wraps instead of overflowing. `--theme`
+works again: the theme CSS (`mdstack::theme::toCSS`) is embedded by mdserver
+itself -- docir::html knows only its own default CSS, so hell / dunkel /
+solarized used to render identically.
 
 **0.2 (2026-07-11)** -- nav bar auto-sections (`navsections`), trailing-slash
 redirect for directories, directory listing rendered via mdstack, chapter

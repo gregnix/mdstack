@@ -40,44 +40,58 @@ proc itext {inlines n} {
 # BUG1: Backslash-Escape
 # ============================================================
 
+# Since 0.7.0 adjacent text nodes are merged, so an escaped run is ONE text
+# node instead of four ("no ", "*", "bold", "*", " here"). What matters is that
+# no emphasis is produced and the stars survive literally.
 set r [mdstack::parser::parseInlines {no \*bold\* here}]
-assert "escape-star: no emphasis" {[itype $r 1] eq "text" && [itext $r 1] eq "*"}
-assert "escape-star: plain bold text" {[itype $r 2] eq "text" && [itext $r 2] eq "bold"}
-assert "escape-star: closing star literal" {[itype $r 3] eq "text" && [itext $r 3] eq "*"}
+assert "escape-star: one text node" {[llength $r] == 1}
+assert "escape-star: no emphasis" {[itype $r 0] eq "text"}
+assert "escape-star: stars literal" {[itext $r 0] eq {no *bold* here}}
 
 set r [mdstack::parser::parseInlines {no \`code\` here}]
-assert "escape-backtick: no code span" {[itype $r 1] eq "text" && [itext $r 1] eq "`"}
+assert "escape-backtick: no code span" {[llength $r] == 1 && [itype $r 0] eq "text"}
+assert "escape-backtick: backticks literal" {[itext $r 0] eq {no `code` here}}
 
 set r [mdstack::parser::parseInlines {no \~\~strike\~\~ here}]
-assert "escape-tilde: no strike" {[itype $r 1] eq "text" && [itext $r 1] eq "~"}
+assert "escape-tilde: no strike" {[llength $r] == 1 && [itype $r 0] eq "text"}
+assert "escape-tilde: tildes literal" {[itext $r 0] eq {no ~~strike~~ here}}
 
 set r [mdstack::parser::parseInlines {use \[not a link\]}]
-assert "escape-bracket: no link" {[itype $r 1] eq "text" && [itext $r 1] eq {[}}
+assert "escape-bracket: no link" {[llength $r] == 1 && [itype $r 0] eq "text"}
+assert "escape-bracket: brackets literal" {[itext $r 0] eq {use [not a link]}}
 
 set r [mdstack::parser::parseInlines "backslash: \\\\done"]
-set expected "\\"
-assert "escape-backslash: literal backslash" {[itype $r 1] eq "text" && [itext $r 1] eq $expected}
+assert "escape-backslash: literal backslash" {[llength $r] == 1 && [itype $r 0] eq "text"}
+assert "escape-backslash: text merged" {[itext $r 0] eq "backslash: \\done"}
 
 # Nicht-Escape: normaler Backslash vor nicht-speziellem Zeichen
 set r [mdstack::parser::parseInlines {path\nhere}]
-# \n ist kein Escape-Zeichen → \ wird als eigenes Text-Element ausgegeben
-assert "non-escape: backslash as text" {[itype $r 1] eq "text" && [itext $r 1] eq "\\"}
+# \n ist kein Escape-Zeichen -> der Backslash bleibt literal im Text stehen
+# (seit 0.7.0 in EINEM Textknoten, weil benachbarte Textknoten verschmolzen werden)
+assert "non-escape: backslash as text" {[llength $r] == 1 && [itype $r 0] eq "text"}
+assert "non-escape: backslash literal" {[itext $r 0] eq {path\nhere}}
 
 # ============================================================
 # BUG2: Bold+Italic (***)
+#
+# Nesting order changed with the delimiter stack (parser 0.7.0): CommonMark
+# resolves *** as <em><strong>x</strong></em> -- the two-delimiter (strong)
+# pair is consumed first, the leftover single pair wraps it. The old scanner
+# produced strong[emphasis[...]]. Both render bold+italic; the CommonMark order
+# is now the reference.
 # ============================================================
 
 set r [mdstack::parser::parseInlines {***bold and italic***}]
 assert "bolditalic: one element" {[llength $r] == 1}
-assert "bolditalic: outer is strong" {[itype $r 0] eq "strong"}
+assert "bolditalic: outer is em" {[itype $r 0] eq "emphasis"}
 set inner [dict get [lindex $r 0] content]
-assert "bolditalic: inner is em" {[dict get [lindex $inner 0] type] eq "emphasis"}
-set emInner [dict get [lindex $inner 0] content]
-assert "bolditalic: em text correct" {[dict get [lindex $emInner 0] value] eq "bold and italic"}
+assert "bolditalic: inner is strong" {[dict get [lindex $inner 0] type] eq "strong"}
+set stInner [dict get [lindex $inner 0] content]
+assert "bolditalic: text correct" {[dict get [lindex $stInner 0] value] eq "bold and italic"}
 
 set r [mdstack::parser::parseInlines {before ***combo*** after}]
 assert "bolditalic-context: 3 elements" {[llength $r] == 3}
-assert "bolditalic-context: middle is strong" {[itype $r 1] eq "strong"}
+assert "bolditalic-context: middle is em" {[itype $r 1] eq "emphasis"}
 
 # ============================================================
 # BUG3: Double-Backtick Code

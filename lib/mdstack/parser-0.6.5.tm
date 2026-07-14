@@ -1,4 +1,4 @@
-# mdstack::parser 0.6.3
+# mdstack::parser 0.6.5
 #
 # 0.6.0 (2026-06-20): reflink comment-defs ([//NNN]: # (text)) consumed;
 #   indented deflist bodies kept in the list item; underscore emphasis/strong
@@ -43,10 +43,14 @@
 # v0.6.2  Ordered lists carry a 'start' when the first number != 1 (<ol start=N>)
 # v0.6.3  List items hold nested blocks (indented code / block quote) via
 #         parseBlocks; the deliberate 4-space-after-list = code behaviour kept
+# v0.6.4  GFM tables: cells split on UNESCAPED pipes only; '\|' becomes a
+#         literal pipe in the cell text (also inside code spans)
+# v0.6.5  '*' emphasis scans candidate closing runs instead of taking the first
+#         one the lazy regexp finds: '*italic **bold** text*' is emphasis again
 #
 package require Tcl 8.6-
 
-package provide mdstack::parser 0.6.3
+package provide mdstack::parser 0.6.5
 
 namespace eval mdstack::parser {
     namespace export parse validate supports anchorize
@@ -1229,12 +1233,67 @@ proc mdstack::parser::parseTable {lines} {
             hasHeader  $hasHeader]]
 }
 
+# True if the character at index $i is escaped, i.e. preceded by an odd number
+# of backslashes.
+proc mdstack::parser::_isEscaped {line i} {
+    set n 0
+    for {set j [expr {$i - 1}]} {$j >= 0} {incr j -1} {
+        if {[string index $line $j] ne "\\"} { break }
+        incr n
+    }
+    return [expr {$n % 2 == 1}]
+}
+
+# Split one GFM table row into cells.
+#
+# A cell boundary is an UNESCAPED pipe. A '\|' is a literal pipe and is
+# resolved to '|' right here -- GFM requires this even inside a code span,
+# where the generic CommonMark backslash escape does not apply, so the inline
+# parser would never see it. '\\' stays as-is (the inline parser turns it into
+# a literal backslash) and the pipe after it still delimits.
 proc mdstack::parser::parseTableRow {line} {
     set line [string trim $line]
+    # Optional leading/trailing row pipe. The leading one cannot be escaped;
+    # the trailing one can ("a\|" ends in a literal pipe, not a delimiter).
     if {[string index $line 0] eq "|"} { set line [string range $line 1 end] }
-    if {[string index $line end] eq "|"} { set line [string range $line 0 end-1] }
+    set last [expr {[string length $line] - 1}]
+    if {$last >= 0 && [string index $line $last] eq "|" \
+            && ![mdstack::parser::_isEscaped $line $last]} {
+        set line [string range $line 0 end-1]
+    }
+
     set cells {}
-    foreach cell [split $line "|"] { lappend cells [string trim $cell " \t"] }
+    set cur   ""
+    set i     0
+    set n     [string length $line]
+    while {$i < $n} {
+        set ch [string index $line $i]
+        if {$ch eq "\\"} {
+            set nxt [string index $line [expr {$i + 1}]]
+            if {$nxt eq "|"} {
+                append cur "|"          ;# escaped pipe -> literal, escape consumed
+                incr i 2
+                continue
+            }
+            if {$nxt eq "\\"} {
+                append cur "\\\\"           ;# escaped backslash -> keep for the inline parser
+                incr i 2
+                continue
+            }
+            append cur $ch              ;# any other backslash: leave it alone
+            incr i
+            continue
+        }
+        if {$ch eq "|"} {
+            lappend cells [string trim $cur " \t"]
+            set cur ""
+            incr i
+            continue
+        }
+        append cur $ch
+        incr i
+    }
+    lappend cells [string trim $cur " \t"]
     return $cells
 }
 
@@ -1592,20 +1651,69 @@ proc mdstack::parser::_flank {s idx rest inner dl} {
     expr {[mdstack::parser::_canOpen $prevO $nextO] && [mdstack::parser::_canClose $prevC $nextC]}
 }
 
+# Content of a '*' emphasis of delimiter length dl, or "" when it does not
+# close here.
+#
+# The lazy regexp this replaced ({^\*(.+?)\*}) tried exactly ONE candidate --
+# the first '*' after the opener. In "*italic **bold** text*" that candidate is
+# the opening star of "**bold**"; it fails right-flanking (a space precedes it),
+# and the whole run was dropped to literal text. The emphasis was lost even
+# though a perfectly good closer sat at the end of the line.
+#
+# So: walk the delimiter runs and take the first candidate that flanks.
+# Pass 1 prefers a run of EXACTLY dl stars -- a balanced closer, which is what
+# makes the nested case work. Pass 2 falls back to any run of at least dl (the
+# old behaviour), so "*foo***" still closes at the first star of the trailing
+# run, as CommonMark wants.
+proc mdstack::parser::_emphasisInner {s rest idx dl} {
+    set n [string length $rest]
+    # The opener must actually be dl stars -- the regexps this replaced were
+    # anchored ({^\*\*\*...}), the scanner has to check it itself.
+    if {$n <= $dl || [string range $rest 0 [expr {$dl - 1}]] \
+            ne [string repeat "*" $dl]} {
+        return ""
+    }
+    foreach exact {1 0} {
+        set p $dl
+        while {$p < $n} {
+            if {[string index $rest $p] ne "*"} {
+                incr p
+                continue
+            }
+            # length of the delimiter run starting at p
+            set q $p
+            while {$q < $n && [string index $rest $q] eq "*"} { incr q }
+            set runLen [expr {$q - $p}]
+            if {$runLen >= $dl && (!$exact || $runLen == $dl)} {
+                set inner [string range $rest $dl [expr {$p - 1}]]
+                if {$inner ne "" \
+                        && [mdstack::parser::_flank $s $idx $rest $inner $dl]} {
+                    return $inner
+                }
+            }
+            set p $q
+        }
+    }
+    return ""
+}
+
 proc mdstack::parser::_tryEmphasis {s rest idx} {
     # Bold+Italic
-    if {[regexp {^\*\*\*(.+?)\*\*\*} $rest -> inner] && [mdstack::parser::_flank $s $idx $rest $inner 3]} {
+    set inner [mdstack::parser::_emphasisInner $s $rest $idx 3]
+    if {$inner ne ""} {
         set d [dict create type strong content [list \
             [dict create type emphasis content [mdstack::parser::parseInlines $inner]]]]
         return [list [expr {$idx + [string length $inner] + 6}] $d]
     }
     # Strong
-    if {[regexp {^\*\*(.+?)\*\*} $rest -> inner] && [mdstack::parser::_flank $s $idx $rest $inner 2]} {
+    set inner [mdstack::parser::_emphasisInner $s $rest $idx 2]
+    if {$inner ne ""} {
         set d [dict create type strong content [mdstack::parser::parseInlines $inner]]
         return [list [expr {$idx + [string length $inner] + 4}] $d]
     }
     # Emphasis
-    if {[regexp {^\*(.+?)\*} $rest -> inner] && [mdstack::parser::_flank $s $idx $rest $inner 1]} {
+    set inner [mdstack::parser::_emphasisInner $s $rest $idx 1]
+    if {$inner ne ""} {
         set d [dict create type emphasis content [mdstack::parser::parseInlines $inner]]
         return [list [expr {$idx + [string length $inner] + 2}] $d]
     }

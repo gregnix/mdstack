@@ -29,7 +29,6 @@
 #       -skip_dirs    {build dist .git ...}   Directories to skip
 #       -descriptions 0/1                     Show short description in index
 #       -sort         name/title              Sort order: filename or title
-#       -autocreate   0/1                     Auto-create index.md for dirs without
 #
 # Managed Blocks:
 #   <!-- mdindexgen:begin -->
@@ -65,7 +64,6 @@ namespace eval mdstack::indexgen {
     # Optional features
     variable DESCRIPTIONS 0     ;# Show short description
     variable SORT         "name" ;# name or title
-    variable AUTOCREATE   0     ;# Auto-create index.md
 }
 
 # ── Configuration ────────────────────────────────────────
@@ -78,7 +76,6 @@ proc mdstack::indexgen::configure {args} {
     #   -skip_dirs    {build dist .git ...}
     #   -descriptions 0/1
     #   -sort         name/title
-    #   -autocreate   0/1
     #
     # Without arguments: return current configuration as dict.
 
@@ -86,15 +83,13 @@ proc mdstack::indexgen::configure {args} {
     variable SKIP_DIRS
     variable DESCRIPTIONS
     variable SORT
-    variable AUTOCREATE
 
     if {[llength $args] == 0} {
         return [dict create \
             -skip_files   $SKIP_FILES \
             -skip_dirs    $SKIP_DIRS \
             -descriptions $DESCRIPTIONS \
-            -sort         $SORT \
-            -autocreate   $AUTOCREATE]
+            -sort         $SORT]
     }
 
     foreach {key val} $args {
@@ -109,11 +104,10 @@ proc mdstack::indexgen::configure {args} {
                 }
                 set SORT $val
             }
-            -autocreate   { set AUTOCREATE [expr {!!$val}] }
             default {
                 error "mdstack::indexgen::configure: Unknown option '$key'\
                        (allowed: -skip_files, -skip_dirs, -descriptions,\
-                       -sort, -autocreate)"
+                       -sort)"
             }
         }
     }

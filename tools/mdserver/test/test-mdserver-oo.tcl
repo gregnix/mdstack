@@ -1,5 +1,5 @@
 #!/usr/bin/env tclsh
-# test-mdserver-oo.tcl -- Test-Suite fuer mdserver-0.1.tm
+# test-mdserver-oo.tcl -- Test-Suite fuer mdserver-0.3.tm
 # ============================================================================
 # Testet mdserver::Request, mdserver::Renderer und mdserver::Server.
 # Keine echte Netzwerkverbindung -- Pipes simulieren Channels.
@@ -29,27 +29,23 @@ foreach candidate {
     if {[file exists $d]} { tcl::tm::path add $d }
 }
 
-foreach {pkg ver} {mdparser 0.2 mdtheme 0.1 mdhtml 0.1} {
+foreach {pkg ver} {mdstack::parser 0.2 mdstack::theme 0.1 mdstack::html 0.1} {
     if {[catch {package require $pkg $ver} err]} {
         puts stderr "FEHLER: $pkg $ver nicht verfuegbar: $err"
         exit 1
     }
 }
 
-# mdserver-0.1.tm laden
+# mdserver-0.3.tm laden
 foreach _candidate {../lib lib} {
     set _d [file normalize [file join $scriptDir $_candidate]]
     if {[file exists $_d]} { tcl::tm::path add $_d }
 }
-# Fallback: direkt aus Parent-Verzeichnis sourcen falls kein lib/ vorhanden
-set _tm [file normalize [file join $scriptDir ../mdserver-0.1.tm]]
-if {[file exists $_tm]} {
-    source $_tm
-} elseif {[catch {package require mdserver 0.1} err]} {
-    puts stderr "FEHLER: mdserver 0.1 nicht gefunden: $err"
+if {[catch {package require mdserver 0.3} err]} {
+    puts stderr "FEHLER: mdserver 0.3 nicht gefunden: $err"
     exit 1
 }
-unset -nocomplain _candidate _d _tm err
+unset -nocomplain _candidate _d err
 
 # ============================================================
 # Hilfsprozeduren
@@ -282,8 +278,25 @@ test render-md-6 "Theme dunkel dunkler Hintergrund" {
         [$renderer markdown [file join $testDir index.md] dunkel 0]
 } 1
 
+test render-md-11 "Themes unterscheiden sich tatsaechlich" {
+    set a [$renderer markdown [file join $testDir index.md] hell 0]
+    set b [$renderer markdown [file join $testDir index.md] dunkel 0]
+    expr {$a ne $b}
+} 1
+
+test render-md-12 "Theme-CSS steht nach dem Default-CSS (gewinnt in der Kaskade)" {
+    set html [$renderer markdown [file join $testDir index.md] dunkel 0]
+    expr {[string last "1e1e2e" $html] > [string first "-apple-system" $html]}
+} 1
+
+test render-md-13 "Style-Datei steht nach dem Theme-CSS" {
+    set css [file join $testDir style.css]
+    set html [$renderer markdown [file join $testDir index.md] dunkel 0 $css]
+    expr {[string first "color: red" $html] > [string last "1e1e2e" $html]}
+} 1
+
 test render-md-7 "Tabelle gerendert" {
-    string match {*<table>*} \
+    string match {*<table*} \
         [$renderer markdown [file join $testDir doc.md] hell 0]
 } 1
 
@@ -323,7 +336,7 @@ test render-index-4 "Kein up-Link im Root" {
 } 1
 
 test render-index-5 "up-Link in Unterverzeichnis" {
-    string match {*(up)*} \
+    string match {*href="../"*} \
         [$renderer index [file join $testDir subdir] "/subdir" hell]
 } 1
 
@@ -331,10 +344,10 @@ test render-index-6 "Titel aus H1 sichtbar" {
     string match {*Startseite*} [$renderer index $testDir "/" hell]
 } 1
 
-test render-index-7 "Leeres Verzeichnis zeigt Hinweis" {
-    string match {*No Markdown files found*} \
-        [$renderer index [file join $testDir empty] "/empty" hell]
-} 1
+test render-index-7 "Leeres Verzeichnis: nur der up-Link, keine Eintraege" {
+    set html [$renderer index [file join $testDir empty] "/empty" hell]
+    list [string match {*href="../"*} $html] [regexp -all {\.md"} $html]
+} {1 0}
 
 # ============================================================
 # G -- mdserver::Server: _mime
@@ -431,7 +444,7 @@ test dispatch-1 "Existierende .md liefert 200" {
     fconfigure $w -translation crlf -encoding utf-8 -buffering full
     set reqChan [makeRequestChan GET /index.md]
     set req [mdserver::Request new $reqChan]
-    $server _dispatch $w /index.md hell 0
+    $server _dispatch $w $req /index.md hell 0
     close $w
     string match {*200 OK*} [read $r]
 } 1
@@ -441,7 +454,7 @@ test dispatch-2 "Nicht-existente Datei liefert 404" {
     fconfigure $w -translation crlf -encoding utf-8 -buffering full
     set reqChan [makeRequestChan GET /nichtda.md]
     set req [mdserver::Request new $reqChan]
-    $server _dispatch $w /nichtda.md hell 0
+    $server _dispatch $w $req /nichtda.md hell 0
     close $w
     string match {*404*} [read $r]
 } 1
@@ -451,7 +464,7 @@ test dispatch-3 "Directory Traversal liefert 403" {
     fconfigure $w -translation crlf -encoding utf-8 -buffering full
     set reqChan [makeRequestChan GET /../etc/passwd]
     set req [mdserver::Request new $reqChan]
-    $server _dispatch $w /../etc/passwd hell 0
+    $server _dispatch $w $req /../etc/passwd hell 0
     close $w
     string match {*403*} [read $r]
 } 1
@@ -461,7 +474,7 @@ test dispatch-4 "Verzeichnis liefert Index-HTML" {
     fconfigure $w -translation crlf -encoding utf-8 -buffering full
     set reqChan [makeRequestChan GET /]
     set req [mdserver::Request new $reqChan]
-    $server _dispatch $w / hell 0
+    $server _dispatch $w $req / hell 0
     close $w
     # Root hat index.md -> rendered als Markdown
     string match {*200 OK*} [read $r]
@@ -472,9 +485,88 @@ test dispatch-5 "Statische CSS-Datei liefert text/css" {
     fconfigure $w -translation crlf -encoding utf-8 -buffering full
     set reqChan [makeRequestChan GET /style.css]
     set req [mdserver::Request new $reqChan]
-    $server _dispatch $w /style.css hell 0
+    $server _dispatch $w $req /style.css hell 0
     close $w
     string match {*text/css*} [read $r]
+} 1
+
+# ============================================================
+# F -- Navi-Leiste: Sektionen und Ueberlauf-Dropdown
+# ============================================================
+
+# Eigene Wurzel mit vielen Sektionen (mehr als navmax)
+set navDir [file join [::tcltest::temporaryDirectory] mdserver_nav_test]
+file delete -force $navDir
+file mkdir $navDir
+writeFile [file join $navDir index.md] "# Start"
+foreach _s {A B C D E F G H} {
+    file mkdir [file join $navDir $_s]
+    writeFile [file join $navDir $_s index.md] "# Sektion $_s"
+}
+unset -nocomplain _s
+
+# Server mit eigener Wurzel; private Nav-Methoden freischalten
+proc navServer {args} {
+    set srv [mdserver::Server new --root $::navDir --log 0 --port 19998 {*}$args]
+    oo::objdefine $srv export _injectNav _sectionLinks
+    return $srv
+}
+
+test nav-1 "Alle Top-Level-Sektionen erkannt" {
+    set srv [navServer]
+    set n [llength [$srv _sectionLinks]]
+    $srv destroy
+    set n
+} 8
+
+test nav-2 "Mehr Sektionen als navmax -> ein Dropdown statt vieler Links" {
+    set srv [navServer]
+    set html [$srv _injectNav "<html><body></body></html>"]
+    $srv destroy
+    list [string match {*<details class="mdserver-navmore">*} $html] \
+         [regexp -all {<div class="mdserver-navmore-items">} $html]
+} {1 1}
+
+test nav-3 "Dropdown enthaelt alle Sektionen" {
+    set srv [navServer]
+    set html [$srv _injectNav "<html><body></body></html>"]
+    $srv destroy
+    regexp -all {href="/[A-H]/"} $html
+} 8
+
+test nav-4 "navmax 0 -> alle Sektionen inline, kein Dropdown" {
+    set srv [navServer --navmax 0]
+    set html [$srv _injectNav "<html><body></body></html>"]
+    $srv destroy
+    list [string match {*<details*} $html] [regexp -all {href="/[A-H]/"} $html]
+} {0 8}
+
+test nav-5 "Weniger Sektionen als navmax -> inline" {
+    set srv [navServer --navmax 20]
+    set html [$srv _injectNav "<html><body></body></html>"]
+    $srv destroy
+    string match {*<details*} $html
+} 0
+
+test nav-6 "Leiste umbricht, Links selbst brechen nicht" {
+    set srv [navServer]
+    set html [$srv _injectNav "<html><body></body></html>"]
+    $srv destroy
+    list [string match {*flex-wrap:wrap*} $html] [string match {*white-space:nowrap*} $html]
+} {1 1}
+
+test nav-7 "nav 0 -> keine Leiste" {
+    set srv [navServer --nav 0]
+    set html [$srv _injectNav "<html><body>X</body></html>"]
+    $srv destroy
+    string match {*mdserver-nav*} $html
+} 0
+
+test nav-8 "Leiste steht vor dem Inhalt" {
+    set srv [navServer]
+    set html [$srv _injectNav "<html><body>INHALT</body></html>"]
+    $srv destroy
+    expr {[string first "mdserver-nav" $html] < [string first "INHALT" $html]}
 } 1
 
 # ============================================================
@@ -484,5 +576,6 @@ test dispatch-5 "Statische CSS-Datei liefert text/css" {
 $renderer destroy
 $server   destroy
 
-tcltest::cleanupTests
 file delete -force $testDir
+file delete -force $navDir
+tcltest::cleanupTests

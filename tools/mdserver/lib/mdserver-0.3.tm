@@ -1,4 +1,4 @@
-# mdserver-0.2.tm -- Markdown-Web-Server Modul v0.5 (coroutine/non-blocking)
+# mdserver-0.3.tm -- Markdown-Web-Server Modul v0.5 (coroutine/non-blocking)
 # ============================================================================
 # HTTP/HTTPS server for Markdown documents.
 # No Tk, no fonts, no display. Requires only Tcl 8.6+.
@@ -12,7 +12,7 @@
 # Optional: mdstack::theme 0.1, tls (for HTTPS)
 # ============================================================================
 
-package provide mdserver 0.2
+package provide mdserver 0.3
 
 package require Tcl 8.6 9
 # ============================================================
@@ -27,7 +27,11 @@ if {[catch {package require mdstack::html 0.1} err]} {
     puts stderr "ERROR: mdhtml 0.1 not found: $err"
     exit 1
 }
-catch {package require mdstack::theme 0.1}
+if {[catch {package require mdstack::theme 0.1} err]} {
+    # Optional: without it the pages fall back to the docir default CSS,
+    # i.e. --theme has no effect.
+    puts stderr "WARNING: mdstack::theme 0.1 not found -- themes disabled: $err"
+}
 
 # ============================================================
 # MIME types (global, immutable)
@@ -177,17 +181,40 @@ oo::class create mdserver::Renderer {
         set md [my _readFile $path]
         set ast [mdstack::parser::parse $md]
         set html [mdstack::html::render $ast -theme $theme -toc $toc -lang de]
+        set html [my _injectTheme $html $theme]
         return [my _injectCss $html $cssFile]
     }
 
-    # Insert the chosen style as an extra <style> after the default --
+    # Insert the theme CSS as an extra <style> after the default one.
+    #
+    # The theme name is passed down to docir::html, but that only knows its own
+    # default CSS ("manpage" | "none" | default) -- hell / dunkel / solarized
+    # mean nothing to it, so every page would come out identical. The theme's
+    # own CSS (mdstack::theme::toCSS) is therefore appended here: same
+    # specificity, later rule wins.
+    #
+    # Degrades silently: no mdstack::theme package, or an unknown theme name,
+    # leaves the page with the default CSS instead of throwing.
+    method _injectTheme {html theme} {
+        if {$theme eq "" || $theme eq "none"} { return $html }
+        set css ""
+        if {[catch { set css [mdstack::theme::toCSS $theme] }]} { return $html }
+        if {[string trim $css] eq ""} { return $html }
+        return [my _insertStyle $html "<style>\n$css\n</style>\n"]
+    }
+
+    # Insert the chosen style as an extra <style> after the theme --
     # render has no -css; the style rules win via the CSS cascade.
     method _injectCss {html cssFile} {
         if {$cssFile eq "" || ![file exists $cssFile]} { return $html }
         set css ""
         catch { set css [my _readFile $cssFile] }
         if {$css eq ""} { return $html }
-        set block "<style>\n$css\n</style>\n"
+        return [my _insertStyle $html "<style>\n$css\n</style>\n"]
+    }
+
+    # Put a <style> block at the end of <head> (else before </body>, else last).
+    method _insertStyle {html block} {
         set idx [string first "</head>" $html]
         if {$idx < 0} { set idx [string first "</body>" $html] }
         if {$idx >= 0} {
@@ -230,6 +257,7 @@ oo::class create mdserver::Renderer {
 
         set ast  [mdstack::parser::parse $md]
         set html [mdstack::html::render $ast -theme $theme -toc 0 -lang de]
+        set html [my _injectTheme $html $theme]
         return [my _injectCss $html $cssFile]
     }
 
@@ -244,6 +272,7 @@ oo::class create mdserver::Renderer {
         }
         set ast [mdstack::parser::parse $md]
         set html [mdstack::html::render $ast -theme $theme -toc 0 -lang de]
+        set html [my _injectTheme $html $theme]
         return [my _injectCss $html $cssFile]
     }
 
@@ -326,6 +355,8 @@ oo::class create mdserver::Server {
             navfg      "#ffffff"
             navlinks   {{{&#127968; Start} /} {{&#128218; Alle Dokumente} /?nav=index}}
             navsections 1
+            navmax      6
+            navmore     "&#128193; Bereiche"
             chapternav  1
         }
         # Read arguments
@@ -619,6 +650,42 @@ $prev$up$next</nav>\n"
         return "$html$bar"
     }
 
+    # One nav bar link. Never wraps inside itself -- a label breaks the bar
+    # between links, not inside a title.
+    method _navLink {label url fg} {
+        return "<a href=\"$url\" style=\"color:$fg;text-decoration:none;white-space:nowrap;\">$label</a>"
+    }
+
+    # Sections folded into one CSS-only dropdown (no JavaScript: details/summary).
+    method _navDropdown {sections bg fg} {
+        set items ""
+        foreach link $sections {
+            lassign $link label url
+            append items [my _navLink $label $url $fg]
+        }
+        set label [my cfg navmore]
+        return "<details class=\"mdserver-navmore\">\
+<summary style=\"color:$fg;\">$label</summary>\
+<div class=\"mdserver-navmore-items\">$items</div></details>"
+    }
+
+    # Stylesheet for the nav bar: wrapping as a safety net, plus the dropdown.
+    method _navCss {bg fg} {
+        set css {
+.mdserver-nav { flex-wrap: wrap; row-gap: 0.4em; }
+.mdserver-navmore { position: relative; }
+.mdserver-navmore > summary { cursor: pointer; list-style: none; white-space: nowrap; }
+.mdserver-navmore > summary::-webkit-details-marker { display: none; }
+.mdserver-navmore-items { display: none; position: absolute; top: 1.8em; left: 0;
+    z-index: 100; flex-direction: column; gap: 0.5em; padding: 0.7em 1em;
+    min-width: 14em; border-radius: 0 0 4px 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+    background: __BG__; color: __FG__; }
+.mdserver-navmore[open] > .mdserver-navmore-items { display: flex; }
+}
+        return "<style>[string map [list __BG__ $bg __FG__ $fg] $css]</style>"
+    }
+
     method _injectNav {html} {
         if {![my cfg nav]} { return $html }
         set bg [my cfg navbg]
@@ -627,19 +694,31 @@ $prev$up$next</nav>\n"
         set links ""
         foreach link [my cfg navlinks] {
             lassign $link label url
-            append links "<a href=\"$url\" style=\"color:$fg;text-decoration:none;\">$label</a>"
+            append links [my _navLink $label $url $fg]
         }
-        # Top-level sections, auto-derived from the document root.
+        # Top-level sections, auto-derived from the document root. More than
+        # navmax of them are folded into a single dropdown, so the bar stays
+        # one line however many sections the root grows. navmax 0 = never fold.
+        set css ""
         if {[my cfg navsections]} {
-            foreach link [my _sectionLinks] {
-                lassign $link label url
-                append links "<a href=\"$url\" style=\"color:$fg;text-decoration:none;\">$label</a>"
+            set sections [my _sectionLinks]
+            set max      [my cfg navmax]
+            if {![string is integer -strict $max]} { set max 0 }
+            if {$max > 0 && [llength $sections] > $max} {
+                append links [my _navDropdown $sections $bg $fg]
+                set css [my _navCss $bg $fg]
+            } else {
+                foreach link $sections {
+                    lassign $link label url
+                    append links [my _navLink $label $url $fg]
+                }
             }
         }
         set style "background:$bg;color:$fg;padding:0.5em 1em;\
 margin:0 calc(50% - 50vw) 1em;width:100vw;box-sizing:border-box;\
-font-size:0.95em;display:flex;gap:1.4em;align-items:center;align-self:start;"
-        set bar "<nav class=\"mdserver-nav\" style=\"$style\">$links</nav>
+font-size:0.95em;display:flex;gap:1.4em;align-items:center;align-self:start;\
+flex-wrap:wrap;row-gap:0.4em;"
+        set bar "$css<nav class=\"mdserver-nav\" style=\"$style\">$links</nav>
 "
         if {[regexp -indices {<body[^>]*>} $html m]} {
             set e [lindex $m 1]

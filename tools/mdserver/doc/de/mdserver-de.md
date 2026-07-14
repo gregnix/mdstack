@@ -63,6 +63,7 @@ tclsh mdserver.tcl [Optionen]
 | `--stylesdir` | `../styles` | Verzeichnis der CSS-Stile |
 | `--navbg` | `#2c3e50` | Navi-Leiste: Hintergrundfarbe |
 | `--navfg` | `#ffffff` | Navi-Leiste: Textfarbe |
+| `--navmax` | `6` | Navi-Leiste: max. Sektionen inline; mehr klappen ins Dropdown (`0` = nie) |
 | `--title` | `mdserver` | Site-Titel |
 | `--toc` | `1` | Inhaltsverzeichnis (0 oder 1) |
 | `--control` | `""` | Control-Port (nur localhost; `stop`/`ping`) |
@@ -181,6 +182,22 @@ der Wurzel als Links an (Label aus der Sektions-`index.md`-H1, sonst Ordnername)
 entfernt, nicht nur ueber *Alle Dokumente*. Ein Ordner erscheint, wenn er
 transitiv irgendeine `.md` enthaelt. Abschaltbar mit der Config-Option
 `navsections 0`.
+
+**Ueberlauf: das Sektions-Dropdown.** Waechst die Wurzel, waechst sonst auch die
+Leiste -- bei acht oder zehn Sektionen mit langen Titeln laeuft sie ueber den
+Fensterrand hinaus. Deshalb klappen mehr als `navmax` Sektionen (Standard: 6) in
+**ein** Menue mit dem Label aus `navmore` (Standard `&#128193; Bereiche`). Die
+Leiste bleibt damit einzeilig, egal wie viele Bereiche die Wurzel hat. Das
+Dropdown ist reines CSS (`<details>`/`<summary>`) -- kein JavaScript.
+
+```bash
+tclsh mdserver.tcl --root docs --navmax 4      # ab 5 Sektionen: Dropdown
+tclsh mdserver.tcl --root docs --navmax 0      # nie einklappen (Verhalten bis 0.2)
+```
+
+Zusaetzlich bricht die Leiste bei sehr vielen festen `navlinks` um
+(`flex-wrap`), statt zu ueberlaufen; die Links selbst brechen nie mitten im
+Titel.
 
 **Navi-Leiste anpassen.** Farben per CLI, Links/Icons programmatisch:
 
@@ -515,6 +532,16 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+### 0.3
+
+- **Navi-Leiste laeuft nicht mehr ueber**: mehr als `navmax` Sektionen
+  (Standard 6) klappen in ein reines CSS-Dropdown (`navmore`); die Leiste
+  bricht um statt ueberzulaufen, Links brechen nie mitten im Titel
+- **`--theme` wirkt wieder**: das Theme-CSS (`mdstack::theme::toCSS`) wird von
+  mdserver selbst eingebettet. docir::html kennt nur sein eigenes Default-CSS --
+  `hell`, `dunkel` und `solarized` lieferten zuvor identische Seiten
+- Kaskade: Default-CSS -> Theme-CSS -> Style-Datei (`--style`)
 
 ### 0.2 (2026-07-09)
 

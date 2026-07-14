@@ -6,7 +6,7 @@
 # Usage:
 #   tclsh mdserver.tcl ?--port 8080? ?--root /path? ?--theme hell?
 #
-# Requires: mdserver 0.2 (mdserver-0.2.tm)
+# Requires: mdserver 0.3 (mdserver-0.3.tm)
 # ============================================================================
 
 package require Tcl 8.6 9
@@ -19,8 +19,8 @@ foreach _candidate {lib ../lib} {
 }
 unset -nocomplain _scriptDir _candidate _d
 
-if {[catch {package require mdserver 0.2} err]} {
-    puts stderr "ERROR: mdserver 0.2 nicht gefunden: $err"
+if {[catch {package require mdserver 0.3} err]} {
+    puts stderr "ERROR: mdserver 0.3 nicht gefunden: $err"
     puts stderr "       mdserver-0.2.tm muss in lib/ liegen."
     exit 1
 }
@@ -47,6 +47,7 @@ proc parseArgs {argv} {
             --stylesdir -
             --navbg   -
             --navfg   -
+            --navmax  -
             --tlsport { lappend args $arg [lindex $argv [incr i]] }
             --no-log  { lappend args --log 0 }
             --help {
@@ -65,6 +66,8 @@ proc parseArgs {argv} {
                 puts "  --stylesdir DIR   CSS style directory (default: ../styles)"
                 puts "  --navbg   COLOR   Nav bar background color"
                 puts "  --navfg   COLOR   Nav bar text color"
+                puts "  --navmax  N       Max. sections shown inline; more fold into a"
+                puts "                    dropdown (default: 6; 0 = never fold)"
                 puts ""
                 puts "Troubleshooting:"
                 puts "  Port belegt: fuser -k 8080/tcp"

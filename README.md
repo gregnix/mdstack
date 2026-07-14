@@ -13,7 +13,7 @@ A complete Markdown processing stack for Tcl/Tk applications.
 
 | Module | Version | Description |
 |--------|---------|-------------|
-| `mdstack::parser` | 0.6.3 | Markdown → AST parser (CommonMark subset + TIP-700) |
+| `mdstack::parser` | 0.7.0 | Markdown → AST parser (CommonMark subset + TIP-700) |
 | `mdstack` | 0.1 | Orchestrator / stack manager |
 | `mdstack::model` | 0.1 | Document model |
 | `mdstack::validator` | 0.1 | AST validator |

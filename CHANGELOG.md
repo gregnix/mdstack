@@ -1,5 +1,89 @@
 # mdstack — Changelog
 
+## Unreleased — mdstack::parser 0.7.0
+
+`lib/mdstack/parser-0.7.0.tm` (was `parser-0.6.5.tm`).
+
+### Changed — emphasis via the CommonMark delimiter stack
+
+The scanner resolved each `*`/`_` run on sight, with a regexp per attempt. That
+shape cannot express three of CommonMark's rules, and no amount of patching
+would have changed it:
+
+- **flanking of the OPENER** — `** foo bar**` came out as
+  `<em>*</em><em>foo bar</em>*`; a run followed by whitespace must stay literal.
+- **the rule of 3** — `a**"foo"**` came out as `a*<em>"foo"</em>*`; a pair whose
+  run lengths sum to a multiple of 3 (when one side could do both jobs) must not
+  match.
+- **intraword `_`** — `_foo_bar_baz_` stayed literal instead of becoming one
+  emphasis; the inner underscores may not close.
+
+Now `parseInlines` **tokenises** each delimiter run into a `_delim` node with its
+`canOpen`/`canClose` flags, and `_processEmphasis` matches openers and closers
+afterwards over the finished node list — the standard two-pass algorithm.
+Leftover delimiters become literal text, and adjacent text nodes are merged
+(`_foo_bar_baz_` is now a single text node inside one `emphasis`, not five).
+
+**Nesting of `***` changed to CommonMark's:** `<em><strong>x</strong></em>` — the
+strong pair is consumed first, the leftover single pair wraps it. It used to be
+`strong[emphasis[...]]`. Both render bold+italic; the CommonMark order is the
+reference now.
+
+### Numbers
+
+| | before | after |
+|---|---|---|
+| CommonMark emphasis section | 46/132 | **77/132** |
+| CommonMark strict, overall | 285/655 (43.5%) | **321/655 (49.0%)** |
+| CommonMark lenient, overall | 327/655 | **363/655 (55.4%)** |
+| mdstack core suite | 638/0 | **648/0** |
+
+Cross-checked: docir 763/0, mdhelp 7 suites/0. Test expectations that asserted
+the old node granularity (an escaped run as three text nodes) or the old `***`
+nesting were updated in `parser-inline-fixes.tcl`,
+`parser-emphasis-flanking.tcl` and mdhelp's `test_commonmark.tcl`.
+
+## Unreleased — mdstack::parser 0.6.5
+
+`lib/mdstack/parser-0.6.5.tm` (was `parser-0.6.4.tm`).
+
+- **`*` emphasis scans candidate closing runs.** `_tryEmphasis` used a lazy
+  regexp (`{^\*(.+?)\*}`), which tries exactly ONE candidate closer: the first
+  `*` after the opener. In `*italic **bold** text*` that candidate is the
+  opening star of `**bold**`; it fails right-flanking (a space precedes it), so
+  the match was rejected and the whole run collapsed to literal text — the
+  emphasis was lost although a perfectly good closer sat at the end of the line.
+- The new `_emphasisInner` walks the delimiter runs and takes the first
+  candidate that flanks. Pass 1 prefers a run of *exactly* the opener's length
+  (a balanced closer — this is what makes the nested case work); pass 2 falls
+  back to any run of at least that length, so `*foo***` still closes at the
+  first star of the trailing run, as CommonMark wants.
+- CommonMark conformance: emphasis 44/132 → **46/132**, overall 283 → **285**
+  strict (325 → **327** lenient). Six new cases in
+  `tests/parser-emphasis-flanking.tcl`.
+- Found because the mdhelp suite demanded `docir 1.0` in its dependency check —
+  a version that cannot exist — so it aborted before running and had been
+  hiding this failure.
+
+## Unreleased — mdstack::parser 0.6.4
+
+`lib/mdstack/parser-0.6.4.tm` (was `parser-0.6.3.tm`).
+
+- **GFM tables: cells split on unescaped pipes only.** `parseTableRow` walked
+  the row with `split $line "|"`, so a `\|` inside a cell was treated as a
+  column separator: the backslash stayed in the output, the rest of the cell
+  moved into a phantom column, and the column count no longer matched the
+  header (visible in HTML *and* PDF).
+- A `\|` is now resolved to a literal `|` in the cell text — as GFM requires,
+  this also happens inside code spans, where the generic CommonMark backslash
+  escape does not apply and the inline parser would never see it. `\\` is left
+  for the inline parser, and the pipe following it still delimits.
+- A trailing row pipe is only stripped when it is not escaped (`| a | b \|`
+  ends in a literal pipe, not an empty cell).
+- The alignment row runs through the same splitter and is unaffected.
+- New suite `tests/parser-tables.tcl` (13 tests). CommonMark conformance
+  unchanged (283/655 strict, 325 lenient — the spec suite has no GFM tables).
+
 ## Unreleased — mdstack::parser 0.6.3
 
 `lib/mdstack/parser-0.6.3.tm` (was `parser-0.6.2.tm`).
