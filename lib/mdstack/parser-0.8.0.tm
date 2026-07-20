@@ -2089,8 +2089,8 @@ proc mdstack::parser::_tryAutolink {s rest idx} {
     # Angle-bracket URI autolink: any valid scheme (letter + 1-31 of
     # [A-Za-z0-9+.-]) then ':' then non-space/non-angle chars. Covers
     # https, mailto:, irc:, localhost:port, custom schemes, etc.
-    if {[regexp -indices {^<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>[:space:]]*)>} $rest matchRange]} {
-        regexp {^<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>[:space:]]*)>} $rest -> url
+    if {[regexp -indices {^<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>[:space:]\u0000]*)>} $rest matchRange]} {
+        regexp {^<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>[:space:]\u0000]*)>} $rest -> url
         set d [dict create type link label [list [dict create type text value $url]] url $url]
         return [list [expr {$idx + [lindex $matchRange 1] + 1}] $d]
     }
@@ -2101,7 +2101,7 @@ proc mdstack::parser::_tryAutolink {s rest idx} {
         return [list [expr {$idx + [lindex $matchRange 1] + 1}] $d]
     }
     # Bare URL
-    if {[regexp -indices {^https?://[^\s<>"]+} $rest matchRange]} {
+    if {[regexp -indices {^https?://[^\s<>"\u0000]+} $rest matchRange]} {
         set url [string range $rest 0 [lindex $matchRange 1]]
         while {[string length $url] > 10 && [string index $url end] in {. , ; : ! ? \)}} {
             set url [string range $url 0 end-1]
