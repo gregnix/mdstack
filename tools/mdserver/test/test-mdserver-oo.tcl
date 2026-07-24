@@ -9,7 +9,7 @@
 #   tclsh test-mdserver-oo.tcl -verbose passed
 # ============================================================================
 
-package require Tcl 8.6
+package require Tcl 8.6-
 package require tcltest 2.0
 namespace import tcltest::*
 
