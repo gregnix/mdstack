@@ -1,5 +1,7 @@
 # mdstack::parser
 
+> Version 0.8.0
+
 ## Purpose
 
 `mdstack::parser` converts Markdown text into an **abstract syntax tree (AST)**.
@@ -34,6 +36,9 @@ The module:
 | Fenced divs (TIP-700) | `::: {.class} ... :::` | |
 | Standalone images | `![alt](url)` | |
 | YAML frontmatter | `---` at document start | |
+| HTML blocks (0.8.0) | CommonMark start conditions 1–7 | `<div>…</div>` → `html_block` |
+| Display math | `$$…$$` on its own line | `math_block` |
+| Footnote defs | `[^id]: text` | `footnote_def` / `footnote_section` |
 
 ### Inline types
 
@@ -50,6 +55,8 @@ The module:
 | Hard line break | two trailing spaces |
 | Backslash escape | `\*` `\_` `\`` etc. |
 | Bracketed spans (TIP-700) | `[text]{.class}` |
+| Inline math | `$…$` |
+| Footnote refs | `[^id]` |
 
 ### Nested lists
 
@@ -109,6 +116,25 @@ This is a note block.
 :::
 ```
 
+### HTML blocks (0.8.0)
+
+Raw block HTML is kept verbatim as `html_block` (previously dropped).
+All seven CommonMark start conditions apply. Sinks decide the rest:
+`docir::html` emits the markup as-is; PDF/Tk/ODT show the source.
+
+### Math
+
+```markdown
+Inline $E=mc^2$ and display:
+
+$$
+\frac{a}{b}
+$$
+```
+
+`supports` lists `inline:math` and `blocks:math_block`. The `$ast` argument
+to `supports` is unused — the list is static.
+
 ---
 
 ## Dependencies
@@ -139,6 +165,20 @@ set content [read $fd]
 close $fd
 set ast [mdstack::parser::parse $content]
 ```
+
+### `mdstack::parser::validate ast`
+
+Shallow check: root `type=document`, `version=1`, key `blocks`. Throws on
+failure; returns 1. Node walks belong to `mdstack::validator`.
+
+### `mdstack::parser::supports ast`
+
+Returns the capability token list (`blocks:html_block`, `blocks:math_block`,
+`inline:math`, …). Argument unused.
+
+### `mdstack::parser::anchorize title`
+
+Heading text → anchor id.
 
 ---
 
@@ -190,6 +230,18 @@ Note: `style` is `"ordered"` or `"unordered"` (not a boolean).
 {type code_block  language "tcl"  value "puts hello"}
 ```
 
+### HTML block
+
+```tcl
+{type html_block  content "<div class=\"x\">\n<p>hi</p>\n</div>"}
+```
+
+### Display math
+
+```tcl
+{type math_block  display 1  content "E=mc^2"}
+```
+
 ### Table
 
 ```tcl
@@ -206,7 +258,7 @@ Note: `style` is `"ordered"` or `"unordered"` (not a boolean).
 
 | Field | Content |
 |-------|---------|
-| `type` | `text` `strong` `emphasis` `inline_code` `link` `image` `span` `strike` `linebreak` `softbreak` |
+| `type` | `text` `strong` `emphasis` `inline_code` `link` `image` `span` `strike` `linebreak` `softbreak` `math` `footnote_ref` |
 | `value` | text content (type=text, strong, emphasis, inline_code, strike) |
 | `url` | URL (type=link, image) |
 | `title` | title attribute (type=link, image) |

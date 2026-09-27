@@ -16,7 +16,7 @@ The module:
 ## Dependencies
 
 - Tcl/Tk ≥ 8.6
-- `mdstack::viewer 0.3`
+- `mdstack::viewer 0.4`
 
 ---
 
@@ -100,7 +100,7 @@ puts "[mdstack::search::current .v] of [mdstack::search::count .v]"
 ## Example
 
 ```tcl
-package require mdstack::viewer 0.3
+package require mdstack::viewer 0.4
 package require mdstack::search 0.1
 
 set v [mdstack::viewer::create .v]

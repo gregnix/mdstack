@@ -11,6 +11,7 @@
 # In strict mode, warnings are also reported as errors
 # (e.g. unknown node types, empty text.value).
 
+package require Tcl 8.6-
 package provide mdstack::validator 0.1
 
 namespace eval mdstack::validator {

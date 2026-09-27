@@ -1,5 +1,17 @@
 # mdstack — Changelog
 
+## 2026-09-26 — Pins, supports, Doku
+
+### Changed
+
+- **`parser::supports`** lists `blocks:html_block`, `blocks:math_block`,
+  `inline:math` (already parsed since 0.2.10 / 0.8.0). Argument still unused.
+- **Tk modules** (viewer, outline, search, contextmenu, uicontextmenu,
+  editorkit) and **validator** declare `Tcl 8.6-`; Tk widgets also `Tk 8.6-`.
+- **README** renderer table: html 0.2, pdf 0.3. **module-status** table
+  matches live `package provide` (parser 0.8.0). Manuals: html_block/math,
+  adapters, `mdindexgen.md`.
+
 ## 0.5.0 — 2026-06-14
 
 ### Added

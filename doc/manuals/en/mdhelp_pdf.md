@@ -13,7 +13,7 @@ Version 0.3 delegates PDF generation to pdf4tcllib.
 ## Dependencies
 
 - pdf4tcl (PDF base)
-- pdf4tcllib 0.1 (fonts, Unicode, text, tables)
+- pdf4tcllib 0.6.5 (fonts, Unicode, text, tables)
 - Tk (for widget access)
 
 ---

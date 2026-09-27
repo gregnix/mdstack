@@ -12,7 +12,8 @@
 # - State-Management (enable/disable)
 #
 
-package require Tk
+package require Tcl 8.6-
+package require Tk 8.6-
 
 namespace eval ::mdstack::uicontextmenu {
     namespace export create attach detach show \

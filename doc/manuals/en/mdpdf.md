@@ -1,17 +1,16 @@
 # mdstack::pdf
 
-> Version 0.2 – pdf4tcllib backend
+> Version 0.3 — adapter to `docir::mdSource` + `docir::pdf` (live 0.5)
 
 ## Purpose
 
-`mdstack::pdf` exports Markdown documents as PDF files.
+`mdstack::pdf` exports Markdown documents as PDF files through DocIR.
 
 The module:
 - converts a Markdown AST or model to PDF
-- supports all block types (headings, paragraphs, lists, code, blockquotes, HR)
-- generates a table of contents (TOC)
-- renders blockquotes with italic formatting
-- handles Unicode sanitization and Emoji fallbacks via pdf4tcllib
+- maps options onto `docir::pdf::render`
+- generates a TOC when `-toc 1` (two-pass, with page numbers)
+- handles Unicode via pdf4tcllib (CID/TTF)
 
 ---
 
@@ -29,7 +28,7 @@ The module:
 | Tables | Column widths with alignment |
 | Images | Image rendering with alt-text fallback |
 | Horizontal rule | `---` |
-| TOC | Auto-generated (without page numbers) |
+| TOC | two-pass via `docir::pdf` `generateToc` (page numbers) |
 | Hyperlinks | Clickable PDF annotations |
 
 **Inline formatting:** bold, italic, code, combinations
@@ -39,10 +38,11 @@ The module:
 ## Dependencies
 
 - Tcl ≥ 8.6
-- pdf4tcl 0.9+
-- pdf4tcllib 0.1
-- mdstack::parser 0.2 (optional, for AST input)
+- pdf4tcl 0.9.4+
+- pdf4tcllib (live 0.6.5; `docir::pdf` requires ≥ 0.3)
+- mdstack::parser 0.8.0 (optional, for AST input)
 - mdstack::model 0.1 (optional, for model input)
+- `docir::mdSource`, `docir::pdf` 0.3 (pulls 0.5)
 
 ---
 
@@ -57,7 +57,7 @@ Reads the file binary and replaces Emoji bytes (4-byte UTF-8) with
 ASCII fallbacks before Tcl 8.6 can corrupt them to U+FFFD.
 
 ```tcl
-package require mdstack::pdf 0.2
+package require mdstack::pdf 0.3
 
 mdstack::pdf::exportFile "input.md" "output.pdf" \
     -title "Documentation" \
@@ -101,14 +101,15 @@ mdstack::pdf::exportModel $doc "output.pdf" -title "Documentation"
 | `-toc` | `0` | Table of contents (0\|1) |
 | `-header` | `""` | Header text |
 | `-footer` | `"- %p -"` | Footer text (`%p` = page number) |
-| `-root` | `""` | Base path for relative image URLs |
-| `-fontdir` | `""` | Directory with TTF font files |
-| `-debug` | `0` | Debug output (0\|1) |
-| `-compress` | `1` | zlib compression (0\|1) |
-| `-pdfa` | `""` | PDF/A conformance: `1b`, `2b` (pdf4tcl 0.9.4.11+) |
-| `-userpassword` | `""` | AES-128 user password |
-| `-ownerpassword` | `""` | AES-128 owner password |
-| `-theme` | `""` | mdstack::theme name: `hell`, `dunkel`, `solarized` |
+| `-fontdir` | `""` | **ignored** (TTF paths via pdf4tcllib / docir) |
+| `-debug` | `0` | **ignored** |
+| `-compress` | `1` | **ignored** (pdf4tcl default) |
+| `-root` | `""` | **ignored** (image root not wired) |
+| `-pdfa` | `""` | PDF/A via `docir::pdf` → pdf4tcl |
+| `-userpassword` | `""` | user password (pass-through) |
+| `-ownerpassword` | `""` | owner password (pass-through) |
+| `-theme` | `""` | `mdstack::theme::toPdfOpts` |
+| `-cid` | `0` | full Unicode subset/CID when 1 |
 
 ---
 
@@ -124,38 +125,25 @@ mdstack::pdf::configure -fontsize 12 -margin 60
 
 ## Features
 
-### Hyperlinks (0.2)
+### Hyperlinks
 
-Markdown links `[Label](URL)` are embedded as clickable PDF annotations.
+Markdown links `[Label](URL)` are clickable PDF annotations (`docir::pdf`).
 
-### PDF/A export (0.2)
-
-```tcl
-mdstack::pdf::export $ast output.pdf -pdfa 1b  ;# PDF/A-1b
-mdstack::pdf::export $ast output.pdf -pdfa 2b  ;# PDF/A-2b
-```
-
-### Encryption (0.2)
+### PDF/A, encryption, theme (since adapter 0.3)
 
 ```tcl
+mdstack::pdf::export $ast output.pdf -pdfa 1b
 mdstack::pdf::export $ast output.pdf -userpassword "secret"
-mdstack::pdf::export $ast output.pdf -ownerpassword "admin"
-```
-
-### Theme support (0.2)
-
-```tcl
 mdstack::pdf::export $ast output.pdf -theme hell
-mdstack::pdf::export $ast output.pdf -theme dunkel
 ```
 
 ---
 
 ## Limitations
 
-- TOC page numbers not yet implemented (requires two-pass export)
-- Theme colors in PDF pending pdf4tcl 0.9.4.12
-- Strikethrough rendered as normal text
+- `-fontdir`, `-compress`, `-debug`, `-root` are accepted and ignored
+- Raw `html_block` is shown as a code block (no HTML engine in PDF)
+- Display math needs pdf4tcllib math; otherwise source `$…$` / `$$…$$`
 
 ---
 

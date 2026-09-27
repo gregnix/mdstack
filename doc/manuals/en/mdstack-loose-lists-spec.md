@@ -1,5 +1,12 @@
 # mdstack 0.5.0 — loose lists / multi-block list items (design)
 
+Status: **SUPERSEDED — implemented** (Step 1 + Step 1b; see the status sections
+at the end of this file). The version numbers below are historical: the change
+landed as `parser-0.5.0.tm`, and the parser has since moved on to **0.8.0**. The
+one item still open from this design is the **odt** sink, which renders a loose
+item's paragraphs space-joined from `content`; proper per-paragraph breaks need
+the ODT multi-`text:p`-per-item API. Retained as a design note, not as a task.
+
 ## Problem
 
 `parseListLines` merges every continuation line of a list item into a **single

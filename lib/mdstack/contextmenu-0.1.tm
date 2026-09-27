@@ -7,7 +7,8 @@
 # - Outline (mdoutline)
 #
 
-package require Tk
+package require Tcl 8.6-
+package require Tk 8.6-
 package require mdstack::uicontextmenu 0.1
 
 package provide mdstack::contextmenu 0.1

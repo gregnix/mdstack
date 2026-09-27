@@ -26,7 +26,7 @@ The module:
 ## Dependencies
 
 - Tcl ≥ 8.6
-- `mdstack::parser 0.2`
+- `mdstack::parser 0.8.0`
 - No Tk dependency
 
 ---

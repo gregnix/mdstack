@@ -13,13 +13,14 @@ sources are called `docir::FORMATSource`) and moved to the central
 
 ## How to use it from mdstack
 
-mdstack now loads the module via `lib/docir-loader.tcl`:
+mdstack loads it from the docir tree via `tcl::tm::path` (see `tests/_paths.tcl`).
+There is no `lib/docir-loader.tcl`.
 
 ```tcl
-source -encoding utf-8 [file join $projectRoot lib docir-loader.tcl]
+tcl::tm::path add /path/to/docir/lib/tm
 package require docir::mdSource
 
-# Function lives in the same namespace as before:
+# Function lives in namespace ::docir::md (package name is mdSource):
 set ir [::docir::md::fromAst $ast]
 ```
 

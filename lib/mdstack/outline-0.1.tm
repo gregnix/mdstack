@@ -12,7 +12,8 @@
 #   mdstack::outline::dispatch $path subcommand
 #   mdstack::outline::destroy $path
 
-package require Tk
+package require Tcl 8.6-
+package require Tk 8.6-
 package require mdstack::text 0.1
 
 package provide mdstack::outline 0.1

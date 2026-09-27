@@ -201,24 +201,27 @@ proc mdstack::parser::validate {ast} {
 
 proc mdstack::parser::supports {ast} {
     # Capability-Liste: was der Parser an Markdown-Konstrukten versteht.
-    # Stand: 2026-05-07.
+    # Stand: 2026-09-26 (0.8.0: html_block; math seit 0.2.10).
     #
     # Hinweis zur Lesart: Die Tokens beschreiben Eingabe-Konstrukte,
     # nicht zwangsweise eindeutige AST-Output-Types. So liefert sowohl
     # `blocks:code_indented` als auch `blocks:code_block` (fenced) im
     # AST einen Knoten vom Typ `code_block` — die Capability ist trotzdem
     # getrennt aufgeführt, weil sie unabhängig erkannt werden.
+    # Das Argument $ast wird nicht gelesen — die Liste ist statisch.
     return {
         blocks:heading blocks:paragraph blocks:list blocks:list_item
         blocks:code_block blocks:code_indented blocks:hr
         blocks:image blocks:table blocks:blockquote blocks:deflist
         blocks:div blocks:footnote_def blocks:footnote_section
         blocks:yaml_frontmatter blocks:html blocks:html_block
+        blocks:math_block
 
         inline:text inline:strong inline:emphasis inline:strike
         inline:inline_code inline:link inline:image inline:linebreak
         inline:reflink inline:refimage
         inline:span inline:footnote_ref inline:html
+        inline:math
     }
 }
 

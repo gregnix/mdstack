@@ -14,9 +14,9 @@ consistent edit/preview pipeline.
 ## Dependencies
 
 - Tcl/Tk ≥ 8.6
-- mdstack::parser 0.2
+- mdstack::parser 0.2 (minimum; live 0.8.0)
 - mdstack::model 0.1
-- mdstack::viewer 0.3
+- mdstack::viewer 0.3 (minimum; live 0.4)
 - mdeditor 0.1
 
 ---

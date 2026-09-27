@@ -1,4 +1,5 @@
-package require Tk
+package require Tcl 8.6-
+package require Tk 8.6-
 package require mdstack::text   0.1
 package require mdstack::parser 0.2
 package require mdstack::model  0.1

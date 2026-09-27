@@ -1,5 +1,20 @@
 # mdstack — Changelog
 
+## 2026-09-26 — Pins, supports, Doku
+
+### Changed
+
+- **`parser::supports`** lists `blocks:html_block`, `blocks:math_block`,
+  `inline:math` (already parsed since 0.2.10 / 0.8.0). Argument still unused.
+- **Tk modules** (viewer, outline, search, contextmenu, uicontextmenu,
+  editorkit) and **validator** declare `Tcl 8.6-`; Tk widgets also `Tk 8.6-`.
+- **README / manuals** brought in line with live packages: adapter
+  direction, pdf 0.3 (PDF/A, TOC, passwords), parser 0.8.0 features,
+  `indexgen` manual. `docir::pdf-0.5.tm` header already 0.5.
+- **Specs / nogit:** DocIR mapping `html_block`/`math_block`; loose-lists
+  design marked SUPERSEDED; CommonMark baseline 2026-09-26 (lenient 63.7 %,
+  HTML blocks 84.8 %; `nogit/spec.txt` bleibt CommonMark 0.31.2).
+
 ## Unreleased — mdstack::parser 0.8.0
 
 `lib/mdstack/parser-0.8.0.tm` (was `parser-0.7.0.tm`).

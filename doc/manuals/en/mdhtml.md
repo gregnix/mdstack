@@ -1,12 +1,12 @@
 # mdstack::html
 
-> Version 0.1
+> Version 0.2 — adapter to `docir::mdSource` + `docir::html`
 
 ## Purpose
 
-`mdstack::html` converts a Markdown AST (from `mdstack::parser`) into clean HTML.
-It is the HTML renderer in the mdstack ecosystem, complementing
-`mdstack::pdf` (PDF) and `mdstack::viewer` (Tk widget).
+`mdstack::html` converts a Markdown AST (from `mdstack::parser`) into HTML
+via DocIR. It is the HTML adapter in the mdstack ecosystem, complementing
+`mdstack::pdf` (PDF adapter) and `mdstack::viewer` (Tk widget).
 
 ```
 Markdown
@@ -28,8 +28,8 @@ mdstack::parser  -->  AST
 Converts an AST into a complete HTML string.
 
 ```tcl
-package require mdstack::parser 0.2
-package require mdstack::html   0.1
+package require mdstack::parser 0.8.0
+package require mdstack::html   0.2
 
 set ast  [mdstack::parser::parse $markdownText]
 set html [mdstack::html::render $ast -title "My Document" -toc 1]
@@ -42,7 +42,7 @@ set html [mdstack::html::render $ast -title "My Document" -toc 1]
 | `-theme` | `""` | mdstack::theme name: `hell`, `dunkel`, `solarized` |
 | `-css` | `""` | Path to external CSS file |
 | `-lang` | `de` | HTML `lang` attribute |
-| `-encoding` | `utf-8` | Output encoding |
+| `-encoding` | ignored | UTF-8 is fixed (option kept for old callers) |
 
 ---
 
@@ -82,6 +82,8 @@ mdstack::html::exportFile input.md output.html -title "Title" -toc 1
 | `table` | `\| A \| B \|` | `<table>` with `<thead>`, `<tbody>` |
 | `image` | `![alt](url)` | `<figure>`, `<img>`, `<figcaption>` |
 | `footnote_section` | `[^1]: text` | `<section class="footnotes">` |
+| `html_block` | raw HTML | passed through unescaped (`pre` + `kind html` in DocIR) |
+| `math_block` | `$$…$$` | HTML sink: display math markup / source |
 
 ### Inline types
 

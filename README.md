@@ -2,8 +2,8 @@
 
 A complete Markdown processing stack for Tcl/Tk applications.
 
-**Version:** 0.6.0  
-**Status:** Stable
+**Parser:** 0.8.0 · **Orchestrator:** 0.1 · **html:** 0.2 · **pdf:** 0.3 · **viewer:** 0.4  
+**Status:** Stable (older README tag 0.6.0 was the stack line, not a single package)
 
 ---
 
@@ -13,18 +13,19 @@ A complete Markdown processing stack for Tcl/Tk applications.
 
 | Module | Version | Description |
 |--------|---------|-------------|
-| `mdstack::parser` | 0.8.0 | Markdown → AST parser (CommonMark subset + TIP-700) |
+| `mdstack::parser` | 0.8.0 | Markdown → AST parser (CommonMark subset + TIP-700; `html_block`, math) |
 | `mdstack` | 0.1 | Orchestrator / stack manager |
 | `mdstack::model` | 0.1 | Document model |
-| `mdstack::validator` | 0.1 | AST validator |
+| `mdstack::validator` | 0.1 | AST validator (node walk; not `parser::validate`) |
+| `mdstack::indexgen` | 0.1 | `index.md` / `indexsub.md` in managed HTML-comment blocks |
 
 ### Renderers
 
 | Module | Version | Description |
 |--------|---------|-------------|
 | `mdstack::viewer` | 0.4 | Markdown viewer (Tk text widget) |
-| `mdstack::pdf` | 0.2 | Markdown → PDF *(adapter to DocIR pipeline since May 2026)* |
-| `mdstack::html` | 0.1 | Markdown → HTML *(adapter to DocIR pipeline since May 2026)* |
+| `mdstack::pdf` | 0.3 | Markdown → PDF *(adapter to DocIR pipeline since May 2026)* |
+| `mdstack::html` | 0.2 | Markdown → HTML *(adapter to DocIR pipeline since May 2026)* |
 
 > **Naming note (May 2026):** All mdstack modules use the consistent
 > `mdstack::*` namespace (formerly `::mdparser`, `::mdtext`, etc.).
@@ -37,9 +38,10 @@ components are used directly:
 
 | External module | Source | Purpose |
 |-----------------|--------|---------|
-| `docir::mdSource` | docir repo | mdparser AST → DocIR |
-| `docir::rendererTk` | docir repo | DocIR → Tk text widget |
-| `docir::html` | docir repo | DocIR → HTML *(internally via the mdstack::html adapter)* |
+| `docir::mdSource` | docir repo | mdstack AST → DocIR (`docir::md::fromAst`) |
+| `docir::html` | docir repo | DocIR → HTML (`mdstack::html` is the adapter) |
+| `docir::pdf` | docir repo | DocIR → PDF (`mdstack::pdf` is the adapter; live 0.5) |
+| `docir::rendererTk` | docir repo | DocIR → Tk text widget (optional for viewer) |
 
 The application using mdstack must arrange for docir to be on its
 `tcl::tm::path` (e.g. system install under
@@ -50,12 +52,12 @@ a sibling-repo checkout.
 
 #### mdhtml consolidation (Phase 2 Session 7, 2026-05-06)
 
-`mdhtml-0.1.tm` has been an **adapter** to the DocIR pipeline since May 2026:
+`mdstack::html` 0.2 is an **adapter** to the DocIR pipeline since May 2026:
 
 ```
-mdparser → mdstack::html::render → docir::md::fromAst
-                          → docir::html::render
-                          → HTML
+mdstack::parser → mdstack::html::render → docir::md::fromAst
+                                 → docir::html::render
+                                 → HTML
 ```
 
 The public API is backwards-compatible — callers (mdserver, demos)
@@ -71,18 +73,19 @@ cutover in May 2026; git history retains it for reference.
 
 #### mdpdf consolidation (Phase 3 Session 5, 2026-05-06)
 
-`mdpdf-0.2.tm` has likewise been an **adapter** to the DocIR pipeline
-since May 2026 (177 lines instead of 1786):
+`mdstack::pdf` 0.3 is likewise an **adapter** to the DocIR pipeline
+since May 2026:
 
 ```
-mdparser → mdstack::pdf::export → docir::md::fromAst
-                         → docir::pdf::render
-                         → PDF
+mdstack::parser → mdstack::pdf::export → docir::md::fromAst
+                                → docir::pdf::render
+                                → PDF
 ```
 
-The public API is backwards-compatible. The original V0.2 was removed
-after the Phase 3 cutover; git history retains it. **Deliberately NOT ported:** PDF/A,
-AES-128 encryption, automatic TOC with PDF outlines. 
+The public API is backwards-compatible. Since **0.3**, `-pdfa`,
+`-userpassword`/`-ownerpassword`, and `-toc` (two-pass TOC with page
+numbers) pass through to `docir::pdf`. Ignored: `-fontdir`, `-compress`,
+`-debug`, `-root`. 
 
 **What docir::pdf gained in Phase 3:**
 - TTF font embedding (DejaVu, Unicode support)
@@ -120,8 +123,9 @@ an editor widget. Both remain standalone.
 
 | Tool | Description |
 |------|-------------|
-| `tools/mdserver/mdserver.tcl` | HTTP/HTTPS Markdown web server |
+| `tools/mdserver/mdserver.tcl` | HTTP/HTTPS Markdown web server (`mdserver` 0.3) |
 | `tools/mdserver/mkcert.tcl` | TLS certificate helper |
+| `mdstack::indexgen` | Directory indexes (`index.md` / `indexsub.md`) |
 
 ---
 
@@ -131,7 +135,7 @@ an editor widget. Both remain standalone.
 - **Tk 8.6+** -- for `mdstack::viewer`, `mdstack::text`, UI modules
 - **docir** (sibling repo or system install) -- for `mdstack::html` and `mdstack::pdf`
 - **pdf4tcl 0.9.4+** -- for `mdstack::pdf` (optional, PDF tests skip otherwise)
-- **pdf4tcllib 0.1+** -- for `mdstack::pdf` emoji/font handling
+- **pdf4tcllib 0.6.5** -- live helper for fonts/Unicode/math (`package require pdf4tcllib 0.3` still satisfies `mdstack::pdf`)
 - **tls 1.7+** -- for `mdserver` HTTPS (optional)
 
 ### Consumer matrix
@@ -158,8 +162,8 @@ is located during development.
 
 ```tcl
 tcl::tm::path add /path/to/mdstack/lib
-package require mdstack::parser 0.2
-package require mdstack::viewer 0.3
+package require mdstack::parser 0.8.0
+package require mdstack::viewer 0.4
 
 set ast [mdstack::parser::parse "# Hello\n\nWorld."]
 mdstack::viewer::create .v -width 600 -height 400
@@ -170,8 +174,8 @@ pack .v
 ### HTML Export
 
 ```tcl
-package require mdstack::parser 0.2
-package require mdstack::html   0.1
+package require mdstack::parser 0.8.0
+package require mdstack::html   0.2
 package require mdstack::theme  0.1
 
 set ast [mdstack::parser::parse $markdown]
@@ -181,7 +185,7 @@ mdstack::html::export $ast output.html -theme light -toc 1
 ### PDF Export
 
 ```tcl
-package require mdstack::pdf 0.2
+package require mdstack::pdf 0.3
 
 mdstack::pdf::exportFile input.md output.pdf -title "My Document" -toc 1
 ```
@@ -228,7 +232,7 @@ PDF tests.
 ## Directory Structure
 
 ```
-mdstack-0.3.x/
+mdstack/
   lib/           -- Tcl modules (.tm) -- mdstack-0.1.tm + mdstack/*.tm
   demo/          -- Demo scripts and examples
   tests/         -- Test suite (group A core, B renderer, C GUI, D PDF)

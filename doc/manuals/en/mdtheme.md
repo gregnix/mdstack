@@ -79,7 +79,7 @@ mdstack::pdf::export $ast output.pdf -theme hell
 
 ```tcl
 package require mdstack::theme  0.1
-package require mdstack::viewer 0.3
+package require mdstack::viewer 0.4
 
 mdstack::theme::activate dunkel
 mdstack::theme::applyToViewer .viewer

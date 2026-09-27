@@ -19,15 +19,14 @@ Single file (~1900 lines), all 8 modules included.
 
 ## Installation
 
-In mdstack, pdf4tcllib is located under `vendors/tm/`:
+In the workspace, pdf4tcllib is a sibling repo (not `mdstack/vendors/tm/`):
 
 ```tcl
-# Automatic: mdstack::pdf and mdhelp_pdf add the path themselves
-package require mdstack::pdf 0.2
+package require mdstack::pdf 0.3
 
-# Manual
-tcl::tm::path add /path/to/mdstack/vendors/tm
-package require pdf4tcllib 0.1
+# Manual (sibling checkout)
+tcl::tm::path add /path/to/pdf4tcllib/lib
+package require pdf4tcllib 0.6.5
 ```
 
 ---

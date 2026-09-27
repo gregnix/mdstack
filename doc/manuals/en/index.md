@@ -11,6 +11,7 @@
 | [mdstack::parser](mdparser.md) | Markdown → AST parser |
 | [mdstack::validator](mdvalidator.md) | AST validator |
 | [mdstack::model](mdmodel.md) | Semantic document model |
+| [mdstack::indexgen](mdindexgen.md) | Directory `index.md` / `indexsub.md` |
 | [docir-md](docir-md.md) | _moved_ to [docir repo](../../../docir/) as `docir::mdSource` |
 
 ## Renderers

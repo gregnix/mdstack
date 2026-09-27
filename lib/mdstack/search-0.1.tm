@@ -23,7 +23,8 @@
 #   mdstack::search::next .v   ;# to first/next match
 #
 
-package require Tk
+package require Tcl 8.6-
+package require Tk 8.6-
 package provide mdstack::search 0.1
 
 namespace eval mdstack::search {

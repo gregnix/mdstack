@@ -51,7 +51,8 @@
 #   mdstack::viewer::anchors $path             → list of all anchor names
 #   mdstack::viewer::setFontSize $path $size   → reconfigure all tag fonts
 #
-package require Tk
+package require Tcl 8.6-
+package require Tk 8.6-
 package provide mdstack::viewer 0.4
 
 namespace eval mdstack::viewer {
