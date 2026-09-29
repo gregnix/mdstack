@@ -19,10 +19,12 @@ set dir [file dirname [info script]]
 set runCore 1
 set runGui  1
 set runPdf  1
+set runSrv  1
 if {[llength $argv] > 0} {
     set runCore [expr {"--core" in $argv}]
     set runGui  [expr {"--gui"  in $argv}]
     set runPdf  [expr {"--pdf"  in $argv}]
+    set runSrv  [expr {"--server" in $argv}]
 }
 
 # --- Zaehler ---
@@ -39,14 +41,36 @@ set errorFiles   {}
 # und aggregiert die Counter ins Grand-Total. Vorher wurden Failures
 # innerhalb von tcltest-Suites nur ausgegeben, aber nicht im Endstand
 # gezählt — gemeldet 2026-05-07 via dritten externen Prüfbericht.
+# Eine Testdatei, die beim Laden stirbt, hat KEINE Bilanzzeile. Bis 2026-09-29
+# fiel sie damit lautlos aus dem Endstand: die Fehlermeldung wurde gedruckt,
+# aber nichts gezaehlt, errorFiles blieb leer, und der Exit-Code war 0.
+# Gemessen mit einer Datei, deren "package require" fehlschlaegt:
+#
+#   basic.tcl: Total 1 Passed 1 Skipped 0 Failed 0
+#   can't find package gibtsnichtmehr 9.9
+#   GESAMT: Total 1 Failed 0
+#   EXIT=0
+#
+# In CI waere das gruen. Dasselbe Muster wie der Befund vom 2026-05-07, nur
+# eine Ebene hoeher: damals wurden Failures INNERHALB einer Suite nicht
+# gezaehlt, jetzt der Ausfall einer ganzen Suite. Keine Bilanz heisst ab jetzt
+# Fehler.
 proc runTcltest {dir files} {
     global grandTotal grandPassed grandFailed grandSkipped errorFiles
     foreach f $files {
         set path [file join $dir $f]
-        if {![file exists $path]} { puts "  SKIP: $f (not found)"; continue }
-        if {[catch {exec [info nameofexecutable] $path} out]} {
-            append out ""
+        if {![file exists $path]} {
+            # Kein "SKIP": diese Liste steht im Repo, die Dateien auch. Fehlt
+            # eine, ist die Liste falsch oder die Datei verloren -- gemessen am
+            # 29.09.2026 blieb GESAMT unveraendert, Failed 0, Exit 0.
+            puts "  ERROR in $f: steht in der Liste, ist aber nicht da"
+            lappend errorFiles "$f (fehlt)"
+            incr grandFailed 1
+            incr grandTotal  1
+            continue
         }
+        # 2>@1: die Abbruchmeldung gehoert in die Ausgabe, nicht ins Nichts
+        catch {exec [info nameofexecutable] $path 2>@1} out
         if {$out ne ""} { puts $out }
         # tcltest-Format: ".../basic.tcl:	Total	17	Passed	17	Skipped	0	Failed	0"
         if {[regexp {Total\s+(\d+)\s+Passed\s+(\d+)\s+Skipped\s+(\d+)\s+Failed\s+(\d+)} \
@@ -58,6 +82,11 @@ proc runTcltest {dir files} {
             if {$fld > 0} {
                 lappend errorFiles "$f ($fld failed)"
             }
+        } else {
+            puts "  ERROR in $f: keine tcltest-Bilanz -- die Datei ist nicht gelaufen"
+            incr grandTotal  1
+            incr grandFailed 1
+            lappend errorFiles "$f (nicht gelaufen)"
         }
     }
 }
@@ -67,11 +96,22 @@ proc runAssert {dir files} {
     global grandTotal grandPassed grandFailed grandSkipped errorFiles
     foreach f $files {
         set path [file join $dir $f]
-        if {![file exists $path]} { puts "  SKIP: $f (not found)"; continue }
+        if {![file exists $path]} {
+            # Kein "SKIP": diese Liste steht im Repo, die Dateien auch. Fehlt
+            # eine, ist die Liste falsch oder die Datei verloren -- gemessen am
+            # 29.09.2026 blieb GESAMT unveraendert, Failed 0, Exit 0.
+            puts "  ERROR in $f: steht in der Liste, ist aber nicht da"
+            lappend errorFiles "$f (fehlt)"
+            incr grandFailed 1
+            incr grandTotal  1
+            continue
+        }
         set total 0; set passed 0; set failed 0; set skipped 0
         if {[catch {source $path} err]} {
             puts "  ERROR in $f: $err"
             lappend errorFiles $f
+            incr grandFailed 1
+            incr grandTotal  1
         }
         incr grandTotal   $total
         incr grandPassed  $passed
@@ -85,10 +125,21 @@ proc runCustom {dir files} {
     global grandFailed errorFiles
     foreach f $files {
         set path [file join $dir $f]
-        if {![file exists $path]} { puts "  SKIP: $f (not found)"; continue }
+        if {![file exists $path]} {
+            # Kein "SKIP": diese Liste steht im Repo, die Dateien auch. Fehlt
+            # eine, ist die Liste falsch oder die Datei verloren -- gemessen am
+            # 29.09.2026 blieb GESAMT unveraendert, Failed 0, Exit 0.
+            puts "  ERROR in $f: steht in der Liste, ist aber nicht da"
+            lappend errorFiles "$f (fehlt)"
+            incr grandFailed 1
+            incr grandTotal  1
+            continue
+        }
         if {[catch {exec [info nameofexecutable] $path 2>@1} out]} {
             puts "  ERROR in $f"
             lappend errorFiles $f
+            incr grandFailed 1
+            incr grandTotal  1
         }
         if {$out ne ""} { puts $out }
     }
@@ -193,6 +244,26 @@ if {$runPdf} {
         }
     } else {
         puts "\n--- D. PDF/Export: SKIP (pdf4tcl nicht verfuegbar) ---"
+    }
+}
+
+# ============================================================
+# E. mdserver -- lag bis 2026-09-29 gar nicht im Gesamtlauf
+# ============================================================
+#
+# Die Suite liegt nicht in tests/, sondern bei ihrem Werkzeug, und war darum
+# hier nie aufgefuehrt: wer "make test" lief, pruefte mdserver nicht mit. Sie
+# laedt ihr Modul selbst (tcl::tm::path relativ zum Skript) und startet
+# eigene Serverprozesse, braucht also nur einen eigenen Interpreter -- genau
+# das, was runTcltest tut. Sie dauert laenger als die anderen (Prozessstarts,
+# Wartezeiten beim Beenden), darum am Ende und mit --server einzeln aufrufbar.
+if {$runSrv} {
+    set srvDir [file normalize [file join $dir .. tools mdserver test]]
+    if {[file exists [file join $srvDir test-mdserver-oo.tcl]]} {
+        puts "\n--- E. mdserver (HTTP, eigene Prozesse) ---"
+        runTcltest $srvDir { test-mdserver-oo.tcl }
+    } else {
+        puts "\n--- E. mdserver: SKIP (tools/mdserver/test nicht gefunden) ---"
     }
 }
 

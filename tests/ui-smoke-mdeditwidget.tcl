@@ -9,9 +9,21 @@ if {![info exists ::_setup_done]} {
 
 
 package require Tk
-package require mdeditwidget 0.2
 
-test ui-widget-1 "create mdeditwidget" -body {
+# mdeditwidget 0.2 liegt in mdhelp, NICHT in mdstack. Der Test ist damit nicht
+# obsolet -- mdstack::editorkit ist ein anderes Paket, geprueft von
+# ui-smoke-mdeditorkit.tcl. Liegt mdhelp nicht im Pfad, wird uebersprungen
+# statt abgebrochen: ein Abbruch hatte keine tcltest-Bilanz und fiel damit
+# lautlos aus dem Gesamtlauf.
+#
+# Nachbildung nach dem Protokoll vom 29.09.2026. Gregors eigene Fassung ist
+# die maßgebliche -- liegt sie in git, gilt die.
+testConstraint mdeditwidget [expr {![catch {package require mdeditwidget 0.2}]}]
+if {![testConstraint mdeditwidget]} {
+    puts "SKIP: mdeditwidget 0.2 liegt in mdhelp, nicht in mdstack"
+}
+
+test ui-widget-1 "create mdeditwidget" -constraints mdeditwidget -body {
     set w [mdeditwidget::create .w]
     update
     set m [mdeditwidget::mode $w]
@@ -19,7 +31,7 @@ test ui-widget-1 "create mdeditwidget" -body {
     set m
 } -result split
 
-test ui-widget-2 "settext and gettext" -body {
+test ui-widget-2 "settext and gettext" -constraints mdeditwidget -body {
     set w [mdeditwidget::create .w]
     set input "# Test\n\nContent"
     mdeditwidget::settext $w $input
@@ -29,7 +41,7 @@ test ui-widget-2 "settext and gettext" -body {
     expr {$input eq $output}
 } -result 1
 
-test ui-widget-3 "mode switching" -body {
+test ui-widget-3 "mode switching" -constraints mdeditwidget -body {
     set w [mdeditwidget::create .w]
     mdeditwidget::setmode $w edit
     set a [mdeditwidget::mode $w]
@@ -41,7 +53,7 @@ test ui-widget-3 "mode switching" -body {
     list $a $b $c
 } -result {edit preview split}
 
-test ui-widget-4 "getdocmodel" -body {
+test ui-widget-4 "getdocmodel" -constraints mdeditwidget -body {
     # debounce=0 for immediate parsing
     set w [mdeditwidget::create .w -debounce 0]
     mdeditwidget::settext $w "# Title\n\nText"

@@ -1,0 +1,72 @@
+# mdserver als systemd-Dienst -- Beispiel, keine fertige Unit
+# ============================================================================
+# Pfade, Benutzer und Ports an die Installation anpassen und nach
+# /etc/systemd/system/mdserver.service legen:
+#
+#   install -o root -g root -m 644 mdserver.service.beispiel \
+#       /etc/systemd/system/mdserver.service
+#   systemctl daemon-reload
+#   systemctl enable --now mdserver
+#
+# Vorher einmal von Hand starten und die Startmeldung lesen -- dort steht,
+# an welche Adresse wirklich gebunden wurde.
+# ============================================================================
+
+[Unit]
+Description=mdserver -- Markdown-Dokumentenserver (nur lesend)
+Documentation=file:/opt/mdstack/tools/mdserver/doc/de/mdserver-de.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Nicht als root. Der Benutzer braucht nur Leserechte auf die Wurzel.
+#   adduser --system --no-create-home --group mdserver
+User=mdserver
+Group=mdserver
+
+WorkingDirectory=/opt/mdstack/tools/mdserver
+
+# --bind 127.0.0.1 gehoert dazu, sobald ein Proxy davorsteht: ohne die Option
+# horcht HTTP auf allen Schnittstellen und umgeht dessen Anmeldung.
+# --trusted-proxy 127.0.0.1 erst, wenn dieser Proxy X-Forwarded-For setzt.
+ExecStart=/usr/bin/tclsh /opt/mdstack/tools/mdserver/mdserver.tcl \
+    --root /srv/md \
+    --port 8080 \
+    --bind 127.0.0.1 \
+    --trusted-proxy 127.0.0.1 \
+    --control 8099 \
+    --title Dokumente \
+    --style sidebar
+
+# Sauber beenden ueber den Steuerport: mdserver schliesst dann erst die
+# Horchsockets, laesst laufende Antworten zu Ende gehen (hoechstens 5 s) und
+# beendet sich selbst. Ohne das kommt SIGTERM, und Tcl hat ohne TclX keine
+# Signalbehandlung -- der Prozess endet dann mitten in der Antwort.
+#
+# Kein "echo stop | nc": OpenBSD-netcat, das Standard-nc auf Debian, wartet
+# ohne -N bis zum Timeout, und systemd schickt danach SIGKILL.
+ExecStop=/usr/bin/tclsh /opt/mdstack/tools/mdserver/mdctl.tcl --port 8099 stop
+
+# Etwas mehr als die 5 s, die mdserver sich fuer laufende Antworten nimmt.
+TimeoutStopSec=15
+
+Restart=on-failure
+RestartSec=5
+
+# Das Protokoll geht ins Journal. mdserver schreibt eine Zeile je Anfrage und
+# nach jeder Zeile ein flush, also steht sie sofort drin:
+#   journalctl -u mdserver -f
+StandardOutput=journal
+StandardError=journal
+
+# Nur lesen, nichts schreiben. mdserver braucht keinen Schreibzugriff.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadOnlyPaths=/srv/md
+
+[Install]
+WantedBy=multi-user.target

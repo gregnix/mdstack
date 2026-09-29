@@ -1,5 +1,67 @@
 # mdstack — Changelog
 
+## 2026-09-29 — mdserver 0.4
+
+### Fixed
+
+- **HEAD returned a body**, although the 405 `Allow: GET, HEAD` promises it
+  (RFC 9110 9.3.2). Now headerless on every path: markdown, static file,
+  directory index, 206, 404 — with the `Content-Length` a GET would send.
+- **`X-Forwarded-For` was trusted from any peer.** Anyone reaching the port
+  could forge the log line; a wrong address is worse than none.
+- **`If-Range` was ignored**: a range whose validator no longer matched was
+  still served as 206, with bytes from the *new* file (RFC 9110 13.1.5).
+- **Symlinks led out of `--root`** — `file normalize` does not resolve the final
+  component. Now 403. The root comparison also stopped at a prefix, so
+  `/srv/md` matched `/srv/mdxyz`.
+- **Valid but unsupported methods got silence** instead of 405 + `Allow`.
+- **The start banner always said `localhost`**, even when bound to all
+  interfaces — the opposite of the truth in exactly the risky case.
+- **`stop` cut running responses.** Only the listeners close now; responses get
+  5 s, then they are cut and that is logged.
+- **`mkcert.tcl` wrote no `subjectAltName`**, so current browsers reject the
+  certificate even after import — and `--check` reported it as `OK`.
+- **`Server:` header** was hand-typed and wrong; it comes from
+  `package provide` now. **`_log`** did not flush, so under systemd the last
+  request showed up kilobytes later.
+
+### Added
+
+- `--bind`, `--dotfiles`, `--trusted-proxy`, `--maxline` (414), `--maxheader`
+  (431), `--healthpath`.
+- Health endpoint `/__mdserver/health` — checks the root is a readable
+  directory, `200 ok` or `503`. No system information.
+- One log line per request, with client IP, status and bytes (bytes for
+  markdown too).
+- `mdctl.tcl` (stop/ping, usable as systemd `ExecStop=`) and
+  `mdserver.service.beispiel`. Not `echo stop | nc`: OpenBSD netcat waits until
+  timeout without `-N`.
+- `mkcert.tcl --san NAME|IP` (repeatable) and `--no-san`.
+
+### Tests
+
+95, up from 68. Each change measured red against its predecessor.
+
+## 2026-09-29 — tests/all.tcl: silent failures count
+
+### Fixed
+
+- **A test file dying at load produced no tcltest tally**, so nothing was
+  counted — `Failed 0`, exit 0, green in CI. That was
+  `can't find package mdeditwidget 0.2`.
+- **A file listed but missing on disk** was skipped just as silently.
+- `runAssert` and `runCustom` filled `errorFiles` but not `grandFailed`, so the
+  GESAMT line still said `Failed 0`.
+- `ui-smoke-mdeditwidget.tcl` now sets a tcltest constraint and reports
+  `Skipped 4`. The package lives in **mdhelp**, not mdstack — the test is not
+  obsolete.
+
+### Added
+
+- **Section E** runs `tools/mdserver/test/test-mdserver-oo.tcl`, which
+  `make test` never covered. 756 instead of 661 without Tk and pdf4tcl.
+  Single group: `--server`.
+
 ## 2026-09-26 — Pins, supports, Doku
 
 ### Changed

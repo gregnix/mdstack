@@ -18,7 +18,7 @@ meinprojekt/
   tools/
     mdserver/
       lib/
-        mdserver-0.2.tm
+        mdserver-0.4.tm
       styles/           <- TOC-CSS (sidebar/sticky-top/collapsible)
       mdserver.tcl
       mkcert.tcl
@@ -263,11 +263,11 @@ tools/mdserver/server.key
 fuser -k 8080/tcp
 ```
 
-**mdserver-0.1.tm nicht gefunden:**
+**mdserver-0.4.tm nicht gefunden:**
 ```
 ERROR: mdserver 0.1 nicht gefunden
 ```
-→ `lib/mdserver-0.1.tm` muss neben `mdserver.tcl` in `lib/` liegen.
+→ `lib/mdserver-0.4.tm` muss neben `mdserver.tcl` in `lib/` liegen.
 
 **Seite zeigt nur Quelltext:**
 → Dateiendung muss `.md` sein, nicht `.txt` oder `.markdown`.

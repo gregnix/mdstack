@@ -20,7 +20,7 @@ It serves Markdown files as HTML on the fly.
 - Static files served directly
 - Directory index with automatic file listing
 
-**Location:** `tools/mdserver/mdserver.tcl`, module `lib/mdserver-0.2.tm`
+**Location:** `tools/mdserver/mdserver.tcl`, module `lib/mdserver-0.4.tm`
 
 ---
 
@@ -52,6 +52,12 @@ tclsh mdserver.tcl [options]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--port` | `8080` | HTTP port |
+| `--bind` | (empty) | Listen address. Empty means **all interfaces**. Behind a proxy that does the authentication this must be `127.0.0.1` -- otherwise the port is reachable from outside and unauthenticated. |
+| `--dotfiles` | `0` | Serve hidden files and directories (`.git`, `.env`, …). Off by default: a document root that is also a working copy would otherwise hand out `/.git/config`. |
+| `--trusted-proxy` | (empty) | Peer addresses whose `X-Forwarded-For` is believed in the log. Exact match, no netmasks. Empty means the header is ignored. Several as a list: `--trusted-proxy "127.0.0.1 10.0.0.5"`. |
+| `--maxline` | `8190` | Bytes per request/header line; over that **414**. `0` = no limit. |
+| `--maxheader` | `16384` | Bytes of all headers; over that **431**. `0` = no limit. |
+| `--healthpath` | `/__mdserver/health` | Path of the health endpoint |
 | `--root` | `.` | Document root |
 | `--theme` | `hell` | Theme: `hell`, `dunkel`, `solarized` |
 | `--style` | `plain` | TOC style: `plain`, `sidebar`, `sticky`, `collapsible` |
@@ -201,6 +207,8 @@ Recommended way to stop a long-running server (no `fuser -k`, no PID lookup).
 ```bash
 # 1. Generate certificate
 tclsh mkcert.tcl --cn myserver.local --days 730
+# LAN, reached by name AND by address:
+tclsh mkcert.tcl --cn mdstack --san 192.168.1.50 --san mdstack.lan
 
 # 2. Start (HTTP 8080 + HTTPS 8443)
 tclsh mdserver.tcl --root /path/to/docs --cert server.crt --key server.key
@@ -243,6 +251,18 @@ TLS 1.2 / 1.3 active; SSL2/3 and TLS 1.0/1.1 disabled.
 | `/dir` | 301 redirect to `/dir/` (correct relative links) |
 | `/dir/` | Directory index or `index.md` |
 | `/` | Directory index or `index.md` |
+| `POST`, `PUT`, `DELETE`, `OPTIONS`, `PATCH` | **405** with `Allow: GET, HEAD` |
+
+Only `GET` and `HEAD` are served. `HEAD` returns the same headers as `GET` --
+same status, same `Content-Length` -- but **no body** (RFC 9110 9.3.2), and
+that holds for 206, 404 and the directory index too. Up to 0.3.1 the body came
+along, although the `Allow` header promises HEAD. Any other valid HTTP method gets **405** with
+an `Allow: GET, HEAD` header, so the client is told rather than left waiting. A
+request line that is not HTTP at all gets no answer -- there is no meaningful
+status for it, and 405 would be a claim about a protocol that was never spoken.
+
+Every response carries `Server: mdserver/<package version>`, taken from
+`package provide mdserver` rather than typed a second time.
 
 **Clean URLs** allow links without `.md` extension (e.g. `/dict`, `/array`).
 Used by `nroff2md --linkmode server` for SEE ALSO cross-references.
@@ -275,6 +295,21 @@ Server cannot find the CSS styles. Ensure `tools/mdserver/styles/` exists (or se
 ## Security notes
 
 - Directory traversal blocked (safePath check)
+- **Symlinks do not lead out of the root.** `file normalize` does not resolve
+  the final component of a path, so up to 0.3 a link `docs/out.txt ->
+  /etc/passwd` was served. Since 0.3.1 every component is resolved and the
+  result checked against the root again: **403**. A link that stays inside the
+  root is served normally.
+- **The root comparison goes up to the separator**: `--root /srv/md` does not
+  match `/srv/mdxyz`.
+- Hidden files are off by default (`--dotfiles`)
+- `--bind 127.0.0.1` behind a proxy that authenticates -- otherwise the port is
+  reachable from outside and unauthenticated
+- Behind a proxy the peer is always the proxy's address. `X-Forwarded-For` is
+  read **only** from peers listed in `--trusted-proxy` (empty by default =
+  never), and only its **first** entry -- anyone reaching the port can append
+  to that header, so up to 0.3.1 a plain
+  `curl -H "X-Forwarded-For: 9.9.9.9"` wrote `9.9.9.9` into the log
 - Control port binds to `127.0.0.1` only
 - Self-signed certificates trigger browser warnings (dev only)
 - No authentication built in -- restrict at network level for sensitive docs
@@ -287,9 +322,11 @@ Server cannot find the CSS styles. Ensure `tools/mdserver/styles/` exists (or se
 ```
 tools/mdserver/
   mdserver.tcl        -- CLI launcher
-  lib/mdserver-0.2.tm -- server module
+  lib/mdserver-0.4.tm -- server module
   styles/             -- TOC CSS styles (sidebar/sticky-top/collapsible)
   mkcert.tcl          -- certificate helper
+  mdctl.tcl           -- control port client (stop|ping), systemd ExecStop=
+  mdserver.service.beispiel -- sample systemd unit
   test/               -- test suite
   mdserver-demo/      -- demo site
 ```
@@ -297,6 +334,40 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+**0.4 (2026-09-29)** -- the start banner names the address actually bound
+(`0.0.0.0:8080 (alle Schnittstellen)` vs `127.0.0.1:8080`) instead of always
+saying `localhost`. `stop` now closes only the listeners and gives running
+responses 5 s before cutting them, so a `systemctl restart` no longer truncates
+a PDF mid-byte. Health endpoint `/__mdserver/health` (`--healthpath`) that
+checks one thing — is the root still a readable directory — with `200 ok` or
+`503 root unreadable`. One log line per request with client IP, status and
+bytes (bytes now for Markdown too). `--maxline` / `--maxheader` answer 414 /
+431. `mdctl.tcl` talks to the control port and works as systemd `ExecStop=`;
+`mdserver.service.beispiel` is a sample unit.
+
+**0.3.4 (2026-09-29)** -- `mkcert.tcl` sets `subjectAltName` from the CN
+(`DNS:` for a name, `IP:` for an address; `localhost` also gets
+`IP:127.0.0.1`), and `--san` appends more. Current browsers do not read the CN
+as a hostname, so a certificate without SAN is rejected even after being
+imported. An existing SAN-less certificate is replaced on the next run, and
+`--check` reports it instead of saying `OK`. `--no-san` keeps the old
+behaviour on purpose.
+
+**0.3.3 (2026-09-29)** -- `If-Range` is honoured: when the validator does
+not match (or is an ETag, which mdserver never issues), the whole file is sent
+with 200 instead of a 206 slice of the new revision (RFC 9110 13.1.5).
+
+**0.3.2 (2026-09-28)** -- HEAD returns headers without a body (RFC 9110 9.3.2),
+on every path including 206 and 404. `--trusted-proxy ADDR ...`:
+`X-Forwarded-For` is read only from those peers, empty by default.
+
+**0.3.1 (2026-09-28)** -- `--bind ADDR` for HTTP and HTTPS (empty = all
+interfaces; a non-existent address aborts the start and names it). Symlinks no
+longer lead out of the document root (403), and the root comparison goes up to
+the separator. `--dotfiles 0|1`, off by default. 405 with `Allow: GET, HEAD`
+instead of silence for other methods. `X-Forwarded-For` (first entry) in the
+log, flushed per line. `Server:` header from `package provide mdserver`.
 
 **0.3** -- nav bar overflow: more than `navmax` sections (default 6) fold into a
 CSS-only dropdown (`navmore` label), bar wraps instead of overflowing. `--theme`

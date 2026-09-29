@@ -197,7 +197,15 @@ cd tools/mdserver
 tclsh mdserver.tcl --root /path/to/docs --port 8080
 # with HTTPS:
 tclsh mdserver.tcl --root /path/to/docs --cert server.crt --key server.key
+# behind a proxy that authenticates: keep the port off the network
+tclsh mdserver.tcl --root /path/to/docs --port 8080 --bind 127.0.0.1 \
+    --trusted-proxy 127.0.0.1 --control 8099
+# stop it again (also works as systemd ExecStop=):
+tclsh mdctl.tcl --port 8099 stop
 ```
+
+Serves `GET` and `HEAD`; hidden files and symlinks leaving the document root
+are refused. See `doc/manuals/en/mdserver.md`.
 
 ---
 

@@ -25,7 +25,7 @@ Er liefert Markdown-Dateien on-the-fly als HTML aus.
 - Statische Dateien direkt ausgeliefert
 - Verzeichnis-Index mit automatischer Dateiliste
 
-**Speicherort:** `tools/mdserver/mdserver.tcl`, Modul `lib/mdserver-0.2.tm`
+**Speicherort:** `tools/mdserver/mdserver.tcl`, Modul `lib/mdserver-0.4.tm`
 
 ---
 
@@ -57,6 +57,12 @@ tclsh mdserver.tcl [Optionen]
 | Option | Standard | Beschreibung |
 |--------|----------|-------------|
 | `--port` | `8080` | HTTP-Port |
+| `--bind` | (leer) | Adresse, auf der gehorcht wird. Leer heisst **alle Schnittstellen**. Hinter einem Proxy, der die Anmeldung macht, gehoert hier `127.0.0.1` hin — sonst ist der Port von aussen offen und unangemeldet. |
+| `--dotfiles` | `0` | Versteckte Dateien und Ordner (`.git`, `.env`, …) ausliefern. Aus, weil eine Wurzel, die zugleich Arbeitskopie ist, sonst `/.git/config` herausgibt. |
+| `--trusted-proxy` | (leer) | Gegenstellen, deren `X-Forwarded-For` im Protokoll geglaubt wird. Genaue Uebereinstimmung, keine Netzmasken. Leer heisst: der Kopf wird ignoriert. Mehrere als Liste: `--trusted-proxy "127.0.0.1 10.0.0.5"`. |
+| `--maxline` | `8190` | Bytes je Anfrage-/Kopfzeile; darueber **414**. `0` = ohne Grenze. |
+| `--maxheader` | `16384` | Bytes aller Koepfe zusammen; darueber **431**. `0` = ohne Grenze. |
+| `--healthpath` | `/__mdserver/health` | Pfad des Health-Endpunkts |
 | `--root` | `.` | Dokument-Wurzel |
 | `--theme` | `hell` | Theme: `hell`, `dunkel`, `solarized` |
 | `--style` | `plain` | TOC-Stil: `plain`, `sidebar`, `sticky`, `collapsible` |
@@ -140,7 +146,7 @@ tclsh mdserver.tcl --root docs --style sidebar
 
 ```
 tools/mdserver/
-  lib/mdserver-0.2.tm
+  lib/mdserver-0.4.tm
   styles/
     sidebar.css
     sticky-top.css
@@ -244,6 +250,39 @@ Beide Features passen zur Web-Ausgabe von bookkit (`book-webindex.tcl`), das die
 
 ---
 
+## Health-Endpunkt
+
+```
+GET /__mdserver/health   ->  200  ok
+                             503  root unreadable
+```
+
+Fuer nginx, systemd oder eine Ueberwachung. Er prueft **eine Sache**, statt nur
+zu bestaetigen, dass der Prozess lebt: ist die Wurzel noch ein lesbares
+Verzeichnis? Ein Endpunkt, der immer 200 sagt, meldet „gesund", wenn `--root`
+auf einen nicht mehr eingehaengten Pfad zeigt — nginx schaltet dann auf einen
+Server, der fuer alles 404 liefert. Keine Systeminformationen, nur `ok` oder
+der Grund. Pfad aenderbar mit `--healthpath`.
+
+---
+
+## Grenzen fuer Anfragen
+
+| | Vorgabe | darueber |
+|---|---|---|
+| `--maxline` | 8190 Bytes je Zeile | **414 URI Too Long** |
+| `--maxheader` | 16384 Bytes alle Koepfe | **431 Request Header Fields Too Large** |
+
+Die Grenze haengt am Lesepuffer, nicht an der fertigen Zeile: eine Zeile ohne
+Zeilenende waechst sonst unbegrenzt, und genau das soll die Grenze verhindern.
+Nach einer abgewiesenen Anfrage bedient der Server normal weiter. `0` schaltet
+eine Grenze ab.
+
+Das Lese-Timeout (15 s, `-timeout`) bleibt davon unberuehrt — es deckt den
+langsamen Klienten, die Grenzen den grossen.
+
+---
+
 ## Control-Port (sauberes Beenden)
 
 Mit `--control PORT` oeffnet der Server einen **localhost-only** Steuerkanal:
@@ -252,16 +291,58 @@ Mit `--control PORT` oeffnet der Server einen **localhost-only** Steuerkanal:
 tclsh mdserver.tcl --root docs --control 8099
 ```
 
-Kommandos (eine Zeile):
+Kommandos mit dem beiliegenden `mdctl.tcl`:
 
 ```bash
-echo stop | nc localhost 8099     # Server sauber beenden (Listener + offene
-                                  # Verbindungen schliessen, dann Prozessende)
-echo ping | nc localhost 8099     # -> pong
+tclsh mdctl.tcl --port 8099 stop     # sauber beenden
+tclsh mdctl.tcl --port 8099 ping     # -> pong
 ```
 
 Das ist der empfohlene Weg zum Beenden eines dauerlaufenden Servers -- kein
 `fuser -k`, keine PID-Suche.
+
+**Kein `echo stop | nc`.** OpenBSD-netcat, das Standard-`nc` auf Debian und
+Ubuntu, schliesst die Senderichtung nach EOF auf stdin nicht und wartet weiter:
+
+```
+echo ping | nc    127.0.0.1 8099   ->  leer, laeuft in den Timeout
+echo ping | nc -N 127.0.0.1 8099   ->  pong
+```
+
+Das `-N` kennen andere netcat-Varianten wieder nicht. Tcl ist da, wo mdserver
+laeuft, also braucht es das Raten nicht -- darum `mdctl.tcl`.
+
+### Was beim Beenden passiert
+
+1. Die **Horchsockets** gehen zu: keine neue Verbindung mehr.
+2. Laufende Antworten bekommen **5 s**, um fertig zu werden.
+3. Danach wird gekappt, mit Protokollzeile:
+   `shutdown: 1 Verbindung(en) abgeschnitten`
+
+Bis 0.3.4 fiel Schritt 2 aus -- `shutdown` schloss alle offenen Verbindungen
+sofort. Wer gerade eine grosse PDF holte, bekam sie mitten im Byte
+abgeschnitten, und zwar bei jedem `systemctl restart`.
+
+### Unter systemd
+
+`mdserver.service.beispiel` liegt neben `mdserver.tcl`. Der Kern:
+
+```ini
+ExecStart=/usr/bin/tclsh /opt/mdstack/tools/mdserver/mdserver.tcl \
+    --root /srv/md --port 8080 --bind 127.0.0.1 \
+    --trusted-proxy 127.0.0.1 --control 8099
+ExecStop=/usr/bin/tclsh /opt/mdstack/tools/mdserver/mdctl.tcl --port 8099 stop
+TimeoutStopSec=15
+```
+
+`TimeoutStopSec` etwas ueber den 5 s, die mdserver sich fuer laufende Antworten
+nimmt. Ohne `ExecStop` kommt SIGTERM -- und Tcl hat ohne TclX keine
+Signalbehandlung, der Prozess endet dann mitten in der Antwort. Das Protokoll
+geht ins Journal und wird nach jeder Zeile geschrieben:
+
+```bash
+journalctl -u mdserver -f
+```
 
 ---
 
@@ -342,6 +423,11 @@ Teilbereichs-Unterstuetzung ausgeliefert:
   `bytes=-50` (letzte 50 Bytes); ungueltiger Bereich -> `416`. Mit
   `Accept-Ranges: bytes` und `Content-Range`. So sind grosse PDFs/Videos im
   Browser springbar.
+- **`If-Range`**: ein Bereich gilt nur, wenn die Datei noch dieselbe ist. Passt
+  der Validator nicht — oder ist er ein ETag, die mdserver nie ausgibt — kommt
+  **200 mit dem ganzen Inhalt** statt 206 (RFC 9110 13.1.5). Bis 0.3.2 wurde
+  der Kopf nicht gelesen: ein Viewer konnte Stuecke zweier Fassungen
+  zusammenkleben, wenn die Datei waehrend des Lesens neu gespeichert wurde.
 - **`If-Modified-Since` / 304 Not Modified**: unveraenderte Dateien werden nicht
   neu gesendet (`Last-Modified` an allen Dateien).
 
@@ -358,6 +444,19 @@ Teilbereichs-Unterstuetzung ausgeliefert:
 | `/verzeichnis/` | `index.md` oder Verzeichnis-Listing |
 | `.css`, `.js`, `.png`, `.jpg`, `.gif`, `.svg`, `.pdf` | Statische Datei |
 | Nicht gefunden | 404-Seite |
+| `POST`, `PUT`, `DELETE`, `OPTIONS`, `PATCH` | **405** mit `Allow: GET, HEAD` |
+
+Ausgeliefert werden nur `GET` und `HEAD`. `HEAD` liefert denselben Kopf wie
+`GET` — gleicher Status, gleiches `Content-Length` — aber **keinen Koerper**
+(RFC 9110 9.3.2). Das gilt auch fuer 206, 404 und den Verzeichnis-Index. Bis
+0.3.1 kam der Koerper mit, obwohl der `Allow`-Kopf HEAD zusagt. Jede andere gueltige HTTP-Methode
+bekommt **405** und im Kopf `Allow: GET, HEAD` — der Klient erfaehrt, woran er
+ist, statt zu warten. Eine Anfragezeile, die gar kein HTTP ist, bekommt
+weiterhin keine Antwort: dafuer gibt es keinen sinnvollen Status, und 405 waere
+eine Aussage ueber ein Protokoll, das nie gesprochen wurde.
+
+Jede Antwort traegt `Server: mdserver/<Paketfassung>` — aus
+`package provide mdserver`, nicht aus einer zweiten getippten Zahl.
 
 **Clean URLs** erlauben Links ohne `.md`-Endung (z.B. `/dict`, `/array`).
 Wird von `nroff2md --linkmode server` für SEE ALSO-Querverweise genutzt.
@@ -380,16 +479,59 @@ alle anderen Seiten (kein separater HTML-Pfad).
 
 ## Logging
 
+Eine Zeile je Anfrage — Zeit, Adresse, Methode, Pfad, Status, Bytes, dann eine
+kurze Notiz. Bis 0.3.4 waren es zwei Zeilen, und Bytes gab es nur bei
+statischen Dateien:
+
 ```
-[09:15:03] GET /index.md
-[09:15:03]   -> 200 (markdown)
-[09:15:03] GET /handbuch.pdf
-[09:15:03]   -> 206 (bytes 0-65535/2400000)
-[09:15:03] GET /style.css
-[09:15:03]   -> 304 (not modified)
+[09:15:03] 127.0.0.1 GET /index.md 200 6194 markdown
+[09:15:03] 127.0.0.1 GET /unter 301 0 -> /unter/
+[09:15:03] 192.168.17.42 GET /handbuch.pdf 206 65536 bytes 0-65535/2400000
+[09:15:03] 127.0.0.1 GET /style.css 304 0 not modified
+[09:15:03] 127.0.0.1 POST /index.md 405 94
 ```
 
+Die Adresse ist die Gegenstelle — oder der erste `X-Forwarded-For`-Eintrag,
+wenn die Gegenstelle in `--trusted-proxy` steht.
+
 Mit `--no-log` deaktivieren.
+
+### Hinter einem Proxy
+
+Als Gegenstelle steht dort immer die Adresse des Proxys — jede Zeile saehe
+gleich aus. `X-Forwarded-For` hilft, aber **nur wenn er vom Proxy kommt**:
+anhaengen kann den Kopf jeder, der den Port erreicht. Bis 0.3.1 glaubte
+mdserver ihn ungeprueft, ein direktes
+
+```bash
+curl -H "X-Forwarded-For: 9.9.9.9" http://server:8080/
+```
+
+schrieb `9.9.9.9` ins Protokoll. Seit 0.3.2 wird der Kopf nur gelesen, wenn die
+**Gegenstelle** in `--trusted-proxy` steht:
+
+```bash
+tclsh mdserver.tcl --root /srv/md --bind 127.0.0.1 --trusted-proxy 127.0.0.1
+```
+
+Dann nennt das Protokoll den **ersten** Eintrag des Kopfes:
+
+```
+[09:15:03] 192.168.17.42 GET /index.md
+```
+
+Alles hinter dem ersten Eintrag kann der Klient selbst hineingeschrieben haben
+und wird verworfen. Wer dem Loopback traut, traut damit allem, was auf
+demselben Rechner laeuft — das ist hinter einem Proxy auf derselben Maschine
+richtig so. In nginx:
+
+```nginx
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+```
+
+Ohne `--trusted-proxy` wird der Kopf gar nicht gelesen. Das Protokoll wird nach
+jeder Zeile geschrieben (`flush`) — in eine Datei umgelenkt, also unter
+systemd, stand die letzte Anfrage sonst erst Kilobytes spaeter darin.
 
 ---
 
@@ -468,6 +610,9 @@ tclsh mkcert.tcl
 # Mit Optionen
 tclsh mkcert.tcl --cn example.com --days 730 --bits 2048
 
+# LAN: Aufruf per Name UND per Adresse
+tclsh mkcert.tcl --cn mdstack --san 192.168.1.50 --san mdstack.lan
+
 # Gueltigkeit pruefen (z.B. in Cron)
 tclsh mkcert.tcl --check
 ```
@@ -480,10 +625,46 @@ tclsh mkcert.tcl --check
 | `--out` | `.` | Ausgabeverzeichnis |
 | `--cert` | `server.crt` | Zertifikat-Dateiname |
 | `--key` | `server.key` | Key-Dateiname |
+| `--san` | -- | Weiterer Name oder IP im `subjectAltName`. Mehrfach angebbar; der CN steht immer drin. |
+| `--no-san` | -- | Ohne `subjectAltName` erzeugen. Browser lehnen das ab. |
 | `--check` | -- | Nur Gueltigkeit pruefen |
 
-Erkennt automatisch ob Zertifikat vorhanden und noch gueltig ist. Fuers LAN den
-`--cn` auf den Hostnamen/die IP des Servers setzen, sonst warnt der Browser.
+Erkennt automatisch ob Zertifikat vorhanden und noch gueltig ist.
+
+### subjectAltName (seit 0.3.4)
+
+Aktuelle Browser lesen den **CN nicht mehr als Hostnamen** — Chrome seit 58
+(2017) — sondern den `subjectAltName`. Bis 0.3.3 setzte `mkcert.tcl` nur
+`-subj /CN=…`, ohne SAN; ein so erzeugtes Zertifikat wird abgelehnt, auch nach
+Import in den Zertifikatspeicher (`ERR_CERT_COMMON_NAME_INVALID`).
+
+Der SAN entsteht jetzt aus dem CN: ein Name wird `DNS:`, eine Adresse `IP:`.
+Bei `localhost` kommt `IP:127.0.0.1` dazu, weil beide Wege benutzt werden.
+
+```
+tclsh mkcert.tcl                        -> DNS:localhost, IP Address:127.0.0.1
+tclsh mkcert.tcl --cn mdstack.lan       -> DNS:mdstack.lan
+tclsh mkcert.tcl --cn 192.168.1.50      -> IP Address:192.168.1.50
+--cn mdstack --san 192.168.1.50 --san mdstack.lan
+      -> DNS:mdstack, IP Address:192.168.1.50, DNS:mdstack.lan
+```
+
+Wer `https://192.168.1.50/` aufruft, braucht die **Adresse** im SAN, nicht nur
+den Namen. Nach dem Erzeugen liest das Skript den SAN aus dem Zertifikat
+zurueck und bricht ab, wenn er fehlt.
+
+**Alte Zertifikate:** ein vorhandenes ohne SAN wird beim naechsten Aufruf
+ersetzt, auch wenn das Datum noch stimmt — es ist fuer Browser ohnehin
+unbrauchbar. `--check` meldet es und endet mit Rueckgabewert 1 statt `OK`:
+
+```
+GUELTIG, ABER OHNE subjectAltName: /pfad/server.crt
+Browser lehnen es ab (ERR_CERT_COMMON_NAME_INVALID), auch nach Import.
+```
+
+`--addext` braucht openssl ab 1.1.1. Fehlt es, bricht `mkcert.tcl` ab statt
+still ein Zertifikat ohne SAN zu bauen; `--no-san` erzwingt das alte Verhalten
+ausdruecklich.
 
 ---
 
@@ -499,6 +680,19 @@ tools/mdserver/server.key
 ## Sicherheitshinweise
 
 - **Directory Traversal** ist blockiert (safePath-Pruefung)
+- **Symlinks** fuehren nicht aus der Wurzel heraus. `file normalize` loest den
+  letzten Bestandteil eines Pfades **nicht** auf; bis 0.3 wurde ein Verweis
+  `docs/hinaus.txt -> /etc/passwd` darum ausgeliefert. Seit 0.3.1 wird jeder
+  Bestandteil aufgeloest und das Ergebnis erneut gegen die Wurzel geprueft:
+  **403**. Ein Verweis, der innerhalb der Wurzel bleibt, wird normal geliefert.
+- **Der Wurzelvergleich geht bis zum Trennzeichen**: `--root /srv/md` passt
+  nicht auf `/srv/mdxyz`.
+- **Versteckte Dateien** sind aus (`--dotfiles`, siehe Kommandozeile)
+- **`X-Forwarded-For`** wird nur von Gegenstellen aus `--trusted-proxy`
+  gelesen; Vorgabe leer heisst: gar nicht. Sonst faelscht jeder, der den Port
+  erreicht, seine Adresse im Protokoll.
+- **`--bind`**: hinter einem Proxy mit Anmeldung gehoert `127.0.0.1` hin, sonst
+  ist der Port von aussen offen und unangemeldet
 - **Control-Port** bindet nur an `127.0.0.1` (nicht von aussen erreichbar)
 - **Selbstsignierte Zertifikate** zeigen Browser-Warnung -- nur fuer Entwicklung
 - **Let's Encrypt** fuer oeffentliche Server empfohlen
@@ -513,12 +707,14 @@ tools/mdserver/server.key
 tools/mdserver/
   mdserver.tcl          -- Startskript (CLI)
   lib/
-    mdserver-0.2.tm     -- Server-Modul
+    mdserver-0.4.tm   -- Server-Modul
   styles/               -- TOC-CSS-Stile
     sidebar.css
     sticky-top.css
     collapsible.css
   mkcert.tcl            -- Zertifikat-Hilfsskript
+  mdctl.tcl             -- Steuerport ansprechen (stop|ping), als ExecStop=
+  mdserver.service.beispiel -- systemd-Unit zum Anpassen
   server.crt            -- (generiert, nicht im Git)
   server.key            -- (generiert, nicht im Git)
   test/
@@ -532,6 +728,45 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+### 0.4 (2026-09-29)
+
+- **Startmeldung nennt die Bindeadresse** statt immer `localhost`
+- **`stop` laesst laufende Antworten zu Ende** (5 s), statt sie zu kappen
+- **Health-Endpunkt** `/__mdserver/health`, prueft die Wurzel
+- **Eine Protokollzeile je Anfrage**, mit Adresse, Status und Bytes
+- **`--maxline` / `--maxheader`** -> 414 / 431
+- **`mdctl.tcl`** und `mdserver.service.beispiel` fuer den Betrieb unter systemd
+
+### 0.3.4 (2026-09-29)
+
+- **`mkcert.tcl` setzt `subjectAltName`** aus dem CN, `--san` haengt weitere an.
+  Ohne SAN lehnen aktuelle Browser das Zertifikat ab. Ein vorhandenes ohne SAN
+  wird ersetzt, `--check` meldet es statt `OK`. `--no-san` fuer den alten Weg
+
+### 0.3.3 (2026-09-29)
+
+- **`If-Range`** wird ausgewertet: passt der Validator nicht, kommt 200 mit dem
+  ganzen Inhalt statt 206 aus der neuen Fassung
+
+### 0.3.2 (2026-09-28)
+
+- **HEAD ohne Koerper** (RFC 9110 9.3.2) — auf allen Wegen, auch 206 und 404.
+  Bis 0.3.1 kam der Koerper mit, obwohl `Allow: GET, HEAD` ihn zusagt
+- **`--trusted-proxy ADDR ...`**: `X-Forwarded-For` wird nur von diesen
+  Gegenstellen gelesen, Vorgabe leer
+
+### 0.3.1 (2026-09-28)
+
+- **`--bind ADDR`**: an welche Adresse HTTP und HTTPS gehen. Leer bleibt die
+  Vorgabe (alle Schnittstellen). Eine Adresse, die es nicht gibt, bricht den
+  Start ab und nennt sie — kein stiller Rueckfall
+- **Symlinks fuehren nicht mehr aus der Wurzel heraus** (403), der
+  Wurzelvergleich geht bis zum Trennzeichen
+- **`--dotfiles 0|1`**, Vorgabe aus
+- **405 mit `Allow: GET, HEAD`** statt Schweigen bei fremden Methoden
+- **`X-Forwarded-For`** (erster Eintrag) im Protokoll; `flush` nach jeder Zeile
+- **`Server:`-Kopf** aus `package provide mdserver`
 
 ### 0.3
 

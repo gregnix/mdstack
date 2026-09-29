@@ -1,4 +1,4 @@
-# mdserver-0.3.tm -- Markdown-Web-Server Modul v0.5 (coroutine/non-blocking)
+# mdserver-0.4.tm -- Markdown-Web-Server Modul (coroutine/non-blocking)
 # ============================================================================
 # HTTP/HTTPS server for Markdown documents.
 # No Tk, no fonts, no display. Requires only Tcl 8.6+.
@@ -12,7 +12,15 @@
 # Optional: mdstack::theme 0.1, tls (for HTTPS)
 # ============================================================================
 
-package provide mdserver 0.3
+package provide mdserver 0.4
+
+# Der Server-Kopf kommt aus der Paketfassung, nicht aus drei getippten Zahlen.
+# Bis 0.3 stand in derselben Datei zweimal "mdserver/0.5", einmal
+# "mdserver/0.4" und einmal "mdserver 0.4" -- bei Paketfassung 0.3. Keine der
+# Angaben stimmte, und keine stimmte mit einer anderen ueberein.
+namespace eval ::mdserver {
+    variable serverHeader "mdserver/[package provide mdserver]"
+}
 
 package require Tcl 8.6 9
 # ============================================================
@@ -63,12 +71,20 @@ namespace eval mdserver {
 # complete line is available -- the readable event (or the timeout)
 # resumes the coroutine. A slow connection never blocks the others.
 # ============================================================
-proc mdserver::coGets {chan _line} {
+# max > 0: bricht ab, sobald mehr als max Bytes ohne Zeilenende im Puffer
+# liegen -- Rueckgabe -2. Die Pruefung muss VOR dem Warten stehen und am
+# Puffer haengen, nicht an der fertigen Zeile: eine Zeile ohne \n waechst
+# sonst unbegrenzt, und genau das soll die Grenze verhindern.
+proc mdserver::coGets {chan _line {max 0}} {
     upvar 1 $_line line
     while {1} {
         set n [gets $chan line]
-        if {$n >= 0} { return $n }
+        if {$n >= 0} {
+            if {$max > 0 && $n > $max} { return -2 }
+            return $n
+        }
         if {[eof $chan]} { return -1 }
+        if {$max > 0 && [chan pending input $chan] > $max} { return -2 }
         if {[yield] eq "TIMEOUT"} { return -1 }
     }
 }
@@ -81,13 +97,16 @@ oo::class create mdserver::Request {
 
     variable _method _path _query _headers _params
 
-    constructor {chan} {
+    # maxline: Bytes je Zeile (Anfragezeile und jede Kopfzeile).
+    # maxheader: Summe aller Kopfzeilen. 0 heisst ohne Grenze.
+    # Beide mit Vorgabe, damit vorhandene Aufrufe unveraendert bleiben.
+    constructor {chan {maxline 8190} {maxheader 16384}} {
         set _method  ""
         set _path    ""
         set _query   ""
         set _headers {}
         set _params  {}
-        my _parse $chan
+        my _parse $chan $maxline $maxheader
     }
 
     # Public accessors
@@ -113,25 +132,46 @@ oo::class create mdserver::Request {
     }
 
     # Private: read request line + headers
-    method _parse {chan} {
+    method _parse {chan maxline maxheader} {
         # Request line (coroutine, non-blocking)
-        if {[mdserver::coGets $chan requestLine] < 0} {
-            throw {MDDOCS BADREQUEST} {connection closed/timeout}
-        }
+        set n [mdserver::coGets $chan requestLine $maxline]
+        if {$n == -2} { throw {MDDOCS URITOOLONG} "request line over $maxline bytes" }
+        if {$n < 0}   { throw {MDDOCS BADREQUEST} {connection closed/timeout} }
 
         # Headers until blank line
+        set summe 0
         while {1} {
-            if {[mdserver::coGets $chan line] < 0} break
+            set n [mdserver::coGets $chan line $maxline]
+            if {$n == -2} { throw {MDDOCS HEADERTOOBIG} "header line over $maxline bytes" }
+            if {$n < 0} break
             set line [string trimright $line]
             if {$line eq ""} break
+            incr summe [string length $line]
+            if {$maxheader > 0 && $summe > $maxheader} {
+                throw {MDDOCS HEADERTOOBIG} "headers over $maxheader bytes"
+            }
             if {[regexp {^([^:]+):\s*(.*)$} $line -> k v]} {
                 dict set _headers [string tolower $k] $v
             }
         }
 
         # Method + URL
+        #
+        # Zwei verschiedene Faelle, die bis 0.3.1 beide gleich endeten -- die
+        # Verbindung wurde ohne Antwort geschlossen, der Klient sah "empty
+        # reply". Ein POST ist aber kein kaputter Aufruf, sondern ein
+        # verstandener mit einer Methode, die es hier nicht gibt: 405 mit
+        # "Allow: GET, HEAD" (RFC 9110 15.5.6).
         if {![regexp {^(GET|HEAD)\s+(/[^\s]*)\s+HTTP} $requestLine \
                 -> _method rawUrl]} {
+            if {[regexp {^([A-Z]+)\s+(/[^\s]*)\s+HTTP} $requestLine -> m u]} {
+                set _method $m
+                set _path $u
+                # Die Methode steht im Fehlercode, der Pfad in der Meldung:
+                # geworfen wird hier im Konstruktor, also gibt es noch kein
+                # Request-Objekt, an dem der Aufrufer den Pfad ablesen koennte.
+                throw [list MDDOCS METHOD $m] $u
+            }
             throw {MDDOCS BADREQUEST} "Invalid request line: $requestLine"
         }
 
@@ -337,6 +377,13 @@ oo::class create mdserver::Server {
         # Defaults
         array set opts {
             port    8080
+            bind    ""
+            dotfiles 0
+            trustedproxy ""
+            maxline    8190
+            maxheader  16384
+            healthpath "/__mdserver/health"
+
             root    "."
             theme   "hell"
             title   "mdserver"
@@ -398,11 +445,22 @@ oo::class create mdserver::Server {
         }
 
         # HTTP
+        #
+        # bind: an welche Adresse. Leer heisst alle Schnittstellen -- das war
+        # bis 0.3.1 die einzige Moeglichkeit, und der Steuerport war die
+        # einzige Stelle mit -myaddr. Steht mdserver hinter einem nginx, das
+        # die Anmeldung macht, muss der HTTP-Port auf 127.0.0.1 liegen: sonst
+        # ist er von aussen offen UND unangemeldet, und die Anmeldung haengt
+        # allein an der Firewall. (Ein LAN-Konzept vom 28.09.2026 nannte eine
+        # Option --bind, die es damals nicht gab.)
+        set myaddr {}
+        if {[my cfg bind] ne ""} { set myaddr [list -myaddr [my cfg bind]] }
         try {
             set _httpSock [socket -server [list [self object] handleRequest] \
-                [my cfg port]]
+                {*}$myaddr [my cfg port]]
         } on error {err} {
-            error "Cannot bind to HTTP port [my cfg port]: $err"
+            set wo [expr {[my cfg bind] eq "" ? "" : " on [my cfg bind]"}]
+            error "Cannot bind to HTTP port [my cfg port]$wo: $err"
         }
 
         # HTTPS
@@ -422,7 +480,7 @@ oo::class create mdserver::Server {
                 set _httpsSock [tls::socket \
                     -server [list [self object] handleRequest] \
                     -command [list [self object] tlsEvent] \
-                    [my cfg tlsport]]
+                    {*}$myaddr [my cfg tlsport]]
             } on error {err} {
                 error "Cannot start HTTPS on port [my cfg tlsport]: $err"
             }
@@ -729,9 +787,64 @@ $bar[string range $html [expr {$e + 1}] end]"
     }
 
     # Clean shutdown: close listeners + open connections, end the loop.
+    # Sauber beenden: nur die HORCHSOCKETS zu, damit keine neue Verbindung
+    # mehr dazukommt. Laufende Antworten bleiben stehen -- auf die wartet
+    # _beendeSanft.
+    #
+    # Bis 0.4 rief shutdown my stop, und das schliesst alle offenen
+    # Verbindungen sofort und leert _conns. Danach kann kein Warten mehr
+    # greifen: wer gerade eine grosse PDF holte, bekam sie mitten im Byte
+    # abgeschnitten, und zwar bei jedem systemctl restart.
     method shutdown {} {
-        my stop
+        catch { close $_httpSock  }
+        catch { close $_httpsSock }
+        catch { close $_ctrlSock  }
+        set _httpSock  ""
+        set _httpsSock ""
+        set _ctrlSock  ""
         catch { set ::mdserver::running 0 }
+    }
+
+    # Eine Antwort auf den Steuerport -- blockierend geschrieben.
+    #
+    # Das ist eine Haertung, KEINE Fehlerbehebung: 0.3.4 hat hier schon
+    # richtig geantwortet. Dass es zunaechst anders aussah, lag am Klienten,
+    # nicht am Server -- OpenBSD-netcat, das Standard-nc auf Debian, schliesst
+    # die Senderichtung nach EOF auf stdin nicht und wartet weiter:
+    #
+    #     echo ping | nc    127.0.0.1 8099   -> leer, laeuft in den Timeout
+    #     echo ping | nc -N 127.0.0.1 8099   -> pong
+    #
+    # Deshalb liegt mdctl.tcl daneben, und deshalb steht in der Startmeldung
+    # nicht mehr "echo stop | nc". Hier sind es wenige Bytes auf eine
+    # Loopback-Verbindung und der Steuerport ist kein Lastpfad, also ist
+    # blockierend einfacher und ohne Nachteil.
+    method _ctrlAntwort {chan text} {
+        catch {
+            fconfigure $chan -blocking 1
+            puts $chan $text
+            flush $chan
+        }
+        catch {close $chan}
+    }
+
+    # Laufende Antworten zu Ende bringen, dann beenden. Ein hartes exit mitten
+    # in einer grossen PDF liefert dem Leser eine halbe Datei.
+    method _beendeSanft {{restMs 5000}} {
+        if {[dict size $_conns] == 0} {
+            my _log "shutdown: fertig"
+            exit 0
+        }
+        if {$restMs <= 0} {
+            my _log "shutdown: [dict size $_conns] Verbindung(en) abgeschnitten"
+            my stop
+            exit 0
+        }
+        # namespace code, nicht [list [self object] _beendeSanft ...]: eine
+        # private Methode ist von aussen nicht aufrufbar, und ein after-Skript
+        # laeuft aussen. Gemessen als
+        #   Background error: unknown method "_beendeSanft"
+        after 100 [namespace code [list my _beendeSanft [expr {$restMs - 100}]]]
     }
 
     # Control connection (localhost): one line, one command (stop|ping).
@@ -747,13 +860,13 @@ $bar[string range $html [expr {$e + 1}] end]"
         set cmd [string tolower [string trim $line]]
         switch -- $cmd {
             stop {
-                catch { puts $chan "stopping"; flush $chan; close $chan }
+                my _ctrlAntwort $chan "stopping"
                 my _log "control: stop"
                 my shutdown
-                after 150 { exit 0 }
+                my _beendeSanft
             }
-            ping    { catch { puts $chan "pong"; flush $chan; close $chan } }
-            default { catch { puts $chan "commands: stop ping"; flush $chan; close $chan } }
+            ping    { my _ctrlAntwort $chan "pong" }
+            default { my _ctrlAntwort $chan "commands: stop ping" }
         }
     }
 
@@ -782,12 +895,26 @@ $bar[string range $html [expr {$e + 1}] end]"
         chan event $chan readable [info coroutine]
         set tid [after [my cfg timeout] [list catch [list [info coroutine] TIMEOUT]]]
 
+        # Fuer die Protokollzeile, die am Ende entsteht. Ohne verstandene
+        # Anfragezeile bleibt es bei "- -".
+        set woher   $addr
+        set methode "-"
+        set pfad    "-"
+
         try {
-            set req [mdserver::Request new $chan]
+            set req [mdserver::Request new $chan [my cfg maxline] [my cfg maxheader]]
             after cancel $tid
             chan event $chan readable {}
 
-            my _log "[$req method] [$req path]"
+            # HEAD: derselbe Kopf wie bei GET, aber kein Koerper (RFC 9110
+            # 9.3.2). Der Merker haengt am Kanal, siehe _koerper.
+            variable _nurKopf
+            set _nurKopf($chan) [expr {[$req method] eq "HEAD"}]
+
+            set xff [string trim [my _woher $addr $req]]
+            if {$xff ne ""} { set woher $xff }
+            set methode [$req method]
+            set pfad    [$req path]
 
             set theme [$req param theme [my cfg theme]]
             set toc   [$req param toc   [my cfg toc]]
@@ -796,15 +923,69 @@ $bar[string range $html [expr {$e + 1}] end]"
 
             my _dispatch $chan $req $path $theme $toc $style
 
+        } trap {MDDOCS METHOD} {u opts} {
+            set methode [lindex [dict get $opts -errorcode] 2]
+            set pfad    $u
+            my _send $chan "405 Method Not Allowed" "text/html; charset=utf-8" \
+                "<html><body><h1>405 Method Not Allowed</h1><p>mdserver liest nur: GET, HEAD.</p></body></html>" \
+                {Allow {GET, HEAD}}
+        } trap {MDDOCS URITOOLONG} {m} {
+            if {$methode eq "-"} { set methode "?" }
+            # Eine ueberlange Anfragezeile: der Klient soll es erfahren, nicht
+            # raten. 414, und der Puffer waechst nicht weiter (RFC 9110 15.5.15).
+            my _notiz $chan $m
+            my _send $chan "414 URI Too Long" "text/html; charset=utf-8" \
+                "<html><body><h1>414 URI Too Long</h1></body></html>"
+        } trap {MDDOCS HEADERTOOBIG} {m} {
+            if {$methode eq "-"} { set methode "?" }
+            my _notiz $chan $m
+            my _send $chan "431 Request Header Fields Too Large" "text/html; charset=utf-8" \
+                "<html><body><h1>431 Request Header Fields Too Large</h1></body></html>"
         } trap {MDDOCS BADREQUEST} {} {
             # Broken connection / timeout / invalid request -- ignore silently
         } on error {msg} {
-            my _log "  -> bgerror: $msg"
+            my _notiz $chan "bgerror: $msg"
             puts stderr "mdserver bgerror: $msg"
         } finally {
             after cancel $tid
+            # Eine Zeile je Anfrage, erst hier: vorher sind Status und Bytes
+            # nicht bekannt. Eine Verbindung ohne verstandene Anfragezeile
+            # (BADREQUEST) bekommt keine -- da gibt es nichts zu protokollieren.
+            if {$methode ne "-"} { my _zeile $chan $woher $methode $pfad }
+            my _zeileWeg $chan
+            variable _nurKopf
+            unset -nocomplain _nurKopf($chan)
             my _flushClose $chan
         }
+    }
+
+    # Wer hat geholt? Hinter einem Proxy steht als Gegenstelle immer dessen
+    # Adresse, also braucht man X-Forwarded-For -- aber den setzt der Proxy
+    # nur DAVOR, anhaengen kann ihn jeder. Bis 0.3.1 glaubte mdserver ihn
+    # ungeprueft: ein direktes
+    #
+    #     curl -H "X-Forwarded-For: 9.9.9.9" http://server:8080/
+    #
+    # schrieb 9.9.9.9 ins Protokoll. Eine falsche Angabe ist schlechter als
+    # keine. Seit 0.3.2 wird der Kopf nur gelesen, wenn die GEGENSTELLE in
+    # --trusted-proxy steht; Vorgabe leer heisst: gar nicht.
+    #
+    # Verglichen wird auf genaue Uebereinstimmung, keine Netzmasken -- ein
+    # halb verstandenes CIDR waere hier schlimmer als keins. Wer dem Loopback
+    # traut, traut damit allem, was auf demselben Rechner laeuft.
+    method _woher {addr req} {
+        if {[lsearch -exact [my cfg trustedproxy] $addr] < 0} { return "" }
+        set woher ""
+        catch {
+            set xff [$req header X-Forwarded-For]
+            if {$xff ne ""} {
+                # Nur der ERSTE Eintrag: alles dahinter hat der Klient selbst
+                # mitgebracht, der Proxy haengt seinen Teil hinten an.
+                set erste [string trim [lindex [split $xff ,] 0]]
+                if {[regexp {^[0-9a-fA-F.:]+$} $erste]} { set woher "$erste " }
+            }
+        }
+        return $woher
     }
 
     # Drain output buffer non-blocking, then close (never blocks the loop)
@@ -826,10 +1007,31 @@ $bar[string range $html [expr {$e + 1}] end]"
     # Routing
     method _dispatch {chan req urlPath theme toc {style plain}} {
         try {
+            # Health: fuer nginx, systemd, Ueberwachung.
+            #
+            # Er prueft eine Sache, statt nur zu bestaetigen, dass der Prozess
+            # lebt: ist die Wurzel noch ein lesbares Verzeichnis? Ein
+            # Health-Endpunkt, der immer 200 sagt, meldet "gesund", wenn
+            # --root auf einen nicht mehr eingehaengten Pfad zeigt -- nginx
+            # schaltet dann auf einen Server, der fuer alles 404 liefert.
+            #
+            # Keine Systeminformationen: nur ok oder der Grund.
+            if {$urlPath eq [my cfg healthpath]} {
+                set wurzel [my cfg root]
+                if {[file isdirectory $wurzel] && [file readable $wurzel]} {
+                    my _send $chan "200 OK" "text/plain; charset=utf-8" "ok\n"
+                } else {
+                    my _notiz $chan "root nicht lesbar"
+                    my _send $chan "503 Service Unavailable" "text/plain; charset=utf-8" \
+                        "root unreadable\n"
+                }
+                return
+            }
+
             # Site index of all documents
             if {[$req param nav ""] eq "index"} {
                 set html [$_renderer siteIndex [my cfg root] $theme [my _styleCss $style]]
-                my _log "  -> 200 (site index)"
+                my _notiz $chan "site index"
                 my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
                 return
             }
@@ -850,11 +1052,11 @@ $bar[string range $html [expr {$e + 1}] end]"
                 if {[file exists $indexFile]} {
                     set html [$_renderer markdown $indexFile $theme $toc [my _styleCss $style]]
                     set html [my _injectBookNav $html $indexFile $style]
-                    my _log "  -> 200 (index.md)"
+                    my _notiz $chan "index.md"
                     my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
                 } else {
                     set html [$_renderer index $fsPath $urlPath $theme [my _styleCss $style]]
-                    my _log "  -> 200 (directory index)"
+                    my _notiz $chan "directory index"
                     my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
                 }
 
@@ -867,7 +1069,7 @@ $bar[string range $html [expr {$e + 1}] end]"
                     set html [$_renderer markdown $fsPath $theme $toc [my _styleCss $style]]
                     set html [my _injectChapterNav $html $fsPath]
                     set html [my _injectBookNav $html $fsPath $style]
-                    my _log "  -> 200 (markdown)"
+                    my _notiz $chan markdown
                     my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
                 } else {
                     set mime [my _mime $ext]
@@ -876,30 +1078,96 @@ $bar[string range $html [expr {$e + 1}] end]"
             }
 
         } trap {MDDOCS TRAVERSAL} {msg} {
-            my _log "  -> 403 ($msg)"
+            my _notiz $chan $msg
             my _send $chan "403 Forbidden" "text/html; charset=utf-8" \
                 "<html><body><h1>403 Forbidden</h1><p>$msg</p></body></html>"
         } trap {MDDOCS NOTFOUND} {msg} {
-            my _log "  -> 404"
             my _send $chan "404 Not Found" "text/html; charset=utf-8" \
                 "<html><body><h1>404 Not Found</h1><p>$msg</p></body></html>"
         } trap {POSIX ENOENT} {} {
-            my _log "  -> 404 (ENOENT)"
+            my _notiz $chan ENOENT
             my _send $chan "404 Not Found" "text/html; charset=utf-8" \
                 "<html><body><h1>404 Not Found</h1></body></html>"
         } on error {msg info} {
-            my _log "  -> 500: $msg"
+            my _notiz $chan $msg
             my _send $chan "500 Internal Server Error" "text/html; charset=utf-8" \
                 "<html><body><h1>500 Internal Server Error</h1><pre>$msg</pre></body></html>"
         }
     }
 
     # Helper methods
+
+    # _unterhalb wurzel pfad -- liegt pfad wirklich unter wurzel?
+    #
+    # "string match ${root}*" war zu grosszuegig: bei der Wurzel /srv/md haette
+    # auch /srv/mdxyz gepasst. Verglichen wird darum bis zum Trennzeichen.
+    method _unterhalb {root path} {
+        if {$path eq $root} { return 1 }
+        return [string match "[string trimright $root /]/*" $path]
+    }
+
+    # _resolveLinks pfad -- Symlinks Schritt fuer Schritt aufloesen.
+    #
+    # Tcls "file normalize" loest "." und ".." auf, aber KEINE Symlinks. Ein
+    # Verweis in der Wurzel fuehrt damit hinaus, und die Pruefung darueber
+    # sieht es nicht, weil sie die Zeichenkette prueft und nicht das Ziel.
+    # Gemessen am 28.09.2026: /link.txt -> /tmp/geheim.txt kam mit 200 zurueck,
+    # und /tmplink/... lief durch einen Verweis auf /tmp. Windows-Klienten
+    # koennen ueber SMB gewoehnlich keine Symlinks anlegen -- "rsync -a" von
+    # der Arbeitsstation nimmt sie aber mit, und genau so wird der Bestand
+    # befuellt.
+    #
+    # max begrenzt die Runden: ein Verweis auf sich selbst wuerde sonst ewig
+    # laufen. Danach bleibt der Pfad, wie er ist, und die Pruefung unten
+    # entscheidet.
+    method _resolveLinks {path {max 32}} {
+        set p [file normalize $path]
+        for {set runde 0} {$runde < $max} {incr runde} {
+            set teile [file split $p]
+            set bisher [lindex $teile 0]
+            set geaendert 0
+            for {set i 1} {$i < [llength $teile]} {incr i} {
+                set bisher [file join $bisher [lindex $teile $i]]
+                if {[catch {file type $bisher} typ]} break
+                if {$typ ne "link"} continue
+                if {[catch {file readlink $bisher} ziel]} break
+                if {[file pathtype $ziel] ne "absolute"} {
+                    set ziel [file join [file dirname $bisher] $ziel]
+                }
+                set rest [lrange $teile [expr {$i + 1}] end]
+                set p [file normalize [file join $ziel {*}$rest]]
+                set geaendert 1
+                break
+            }
+            if {!$geaendert} break
+        }
+        return $p
+    }
+
     method _safePath {urlPath} {
         set root [my cfg root]
         set path [file normalize [file join $root [string trimleft $urlPath /]]]
-        if {![string match "${root}*" $path]} {
+        if {![my _unterhalb $root $path]} {
             throw {MDDOCS TRAVERSAL} "Directory traversal blocked: $urlPath"
+        }
+        # Punkt-Dateien und -Ordner.
+        #
+        # Die Verzeichnisliste zeigt sie ohnehin nicht (Tcls "glob *" laesst
+        # sie aus), der direkte Aufruf lieferte sie aber aus: GET /.git/HEAD
+        # kam am 28.09.2026 mit 200 und dem Inhalt zurueck. Wer seinen Bestand
+        # aus einem Arbeitsbaum rsynct, bringt das .git mit -- und dann liegt
+        # der ganze Verlauf im Browser. --dotfiles 1 fuer den, der es braucht.
+        if {![my cfg dotfiles]} {
+            foreach teil [file split [string trimleft $urlPath /]] {
+                if {[string match ".?*" $teil]} {
+                    throw {MDDOCS TRAVERSAL} "hidden files are not served: $urlPath"
+                }
+            }
+        }
+        # und erst jetzt die Verweise
+        set echt [my _resolveLinks $path]
+        if {![my _unterhalb $root $echt]} {
+            throw {MDDOCS TRAVERSAL} "a symlink leaves the document root: $urlPath"
         }
         return $path
     }
@@ -925,15 +1193,89 @@ $bar[string range $html [expr {$e + 1}] end]"
         return [clock format $t -format "%a, %d %b %Y %H:%M:%S GMT" -gmt 1]
     }
 
+    # Den Koerper schreiben -- ausser die Anfrage war HEAD.
+    #
+    # RFC 9110 9.3.2: die Antwort auf HEAD ist identisch mit der auf GET, nur
+    # OHNE Koerper. Content-Length bleibt also die Laenge, die ein GET
+    # geliefert haette -- sie wird hier nicht angefasst, nur das Schreiben
+    # faellt aus. Bis 0.3.1 kam der Koerper mit, obwohl der Allow-Kopf HEAD
+    # ausdruecklich zusagt.
+    #
+    # Der Merker haengt am Kanal, nicht am Objekt: es bedienen mehrere
+    # Coroutinen gleichzeitig dasselbe Server-Objekt, eine Objektvariable
+    # wuerde zwischen ihnen ueberschrieben.
+    method _koerper {chan daten} {
+        variable _nurKopf
+        if {[info exists _nurKopf($chan)] && $_nurKopf($chan)} { return }
+        puts -nonewline $chan $daten
+    }
+
+    # Status und Laenge fuer die Protokollzeile festhalten. Sie entsteht erst
+    # am Ende der Anfrage -- vorher ist der Status nicht bekannt.
+    method _merken {chan status len} {
+        variable _antwort
+        set _antwort($chan) [list [lindex [split $status] 0] $len]
+    }
+
+    # Eine kurze Notiz, die in der Protokollzeile hinten anhaengt: was sonst
+    # verloren waere -- markdown, der Bereich bei 206, der Grund bei 403.
+    method _notiz {chan text} {
+        variable _notizen
+        set _notizen($chan) $text
+    }
+
+    # Die Protokollzeile. Eine je Anfrage, am Ende geschrieben -- vorher sind
+    # Status und Bytes nicht bekannt. Bis 0.3.4 waren es zwei Zeilen, und die
+    # Bytes standen nur bei statischen Dateien; Markdown hatte keine.
+    #
+    #   [01:30:12] 127.0.0.1 GET /index.md 200 6104 markdown
+    #   [01:30:12] 192.168.17.42 GET /handbuch.pdf 206 65536 bytes 0-65535/2400000
+    #
+    # Die Adresse ist die Gegenstelle, oder der erste X-Forwarded-For-Eintrag,
+    # wenn die Gegenstelle in --trusted-proxy steht.
+    method _zeile {chan woher methode pfad} {
+        variable _antwort
+        variable _notizen
+        lassign [expr {[info exists _antwort($chan)] ? $_antwort($chan) : {- -}}] status bytes
+        set text "$woher $methode $pfad $status $bytes"
+        if {[info exists _notizen($chan)] && $_notizen($chan) ne ""} {
+            append text " $_notizen($chan)"
+        }
+        my _log $text
+    }
+
+    method _zeileWeg {chan} {
+        variable _antwort
+        variable _notizen
+        unset -nocomplain _antwort($chan) _notizen($chan)
+    }
+
     # Write status line + headers (no body). extra = list of "Name: Value".
     method _sendHead {chan status contentType len extra} {
+        my _merken $chan $status $len
         puts $chan "HTTP/1.1 $status"
         puts $chan "Content-Type: $contentType"
         puts $chan "Content-Length: $len"
         foreach h $extra { puts $chan $h }
         puts $chan "Connection: close"
-        puts $chan "Server: mdserver/0.5"
+        puts $chan "Server: $::mdserver::serverHeader"
         puts $chan ""
+    }
+
+    # Passt der If-Range-Validator auf diese Datei?
+    #
+    # Nur ein Datums-Validator kann passen, und nur auf die Sekunde genau:
+    # mdserver setzt keine ETags, also ist alles in ETag-Form (" oder W/) ein
+    # Validator, den dieser Server nie ausgegeben hat. "Passt nicht" ist die
+    # sichere Antwort -- sie fuehrt zum ganzen Inhalt, nie zu einem Stueck aus
+    # der falschen Fassung.
+    #
+    # Bewusst ohne expr auf dem Wert: expr rechnet mit einem Zweig, der wie
+    # eine Zahl aussieht.
+    method _ifRangePasst {ifr mtime} {
+        if {[string index $ifr 0] eq "\"" || [string match "W/*" $ifr]} { return 0 }
+        if {[catch {clock scan $ifr -gmt 1} t]} { return 0 }
+        return [expr {$t == $mtime}]
     }
 
     # Serve a static file: Conditional GET (304) + Range (206) + full (200).
@@ -945,13 +1287,39 @@ $bar[string range $html [expr {$e + 1}] end]"
         # Conditional GET
         set ims [$req header if-modified-since]
         if {$ims ne "" && ![catch {clock scan $ims -gmt 1} imsT] && $mtime <= $imsT} {
-            my _log "  -> 304 (not modified)"
+            my _notiz $chan "not modified"
             my _sendHead $chan "304 Not Modified" $mime 0 [list "Last-Modified: $lastmod"]
             return
         }
 
         # Range
         set range [$req header range]
+
+        # If-Range: der Bereich gilt NUR, wenn die Datei noch dieselbe ist
+        # (RFC 9110 13.1.5). Passt der Validator nicht, gehoert der ganze
+        # Inhalt in die Antwort -- 200, nicht 206.
+        #
+        # Bis 0.3.2 wurde der Kopf gar nicht gelesen. Wer eine grosse PDF
+        # stueckweise holt (Adobe Reader, Chrome) und waehrenddessen speichert
+        # jemand die Datei neu, bekam Stuecke der NEUEN Datei, im
+        # Content-Range als Teil der alten ausgegeben. Der Viewer klebt daraus
+        # zwei Fassungen zusammen, ohne dass etwas darauf hinweist. Genau der
+        # Fall, wenn /srv/md ueber Samba gepflegt wird und gleichzeitig
+        # gelesen.
+        #
+        # mdserver setzt keine ETags. Ein Validator in ETag-Form (beginnt mit
+        # " oder W/) kann darum nie passen und fuehrt ebenso zum ganzen
+        # Inhalt; ein schwacher Validator ist fuer If-Range ohnehin nicht
+        # zulaessig. Ohne Range-Kopf wird If-Range ignoriert -- den Fall
+        # erledigt die Bedingung unten von selbst.
+        if {$range ne ""} {
+            set ifr [string trim [$req header if-range]]
+            if {$ifr ne "" && ![my _ifRangePasst $ifr $mtime]} {
+                my _notiz $chan "If-Range passt nicht"
+                set range ""
+            }
+        }
+
         if {[regexp {^bytes=(\d*)-(\d*)$} $range -> a b] && ($a ne "" || $b ne "")} {
             if {$a eq ""} {
                 set start [expr {$size - $b}]; if {$start < 0} { set start 0 }
@@ -963,7 +1331,7 @@ $bar[string range $html [expr {$e + 1}] end]"
                 if {$end > $size - 1} { set end [expr {$size - 1}] }
             }
             if {$start > $end || $start >= $size} {
-                my _log "  -> 416 (range)"
+                my _notiz $chan "range"
                 my _sendHead $chan "416 Range Not Satisfiable" $mime 0 \
                     [list "Content-Range: bytes */$size"]
                 return
@@ -972,79 +1340,110 @@ $bar[string range $html [expr {$e + 1}] end]"
             seek $fh $start
             set data [read $fh [expr {$end - $start + 1}]]
             close $fh
-            my _log "  -> 206 (bytes $start-$end/$size)"
+            my _notiz $chan "bytes $start-$end/$size"
             my _sendHead $chan "206 Partial Content" $mime [string length $data] \
                 [list "Accept-Ranges: bytes" "Last-Modified: $lastmod" \
                       "Content-Range: bytes $start-$end/$size"]
             fconfigure $chan -translation binary
-            puts -nonewline $chan $data
+            my _koerper $chan $data
             return
         }
 
         # Full (200)
         set data [my _readBin $fsPath]
-        my _log "  -> 200 ($size bytes, $mime)"
+        my _notiz $chan $mime
         my _sendHead $chan "200 OK" $mime [string length $data] \
             [list "Accept-Ranges: bytes" "Last-Modified: $lastmod"]
         fconfigure $chan -translation binary
-        puts -nonewline $chan $data
+        my _koerper $chan $data
     }
 
     # 301 redirect (e.g. add a trailing slash to a directory URL).
     method _redirect {chan location} {
-        my _log "  -> 301 $location"
+        my _merken $chan 301 0
+        my _notiz $chan "-> $location"
         puts $chan "HTTP/1.1 301 Moved Permanently"
         puts $chan "Location: $location"
         puts $chan "Content-Length: 0"
         puts $chan "Connection: close"
-        puts $chan "Server: mdserver/0.5"
+        puts $chan "Server: $::mdserver::serverHeader"
         puts $chan ""
     }
 
-    method _send {chan status contentType body} {
+    # extra: zusaetzliche Kopfzeilen als Paare {Name Wert Name Wert ...}.
+    # Vorgabe leer, damit alle vorhandenen Aufrufe unveraendert bleiben.
+    method _send {chan status contentType body {extra {}}} {
         set bytes [encoding convertto utf-8 $body]
         set len [string length $bytes]
+        my _merken $chan $status $len
         puts $chan "HTTP/1.1 $status"
         puts $chan "Content-Type: $contentType"
         puts $chan "Content-Length: $len"
+        foreach {name wert} $extra { puts $chan "$name: $wert" }
         puts $chan "Connection: close"
-        puts $chan "Server: mdserver/0.5"
+        puts $chan "Server: $::mdserver::serverHeader"
         puts $chan ""
         # Write the body in binary: otherwise -translation crlf expands each \n to \r\n
         # so the byte count would no longer match Content-Length -> truncation.
         chan configure $chan -translation binary
-        puts -nonewline $chan $bytes
+        my _koerper $chan $bytes
     }
 
     method _sendBin {chan status contentType data} {
         set len [string length $data]
+        my _merken $chan $status $len
         fconfigure $chan -translation binary
         puts $chan "HTTP/1.1 $status"
         puts $chan "Content-Type: $contentType"
         puts $chan "Content-Length: $len"
         puts $chan "Connection: close"
-        puts $chan "Server: mdserver/0.4"
+        puts $chan "Server: $::mdserver::serverHeader"
         puts $chan ""
-        puts -nonewline $chan $data
+        my _koerper $chan $data
     }
 
     method _log {msg} {
         if {[my cfg log]} {
             puts "\[[clock format [clock seconds] -format "%H:%M:%S"]\] $msg"
+            # In eine Datei oder Pipe umgelenkt puffert Tcl seitenweise. Genau
+            # so laeuft der Dienst unter systemd -- ohne flush steht die
+            # letzte Anfrage erst Kilobytes spaeter im Protokoll.
+            flush stdout
         }
     }
 
+    # Die Startmeldung sagte bis 0.3.4 immer "http://localhost:PORT/" -- auch
+    # wenn ohne --bind an ALLE Schnittstellen gebunden wurde. Genau im
+    # gefaehrlichen Fall behauptete sie also das Gegenteil: "localhost" liest
+    # sich wie "nur hier". Jetzt steht die Adresse da, an die wirklich
+    # gebunden wurde.
+    method _horchtAuf {port} {
+        set adr [my cfg bind]
+        if {$adr eq ""} { return "0.0.0.0:$port (alle Schnittstellen)" }
+        return "$adr:$port"
+    }
+
     method _printStatus {} {
-        puts "mdserver 0.4 -- Tcl Markdown Server"
+        set adr [my cfg bind]
+        set url [expr {$adr eq "" ? "localhost" : $adr}]
+        puts "$::mdserver::serverHeader -- Tcl Markdown Server"
         puts "  Root:  [my cfg root]"
         puts "  Theme: [my cfg theme]"
         puts ""
-        puts "  HTTP:  http://localhost:[my cfg port]/"
+        puts "  HTTP:  [my _horchtAuf [my cfg port]]"
+        puts "         http://$url:[my cfg port]/"
         if {[my cfg tls]} {
-            puts "  HTTPS: https://localhost:[my cfg tlsport]/"
+            puts "  HTTPS: [my _horchtAuf [my cfg tlsport]]"
+            puts "         https://$url:[my cfg tlsport]/"
             puts "  Cert:  [my cfg cert]"
         } else {
             puts "  HTTPS: nicht aktiv (--cert und --key angeben)"
+        }
+        if {[my cfg control] ne ""} {
+            # Nicht "echo stop | nc ..." vorschlagen: OpenBSD-netcat, das
+            # Standard-nc auf Debian, wartet dort ohne -N bis zum Timeout.
+            puts "  Stop:  127.0.0.1:[my cfg control]"
+            puts "         tclsh mdctl.tcl --port [my cfg control] stop"
         }
         puts ""
         puts "Press Ctrl+C to stop."
