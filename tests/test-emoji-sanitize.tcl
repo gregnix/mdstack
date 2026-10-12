@@ -12,9 +12,11 @@
 set scriptDir [file dirname [file normalize [info script]]]
 source [file join $scriptDir _paths.tcl]
 
-# Self-skip ohne pdf4tcllib
+# Self-skip ohne pdf4tcllib. Laeuft in eigenem Interpreter (all.tcl,
+# runTcltest); die Bilanzzeile im tcltest-Format zaehlt dort den Skip.
 if {[catch {package require pdf4tcllib 0.1}]} {
     puts "SKIP test-emoji-sanitize.tcl: pdf4tcllib not available"
+    puts "test-emoji-sanitize.tcl:\tTotal\t1\tPassed\t0\tSkipped\t1\tFailed\t0"
     exit 0
 }
 
@@ -179,3 +181,6 @@ if {$emoji_failed == 0} {
 } else {
     puts "\n$emoji_failed FEHLER"
 }
+# Bilanz im tcltest-Format (von all.tcl ausgewertet) und Exit-Code
+puts "test-emoji-sanitize.tcl:\tTotal\t[expr {$emoji_passed + $emoji_failed}]\tPassed\t$emoji_passed\tSkipped\t0\tFailed\t$emoji_failed"
+exit [expr {$emoji_failed > 0 ? 1 : 0}]

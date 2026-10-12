@@ -213,6 +213,7 @@ if {$runGui} {
         puts "\n--- C. GUI/Tk ---"
         runTcltest $dir {
             mdtext.tcl
+            uicontextmenu.tcl
             ui-smoke-mdeditorkit.tcl
             ui-smoke-mdeditwidget.tcl
             ui-parser-error.tcl
@@ -235,11 +236,17 @@ if {$runGui} {
 if {$runPdf} {
     if {![catch {package require pdf4tcl}]} {
         puts "\n--- D. PDF/Export ---"
-        runAssert $dir {
+        # Both files end with "exit" (self-skip, result). Sourced via
+        # runAssert, that exit ended this runner with code 0 -- without
+        # the remaining groups and without GESAMT. Hence each runs in its
+        # own interpreter: test-emoji-sanitize prints a tcltest-style
+        # summary line (counted, failures reported), test-emoji-pdf is
+        # judged by its exit code.
+        runTcltest $dir {
             test-emoji-sanitize.tcl
-            test-emoji-pdf.tcl
         }
         runCustom $dir {
+            test-emoji-pdf.tcl
             test-toc.tcl
         }
     } else {

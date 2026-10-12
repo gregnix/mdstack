@@ -4,12 +4,19 @@
 # Eigene Module aus dem Repo (Tests laufen aus dem Repo)
 if {![info exists ::_setup_done]} {
     lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
+    # docir suchen (mdstack::pdf ist Adapter auf docir::pdf)
+    source [file join [file dirname [info script]] _paths.tcl]
     set ::_setup_done 1
 }
 
 
 package require mdstack::parser 0.2
-package require mdstack::pdf 0.2
+# Self-skip ohne docir/pdf4tcl (mdstack::pdf) oder pdf4tcllib (docir::pdf)
+if {[catch {package require mdstack::pdf 0.2}]
+        || [catch {package require pdf4tcllib}]} {
+    puts "SKIP test-toc.tcl: docir/pdf4tcl/pdf4tcllib not available"
+    exit 0
+}
 
 set markdown {
 # Heading 1

@@ -4,8 +4,8 @@
 
 ## Purpose
 
-`mdstack::indexgen` builds and updates `index.md` and `indexsub.md` in a
-Markdown directory tree. Generated sections sit inside HTML comments so
+`mdstack::indexgen` builds and updates `index.md` in each directory of a
+Markdown directory tree (documents first, then non-empty subdirectories). Generated sections sit inside HTML comments so
 manual text before/after the blocks is kept.
 
 ```
@@ -23,17 +23,13 @@ manual text before/after the blocks is kept.
 
 ### `mdstack::indexgen::scan dir ?-verbose 0? ?-dryrun 0?`
 
-Recursively create/update `index.md` and `indexsub.md`.
+Recursively create/update `index.md` in `dir` and all subdirectories.
 
 Returns a dict: `updated`, `unchanged`, `created`.
 
 ### `mdstack::indexgen::updateIndex dir ?-dryrun 0?`
 
 Only `index.md` in that directory.
-
-### `mdstack::indexgen::updateSub dir ?-dryrun 0?`
-
-Only `indexsub.md`.
 
 ### `mdstack::indexgen::readTitle file`
 

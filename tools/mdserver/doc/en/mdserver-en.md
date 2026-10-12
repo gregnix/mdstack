@@ -1,6 +1,6 @@
 # mdserver
 
-> Version 0.2 (module) -- concurrent (coroutine), slow-loris resistant,
+> Version 0.4 (module) -- concurrent (coroutine), slow-loris resistant,
 > Range / Conditional-GET, control port, TOC styles.
 
 ## Purpose
@@ -31,6 +31,7 @@ It serves Markdown files as HTML on the fly.
 | `Tcl` | 8.6 or 9 | yes |
 | `mdstack::parser` | 0.2 | yes |
 | `mdstack::html` | 0.1 | yes |
+| `docir`, `docir::mdSource`, `docir::html`, `docir::diag`, `docir::diagram` | 0.1 | yes (needed by `mdstack::html` 0.2) |
 | `mdstack::theme` | 0.1 | recommended |
 | `tls` | — | HTTPS only |
 
@@ -60,7 +61,7 @@ tclsh mdserver.tcl [options]
 | `--healthpath` | `/__mdserver/health` | Path of the health endpoint |
 | `--root` | `.` | Document root |
 | `--theme` | `hell` | Theme: `hell`, `dunkel`, `solarized` |
-| `--style` | `plain` | TOC style: `plain`, `sidebar`, `sticky`, `collapsible` |
+| `--style` | `site` | page style: `site`, `plain`, `sidebar`, `sticky`, `collapsible` |
 | `--stylesdir` | `../styles` | Directory holding the CSS styles |
 | `--navbg` | `#2c3e50` | Nav bar background color |
 | `--navfg` | `#ffffff` | Nav bar text color |
@@ -103,7 +104,8 @@ styles -- the same styles as mdhelp's HTML export:
 
 | Style | Effect |
 |-------|--------|
-| `plain` | default block at the top |
+| `site` | complete page layout: header, sidebar (book chapters or the folder), breadcrumbs, "on this page" column, folder pages as cards, light/dark -- default |
+| `plain` | TOC block at the top (the default up to 0.4) |
 | `sidebar` | fixed left sidebar, stays visible while scrolling |
 | `sticky` | TOC sticks to the top edge |
 | `collapsible` | collapsible TOC |
@@ -164,6 +166,35 @@ mdserver::Server new -root docs -navlinks {
 
 Disable with the `nav 0` option (constructor). In the sidebar style the bar is a
 fixed top bar.
+
+---
+
+## Style `site`
+
+`--style site` (or `?style=site`) does not lay a stylesheet over the rendered
+page; it takes the rendered body and builds the page around it, with one
+stylesheet (`styles/site.css`): a header with the sections, a left sidebar
+(the book's chapters with PDF/HTML downloads, or the current folder), the text
+column with breadcrumbs, and an "on this page" column for pages with at least
+three h2/h3 headings. Folders without `index.md` are shown as cards: books
+first (title and subtitle from `book.tcl`), then folders, documents (with their
+first paragraph) and other files. In books, previous/next are two cards. Narrow
+screens get a menu button for the sidebar (CSS only, no JavaScript). Dark mode
+follows the system setting, or `?theme=dunkel`. A missing page is a 404 page
+with a way back.
+
+**Search.** The header carries a search field; `/?q=words` lists the
+documents that contain all words (case-insensitive, `ae`/`oe`/`ue`/`ss` match
+the umlauts), best first (title hits weigh more), each with its folder path and
+a snippet with the words marked. The texts are read once and kept with their
+mtime; a search rereads only changed files. Dot folders and symlinks are left
+out, as for serving. The other styles answer `?q=` with a plain list.
+
+**Book landing page.** A book folder (with `book.tcl`) without `index.md` gets
+a generated one, in every style: title, subtitle, the first paragraph of the
+README, PDF/HTML downloads (bookkit's `<name>.pdf` / `.html` next to the book
+folder) and the chapter list. Before, the "Overview" link of the chapter bar
+ended in 404. `book-webindex.tcl` still writes a real `index.md` if wanted.
 
 ---
 
@@ -328,7 +359,7 @@ tools/mdserver/
   mdctl.tcl           -- control port client (stop|ping), systemd ExecStop=
   mdserver.service.beispiel -- sample systemd unit
   test/               -- test suite
-  mdserver-demo/      -- demo site
+  demo/               -- demo site (start.tcl, docs/)
 ```
 
 ---

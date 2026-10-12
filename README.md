@@ -17,7 +17,7 @@ A complete Markdown processing stack for Tcl/Tk applications.
 | `mdstack` | 0.1 | Orchestrator / stack manager |
 | `mdstack::model` | 0.1 | Document model |
 | `mdstack::validator` | 0.1 | AST validator (node walk; not `parser::validate`) |
-| `mdstack::indexgen` | 0.1 | `index.md` / `indexsub.md` in managed HTML-comment blocks |
+| `mdstack::indexgen` | 0.1 | Directory `index.md` in managed HTML-comment blocks |
 
 ### Renderers
 
@@ -125,7 +125,7 @@ an editor widget. Both remain standalone.
 |------|-------------|
 | `tools/mdserver/mdserver.tcl` | HTTP/HTTPS Markdown web server (`mdserver` 0.3) |
 | `tools/mdserver/mkcert.tcl` | TLS certificate helper |
-| `mdstack::indexgen` | Directory indexes (`index.md` / `indexsub.md`) |
+| `mdstack::indexgen` | Directory indexes (`index.md`) |
 
 ---
 

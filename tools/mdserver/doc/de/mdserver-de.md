@@ -5,7 +5,7 @@
 > For exact signatures and options refer to the English version.
 
 
-> Version 0.2 (Modul) -- nebenlaeufig (Coroutine), slow-loris-fest,
+> Version 0.4 (Modul) -- nebenlaeufig (Coroutine), slow-loris-fest,
 > Range/Conditional-GET, Control-Port, TOC-Stile.
 
 ## Zweck
@@ -36,6 +36,7 @@ Er liefert Markdown-Dateien on-the-fly als HTML aus.
 | `Tcl` | 8.6 oder 9 | ja |
 | `mdstack::parser` | 0.2 | ja |
 | `mdstack::html` | 0.1 | ja |
+| `docir`, `docir::mdSource`, `docir::html`, `docir::diag`, `docir::diagram` | 0.1 | ja (braucht `mdstack::html` 0.2) |
 | `mdstack::theme` | 0.1 | empfohlen |
 | `tls` | -- | nur fuer HTTPS |
 
@@ -65,7 +66,7 @@ tclsh mdserver.tcl [Optionen]
 | `--healthpath` | `/__mdserver/health` | Pfad des Health-Endpunkts |
 | `--root` | `.` | Dokument-Wurzel |
 | `--theme` | `hell` | Theme: `hell`, `dunkel`, `solarized` |
-| `--style` | `plain` | TOC-Stil: `plain`, `sidebar`, `sticky`, `collapsible` |
+| `--style` | `site` | Seitenstil: `site`, `plain`, `sidebar`, `sticky`, `collapsible` |
 | `--stylesdir` | `../styles` | Verzeichnis der CSS-Stile |
 | `--navbg` | `#2c3e50` | Navi-Leiste: Hintergrundfarbe |
 | `--navfg` | `#ffffff` | Navi-Leiste: Textfarbe |
@@ -124,7 +125,8 @@ Das Inhaltsverzeichnis (`<nav class="toc">`) kann verschieden dargestellt werden
 
 | Stil | Wirkung |
 |------|---------|
-| `plain` | Standard: TOC als Block oben (Default) |
+| `site` | ganzes Seitenlayout: Kopfleiste, Seitenleiste (Kapitel des Buchs oder der Ordner), Brotkrumen, Spalte "Auf dieser Seite", Ordner als Kacheln, hell/dunkel -- Standard |
+| `plain` | TOC als Block oben (bis 0.4 der Standard) |
 | `sidebar` | TOC als feste Sidebar links, bleibt beim Scrollen sichtbar |
 | `sticky` | TOC klebt oben am Fensterrand |
 | `collapsible` | TOC einklappbar |
@@ -224,6 +226,36 @@ mdserver::Server new -root docs -navlinks {
 Ausschalten mit der Config-Option `nav 0` (Konstruktor). Die Leiste wird nach
 `<body>` eingefuegt und liegt ueber die volle Breite links; im Sidebar-Stil ist
 sie eine feste Top-Leiste (`position: fixed`).
+
+---
+
+## Stil `site`
+
+`--style site` (oder `?style=site`) legt kein Stylesheet ueber die fertige Seite,
+sondern nimmt den gerenderten Inhalt und baut die Seite darum, mit einem
+Stylesheet (`styles/site.css`): Kopfleiste mit den Bereichen, links die
+Seitenleiste (Kapitel des Buchs mit PDF/HTML, sonst der aktuelle Ordner), in
+der Mitte der Text mit Brotkrumen, rechts "Auf dieser Seite" ab drei
+Ueberschriften h2/h3. Ordner ohne `index.md` erscheinen als Kacheln: zuerst
+Buecher (Titel und Untertitel aus `book.tcl`), dann Ordner, Dokumente (mit dem
+ersten Absatz) und sonstige Dateien. Im Buch sind Zurueck/Weiter zwei Kacheln.
+Schmale Bildschirme bekommen einen Menueknopf fuer die Seitenleiste (nur CSS).
+Dunkel folgt der Systemeinstellung oder `?theme=dunkel`. Eine fehlende Seite
+ist eine 404-Seite mit Weg zurueck.
+
+**Suche.** In der Kopfleiste steht ein Suchfeld; `/?q=Woerter` listet die
+Dokumente, die alle Woerter enthalten (ohne Gross/klein, `ae`/`oe`/`ue`/`ss`
+treffen die Umlaute), die besten zuerst (Treffer im Titel zaehlen mehr), mit
+Ordnerpfad und einem Ausschnitt mit markierten Woertern. Die Texte werden einmal
+gelesen und mit ihrer mtime behalten; eine Suche liest nur Geaendertes neu.
+Punkt-Ordner und Symlinks bleiben aussen vor, wie beim Ausliefern. Die anderen
+Stile beantworten `?q=` mit einer schlichten Liste.
+
+**Startseite eines Buchs.** Ein Buchordner (mit `book.tcl`) ohne `index.md`
+bekommt in jedem Stil eine erzeugte: Titel, Untertitel, erster Absatz der
+README, Downloads (bookkits `<name>.pdf` / `.html` neben dem Buchordner) und
+die Kapitelliste. Vorher fuehrte "Uebersicht" in der Kapitelleiste auf 404.
+`book-webindex.tcl` schreibt weiterhin eine echte `index.md`, wenn gewuenscht.
 
 ---
 
@@ -572,13 +604,13 @@ Fehlen sie, `styles/` neben `lib/` ablegen oder `--stylesdir` setzen.
 
 ## Demo-Site
 
-Unter `tools/mdserver/mdserver-demo/` liegt eine vollstaendige
+Unter `tools/mdserver/demo/` liegt eine vollstaendige
 Demo-Site mit Anleitungen und Feature-Uebersicht.
 
 ### Demo mit start.tcl starten
 
 ```bash
-cd tools/mdserver/mdserver-demo
+cd tools/mdserver/demo
 
 # HTTP only
 tclsh start.tcl
@@ -720,7 +752,7 @@ tools/mdserver/
   test/
     test-mdserver-oo.tcl
   doc/                  -- Diese Dokumentation
-  mdserver-demo/
+  demo/
     start.tcl           -- Demo-Startskript
     docs/               -- Demo-Inhalt
 ```
@@ -728,6 +760,16 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+### unveroeffentlicht (2026-10-04)
+
+- **`--style site`**: ganzes Seitenlayout statt uebereinanderliegender
+  Stylesheets (die Sidebar schob den Text unter eine Luecke ihrer Hoehe)
+- **Buch ohne `index.md`**: erzeugte Startseite statt 404 (in jedem Stil)
+- **Volltextsuche** `?q=` mit Suchfeld in der Kopfleiste
+- **Standardstil ist `site`**; das alte Aussehen mit `--style plain`
+- **Suche markiert gemischte Schreibweisen**: `groesse` markiert auch
+  `Grösse` und `Größe`, der Ausschnitt beginnt beim Treffer
 
 ### 0.4 (2026-09-29)
 

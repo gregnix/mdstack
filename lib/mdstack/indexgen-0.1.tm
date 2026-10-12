@@ -1,21 +1,21 @@
 # mdstack/indexgen-0.1.tm  --  package mdstack::indexgen
 #
-# Generates index.md and indexsub.md for Markdown directory trees.
-# Uses managed blocks (HTML comments) to update generated sections
-# on subsequent runs, without destroying manual content.
+# Generates index.md for each directory of a Markdown tree (documents
+# first, then non-empty subdirectories, in one list). Uses managed blocks
+# (HTML comments) to update generated sections on subsequent runs,
+# without destroying manual content. indexsub.md is not generated; the
+# name stays in the skip list so such files are never listed.
 #
 # Public API:
 #   mdstack::indexgen::scan $dir ?-verbose 0? ?-dryrun 0?
-#       Recursive: generate/update index.md + indexsub.md
+#       Recursive: generate/update index.md in $dir and all subdirectories
 #       -verbose 1: Print changes to stdout
 #       -dryrun 1:  Check only, write nothing
 #       Returns: dict with keys "updated", "unchanged", "created"
 #
 #   mdstack::indexgen::updateIndex $dir ?-dryrun 0?
-#       Only update index.md in directory
-#
-#   mdstack::indexgen::updateSub $dir ?-dryrun 0?
-#       Only update indexsub.md in directory
+#       Only update index.md in directory (no recursion)
+#       Returns: dict {file $path status created|updated|unchanged}
 #
 #   mdstack::indexgen::readTitle $file
 #       Read title from .md (YAML frontmatter or first H1, fallback: filename)

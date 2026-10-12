@@ -487,11 +487,23 @@ proc ::mdstack::uicontextmenu::createStandardEdit {path args} {
 # Spec-Format:
 #   {
 #       {label command ?-accelerator acc? ?-state state? ?-icon icon?}
+#       {label -command command ?-accelerator acc? ...}
 #       -
+#       {label -menu {submenu-spec}}
 #       {label {submenu-spec}}
 #       {check label -variable var ?-command cmd?}
 #       {radio label -variable var -value val ?-command cmd?}
 #   }
+#
+# Submenu detection:
+#   - "-menu" after the label always means a submenu, "-command" always
+#     a command entry (explicit forms, never ambiguous).
+#   - Short form {label X}: X is a submenu only if it is a well-formed
+#     spec, i.e. every element is "-" or a list of at least two words
+#     (an entry). A command such as {puts hello} or {app::save $w} starts
+#     with a one-word command name and is therefore a command entry.
+#   - An entry with options after the command ({label cmd -accelerator ..})
+#     is always a command entry.
 #
 proc ::mdstack::uicontextmenu::createFromSpec {path spec} {
     set menu [create $path]
@@ -525,26 +537,48 @@ proc ::mdstack::uicontextmenu::_buildFromSpec {menu spec} {
         
         # Normal item or submenu
         set label $first
-        set second [lindex $item 1]
-        
-        # Ist second eine Liste (Submenu)?
-        if {[llength $second] > 1 && [lindex $second 0] ni {-command -accelerator -state -icon}} {
-            # Submenu
-            set submenuPath $menu.[string map {" " _ . _} $label]
-            set submenu [create $submenuPath]
-            _buildFromSpec $submenu $second
-            addSubmenu $menu $label $submenu
-        } else {
-            # Normal entry
-            set rest [lrange $item 1 end]
-            # Command is first element, rest are options
-            if {[llength $rest] >= 1} {
-                set cmd [lindex $rest 0]
-                set opts [lrange $rest 1 end]
-                addItem $menu $label -command $cmd {*}$opts
-            }
+        set rest  [lrange $item 1 end]
+        set second [lindex $rest 0]
+
+        if {$second eq "-menu"} {
+            # Explicit submenu: {label -menu {spec}}
+            _addSubmenuFromSpec $menu $label [lindex $rest 1]
+        } elseif {$second eq "-command"} {
+            # Explicit command entry: {label -command cmd ?opts?}
+            addItem $menu $label {*}$rest
+        } elseif {[llength $rest] == 1 && [_isSpec $second]} {
+            # Short form {label {spec}}
+            _addSubmenuFromSpec $menu $label $second
+        } elseif {[llength $rest] >= 1} {
+            # Normal entry: command is the first element, rest are options.
+            # A multi-word command ({puts hello}) stays a command.
+            addItem $menu $label -command $second {*}[lrange $rest 1 end]
         }
     }
+}
+
+# _isSpec - is value a submenu spec? Every element must be a separator
+# "-" or an entry list with at least two words (label + command/spec,
+# or check/radio + label ...). A Tcl command starts with a one-word
+# command name, so {puts hello} or {app::save $w} is not a spec.
+proc ::mdstack::uicontextmenu::_isSpec {value} {
+    if {[catch {llength $value} n] || $n == 0} { return 0 }
+    foreach entry $value {
+        if {$entry eq "-"} continue
+        if {[catch {llength $entry} m] || $m < 2} { return 0 }
+    }
+    return 1
+}
+
+# _addSubmenuFromSpec - create a cascade with a generated child path.
+# The label is not used for the path: Tk window names must not start
+# with an upper-case letter and must be unique.
+proc ::mdstack::uicontextmenu::_addSubmenuFromSpec {menu label spec} {
+    set n 0
+    while {[winfo exists $menu.sub$n]} { incr n }
+    set submenu [create $menu.sub$n]
+    _buildFromSpec $submenu $spec
+    addSubmenu $menu $label $submenu
 }
 
 package provide mdstack::uicontextmenu 0.1

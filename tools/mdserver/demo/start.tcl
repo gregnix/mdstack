@@ -12,7 +12,7 @@
 #
 # --https: generates a certificate automatically via mkcert.tcl if needed.
 #          the certificate is stored in ../server.crt (tools/mdserver/)
-#          so it does not end up in mdserver-demo/.
+#          so it does not end up in demo/.
 #
 # .gitignore: server.crt and server.key should be ignored:
 #   echo "tools/mdserver/server.crt" >> .gitignore
@@ -43,7 +43,7 @@ if {$mdserverScript eq ""} {
 }
 
 # default certificate path: one level up (tools/mdserver/)
-# so server.crt/key do not end up in mdserver-demo/
+# so server.crt/key do not end up in demo/
 set certDir  [file normalize [file join $scriptDir ".."]]
 set certFile [file join $certDir server.crt]
 set keyFile  [file join $certDir server.key]

@@ -1,6 +1,6 @@
 # mdserver
 
-> Version 0.2
+> Version 0.4
 
 ## Purpose
 
@@ -23,6 +23,7 @@ It serves Markdown files as HTML on the fly.
 |---------|---------|----------|
 | `mdstack::parser` | 0.2 | yes |
 | `mdstack::html` | 0.1 | yes |
+| `docir`, `docir::mdSource`, `docir::html`, `docir::diag`, `docir::diagram` | 0.1 | yes (needed by `mdstack::html` 0.2) |
 | `mdstack::theme` | 0.1 | recommended |
 | `tls` | — | HTTPS only |
 

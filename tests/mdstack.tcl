@@ -83,6 +83,35 @@ test text-2 "setText ohne Editor" -body {
     mdstack::currentText
 } -result "new"
 
+# Regression: "return" inside catch made currentText ignore the editor
+test text-editor-1 "currentText liefert den Editor-Text" -setup {
+    set ::_edText ""
+    proc ::_edGet {} { return $::_edText }
+    proc ::_edSet {t} { set ::_edText $t }
+    proc ::_edClear {} { set ::_edText "" }
+} -body {
+    mdstack::clear
+    mdstack::push -id "doc" -text "stack" -source ""
+    mdstack::setEditorAPI -getText ::_edGet -setText ::_edSet -clear ::_edClear
+    set ::_edText "live"
+    list [catch {mdstack::currentText} r] $r
+} -cleanup {
+    array set ::mdstack::editorAPI {getText "" setText "" clear "" isModified ""}
+    mdstack::clear
+    rename ::_edGet {}; rename ::_edSet {}; rename ::_edClear {}
+    unset -nocomplain ::_edText
+} -result {0 live}
+
+test text-editor-2 "currentText faellt auf den Stack zurueck, wenn der Editor fehlschlaegt" -body {
+    mdstack::clear
+    mdstack::push -id "doc" -text "stack" -source ""
+    set ::mdstack::editorAPI(getText) ::_noSuchEditorCmd
+    list [catch {mdstack::currentText} r] $r
+} -cleanup {
+    array set ::mdstack::editorAPI {getText "" setText "" clear "" isModified ""}
+    mdstack::clear
+} -result {0 stack}
+
 test text-3 "currentSource" -body {
     mdstack::clear
     mdstack::push -id "note" -text "" -source "noteskit"

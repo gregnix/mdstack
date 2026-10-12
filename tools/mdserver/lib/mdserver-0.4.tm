@@ -218,7 +218,11 @@ oo::class create mdserver::Renderer {
     }
 
     method markdown {path theme toc {cssFile ""}} {
-        set md [my _readFile $path]
+        return [my markdownText [my _readFile $path] $theme $toc $cssFile]
+    }
+
+    # The same for Markdown text (a generated page, e.g. a book landing).
+    method markdownText {md theme toc {cssFile ""}} {
         set ast [mdstack::parser::parse $md]
         set html [mdstack::html::render $ast -theme $theme -toc $toc -lang de]
         set html [my _injectTheme $html $theme]
@@ -396,7 +400,7 @@ oo::class create mdserver::Server {
             tlsport 8443
             timeout 15000
             control ""
-            style      "plain"
+            style      "site"
             stylesdir  ""
             navbg      "#2c3e50"
             navfg      "#ffffff"
@@ -513,6 +517,7 @@ oo::class create mdserver::Server {
         set dir [my cfg stylesdir]
         if {$dir eq ""} { set dir [file join $::mdserver::moduleDir .. styles] }
         switch -- $style {
+            site        { set f site.css }
             sidebar     { set f sidebar.css }
             sticky      { set f sticky-top.css }
             collapsible { set f collapsible.css }
@@ -1005,6 +1010,661 @@ $bar[string range $html [expr {$e + 1}] end]"
     }
 
     # Routing
+    # ------------------------------------------------------------------
+    # Style "site": one layout instead of stacked stylesheets.
+    #
+    # The other styles put a stylesheet over docir's page and make <body>
+    # a grid -- every body child became a grid cell, so a long sidebar
+    # pushed the text below a gap the height of the sidebar. "site" takes
+    # only the rendered body and builds the page itself: header, sidebar
+    # (book chapters or the folder), main column with breadcrumbs, an
+    # "on this page" column for long pages. CSS-only, no JavaScript.
+    # ------------------------------------------------------------------
+
+    method _esc {s} {
+        return [string map {& &amp; < &lt; > &gt; \" &quot;} $s]
+    }
+
+    # Inner HTML of <body>, and the <title>.
+    method _bodyOf {html} {
+        if {[regexp {(?s)<body[^>]*>(.*)</body>} $html -> inner]} { return $inner }
+        return $html
+    }
+
+    # book.tcl as data (safe interp): dict title subtitle lang date chapters.
+    method _bookMeta {dir} {
+        set meta [dict create title "" subtitle "" lang "" date "" chapters {}]
+        set bt [file join $dir book.tcl]
+        if {![file exists $bt]} { return $meta }
+        set ip [interp create -safe]
+        catch {
+            set fh [open $bt r]; fconfigure $fh -encoding utf-8
+            set script [read $fh]; close $fh
+            interp eval $ip $script
+            foreach k {title subtitle lang date chapters} {
+                if {[interp eval $ip [list info exists $k]]} {
+                    dict set meta $k [interp eval $ip [list set $k]]
+                }
+            }
+        }
+        interp delete $ip
+        return $meta
+    }
+
+    # Title of a folder: book title, index.md H1, README.md H1, folder name.
+    method _dirTitle {dir} {
+        if {[file exists [file join $dir book.tcl]]} {
+            set t [dict get [my _bookMeta $dir] title]
+            if {$t ne ""} { return $t }
+        }
+        foreach f {index.md README.md} {
+            set p [file join $dir $f]
+            if {[file exists $p]} {
+                set t [my _h1Title $p]
+                if {$t ne ""} { return [my _plainLabel $t] }
+            }
+        }
+        return [file tail $dir]
+    }
+
+    # Markdown decoration off a title: [x]{.index} -> x, [x](u) -> x.
+    method _plainLabel {t} {
+        regsub -all {\[([^\]]*)\]\{[^\}]*\}} $t {\1} t
+        regsub -all {\[([^\]]*)\]\([^)]*\)} $t {\1} t
+        regsub -all {\{[^\}]*\}} $t {} t
+        regsub -all {[*_`]} $t {} t
+        return [string trim $t]
+    }
+
+    # First prose paragraph of a Markdown file (headings, quotes, code,
+    # lists and tables skipped), shortened to about LEN characters.
+    method _firstPara {file {len 180}} {
+        if {[catch {open $file r} fh]} { return "" }
+        fconfigure $fh -encoding utf-8
+        set para "" ; set inCode 0
+        while {[gets $fh line] >= 0} {
+            if {[regexp {^\s*(```|~~~)} $line]} { set inCode [expr {!$inCode}] ; continue }
+            if {$inCode} continue
+            set l [string trim $line]
+            if {$l eq ""} { if {$para ne ""} break ; continue }
+            if {[regexp {^(#|>|\||-{3,}|\*{3,}|[-*+] |\d+\. |<|\*Stand|_Stand)} $l]} {
+                if {$para ne ""} break
+                continue
+            }
+            append para " " $l
+        }
+        close $fh
+        set para [my _plainLabel $para]
+        if {[string length $para] > $len} {
+            set cut [string last " " $para $len]
+            if {$cut < 40} { set cut $len }
+            set para "[string range $para 0 [expr {$cut - 1}]] ..."
+        }
+        return $para
+    }
+
+    # Is DIR a book or does it hold one directly (a bookkit wrapper)?
+    method _bookEditions {dir} {
+        set out {}
+        foreach d [lsort [glob -nocomplain -directory $dir -type d *]] {
+            if {[file exists [file join $d book.tcl]]} { lappend out $d }
+        }
+        return $out
+    }
+
+    # bookkit writes <name>.pdf / <name>.html next to the book folder.
+    # Returns {label url ...} relative to a page inside the book folder.
+    method _bookDownloads {bookDir} {
+        set out {}
+        set name [file tail $bookDir]
+        foreach ext {pdf html} label {PDF HTML} {
+            if {[file exists [file join [file dirname $bookDir] $name.$ext]]} {
+                lappend out $label "../$name.$ext"
+            }
+        }
+        return $out
+    }
+
+    # Landing page of a book without index.md, as Markdown: title, subtitle,
+    # the README's first paragraph, downloads, chapter list. The chapter bar
+    # and the sidebar link "Uebersicht" point here -- without it they gave 404.
+    method _bookLandingMd {dir} {
+        set m [my _bookMeta $dir]
+        set title [dict get $m title]
+        if {$title eq ""} { set title [file tail $dir] }
+        set md "# $title\n\n"
+        if {[dict get $m subtitle] ne ""} { append md "*[dict get $m subtitle]*\n\n" }
+        foreach f [list [file join $dir README.md] [file join [file dirname $dir] README.md]] {
+            if {[file exists $f]} {
+                set p [my _firstPara $f 400]
+                if {$p ne ""} { append md "$p\n\n" ; break }
+            }
+        }
+        set dl [my _bookDownloads $dir]
+        if {[llength $dl]} {
+            set parts {}
+            foreach {label url} $dl { lappend parts "\[$label\]($url)" }
+            append md "**Download:** [join $parts { | }]\n\n"
+        }
+        append md "## Kapitel\n\n"
+        set i 0
+        foreach ch [my _bookChapters $dir] {
+            append md "[incr i]. \[[my _chapterLabel [file join $dir $ch]]\]($ch)\n"
+        }
+        return $md
+    }
+
+    # Breadcrumbs for URLPATH: Start > folder titles > page title.
+    method _crumbs {urlPath pageTitle} {
+        set parts [lsearch -all -inline -not [split [string trim $urlPath /] /] ""]
+        set isDir [string match */ $urlPath]
+        if {!$isDir && [llength $parts]} {
+            if {[lindex $parts end] eq "index.md"} { set isDir 1 }
+            set parts [lrange $parts 0 end-1]
+        }
+        set crumbs [list [list Start /]]
+        set url "/" ; set fs [my cfg root]
+        foreach p $parts {
+            append url "$p/"
+            set fs [file join $fs $p]
+            lappend crumbs [list [my _dirTitle $fs] $url]
+        }
+        if {!$isDir && $pageTitle ne ""} { lappend crumbs [list $pageTitle ""] }
+        # a bookkit wrapper and its edition usually share the title: once is enough
+        set dedup {}
+        foreach c $crumbs {
+            if {[llength $dedup] && [lindex $dedup end 0] eq [lindex $c 0]} {
+                set dedup [lreplace $dedup end end $c]
+            } else { lappend dedup $c }
+        }
+        set crumbs $dedup
+        if {[llength $crumbs] < 2} { return "" }
+        set out {}
+        foreach c [lrange $crumbs 0 end-1] {
+            lassign $c label url
+            lappend out "<a href=\"[my _esc $url]\">[my _esc $label]</a>"
+        }
+        lappend out "<span>[my _esc [lindex $crumbs end 0]]</span>"
+        return "<nav class=\"mds-crumbs\">[join $out { <span class="sep">&rsaquo;</span> }]</nav>"
+    }
+
+    # "On this page": h2/h3 with id from the rendered body; only when there
+    # are at least three.
+    method _pageToc {body} {
+        set items ""
+        set n 0
+        foreach {- lvl id text} [regexp -all -inline {<h([23])[^>]*?\mid="([^"]+)"[^>]*?>(.*?)</h\1>} $body] {
+            regsub -all {<[^>]+>} $text {} text
+            append items "<li class=\"l$lvl\"><a href=\"#$id\">$text</a></li>"
+            incr n
+        }
+        if {$n < 3} { return "" }
+        return "<nav class=\"mds-toc\"><div class=\"mds-toc-title\">Auf dieser Seite</div><ul>$items</ul></nav>"
+    }
+
+    # Sidebar: the book (chapters, downloads) or the current folder.
+    method _sideNav {fsPath urlPath} {
+        set dir [expr {[file isdirectory $fsPath] ? $fsPath : [file dirname $fsPath]}]
+        set cur [expr {[file isdirectory $fsPath] ? "index.md" : [file tail $fsPath]}]
+        if {[my _isBookDir $dir]} {
+            set title [my _esc [my _dirTitle $dir]]
+            set cls [expr {$cur eq "index.md" ? " class=\"cur\"" : ""}]
+            set items "<li$cls><a href=\"index.md\">&Uuml;bersicht</a></li>"
+            foreach ch [my _bookChapters $dir] {
+                set c [expr {$ch eq $cur ? " class=\"cur\"" : ""}]
+                append items "<li$c><a href=\"$ch\">[my _chapterLabel [file join $dir $ch]]</a></li>"
+            }
+            set dl ""
+            foreach {label url} [my _bookDownloads $dir] {
+                append dl "<a class=\"mds-dl\" href=\"$url\">$label</a>"
+            }
+            if {$dl ne ""} { set dl "<div class=\"mds-side-dl\">$dl</div>" }
+            return "<div class=\"mds-side-title\"><span class=\"mds-badge\">Buch</span> $title</div>$dl<ul>$items</ul>"
+        }
+        # a folder: its subfolders and documents
+        set items ""
+        foreach d [lsort -dictionary [glob -nocomplain -directory $dir -type d *]] {
+            set n [file tail $d]
+            if {[string index $n 0] eq "." || ![my _dirHasAnyMd $d]} continue
+            append items "<li><a href=\"$n/\">[my _esc [my _dirTitle $d]]</a></li>"
+        }
+        foreach f [lsort -dictionary [glob -nocomplain -directory $dir *.md]] {
+            set n [file tail $f]
+            if {$n in {index.md indexsub.md}} continue
+            set c [expr {$n eq $cur ? " class=\"cur\"" : ""}]
+            set t [my _h1Title $f]
+            if {$t eq ""} { set t [file rootname $n] }
+            append items "<li$c><a href=\"$n\">[my _esc [my _plainLabel $t]]</a></li>"
+        }
+        if {$items eq ""} { return "" }
+        set title [expr {$dir eq [my cfg root] ? [my cfg title] : [my _dirTitle $dir]}]
+        return "<div class=\"mds-side-title\">[my _esc $title]</div><ul>$items</ul>"
+    }
+
+    # Previous / next chapter as two cards (book chapters only).
+    method _pagerCards {fsPath} {
+        set dir [file dirname $fsPath]
+        set name [file tail $fsPath]
+        if {![my cfg chapternav] || $name eq "index.md" || ![my _isBookDir $dir]} { return "" }
+        set ch [my _bookChapters $dir]
+        set i [lsearch -exact $ch $name]
+        if {$i < 0} { return "" }
+        set out ""
+        if {$i > 0} {
+            set p [lindex $ch [expr {$i - 1}]]
+            append out "<a class=\"mds-pager prev\" href=\"$p\"><small>&larr; Zur&uuml;ck</small>[my _chapterLabel [file join $dir $p]]</a>"
+        } else { append out "<span></span>" }
+        if {$i < [llength $ch] - 1} {
+            set n [lindex $ch [expr {$i + 1}]]
+            append out "<a class=\"mds-pager next\" href=\"$n\"><small>Weiter &rarr;</small>[my _chapterLabel [file join $dir $n]]</a>"
+        }
+        return "<nav class=\"mds-pagers\">$out</nav>"
+    }
+
+    # Folder page as cards: books first, then folders, documents, files.
+    method _folderCards {dir urlPath} {
+        set books "" ; set folders "" ; set docs "" ; set files ""
+        foreach d [lsort -dictionary [glob -nocomplain -directory $dir -type d *]] {
+            set n [file tail $d]
+            if {[string index $n 0] eq "."} continue
+            set eds [my _bookEditions $d]
+            set isBook [file exists [file join $d book.tcl]]
+            if {!$isBook && ![llength $eds] && ![my _dirHasAnyMd $d]} continue
+            set title [my _esc [my _dirTitle $d]]
+            set desc ""
+            foreach f {index.md README.md} {
+                if {[file exists [file join $d $f]]} { set desc [my _firstPara [file join $d $f]] ; break }
+            }
+            if {$isBook || [llength $eds]} {
+                # a book describes itself best by its subtitle
+                set m [my _bookMeta [expr {$isBook ? $d : [lindex $eds 0]}]]
+                if {[dict get $m subtitle] ne ""} { set desc [dict get $m subtitle] }
+                set meta {}
+                foreach e [expr {$isBook ? [list $d] : $eds}] {
+                    set l [dict get [my _bookMeta $e] lang]
+                    if {$l ne ""} { lappend meta [string toupper $l] }
+                }
+                set href [expr {$isBook || [llength $eds] != 1 ? "$n/" : "$n/[file tail [lindex $eds 0]]/"}]
+                append books "<a class=\"mds-card book\" href=\"$href\"><span class=\"mds-badge\">Buch</span>\
+<strong>$title</strong><span>[my _esc $desc]</span><em>[join $meta { &middot; }]</em></a>"
+            } else {
+                append folders "<a class=\"mds-card\" href=\"$n/\"><strong>$title</strong><span>[my _esc $desc]</span></a>"
+            }
+        }
+        foreach f [lsort -dictionary [glob -nocomplain -directory $dir *.md]] {
+            set n [file tail $f]
+            if {$n in {index.md indexsub.md}} continue
+            set t [my _h1Title $f]
+            if {$t eq ""} { set t [file rootname $n] }
+            append docs "<a class=\"mds-card doc\" href=\"$n\"><strong>[my _esc [my _plainLabel $t]]</strong>\
+<span>[my _esc [my _firstPara $f]]</span></a>"
+        }
+        foreach f [lsort -dictionary [glob -nocomplain -directory $dir -type f *]] {
+            set ext [string tolower [file extension $f]]
+            if {$ext in {.md .tcl .tsv .css} || [string index [file tail $f] 0] eq "."} continue
+            set kb [expr {([file size $f] + 1023) / 1024}]
+            append files "<li><a href=\"[my _esc [file tail $f]]\">[my _esc [file tail $f]]</a> <small>[string toupper [string range $ext 1 end]], $kb KB</small></li>"
+        }
+        set out ""
+        if {$books   ne ""} { append out "<h2>B&uuml;cher</h2><div class=\"mds-cards\">$books</div>" }
+        if {$folders ne ""} { append out "<h2>Bereiche</h2><div class=\"mds-cards\">$folders</div>" }
+        if {$docs    ne ""} { append out "<h2>Dokumente</h2><div class=\"mds-cards\">$docs</div>" }
+        if {$files   ne ""} { append out "<h2>Dateien</h2><ul class=\"mds-files\">$files</ul>" }
+        if {$out eq ""} { set out "<p><em>Keine Dokumente gefunden.</em></p>" }
+        return $out
+    }
+
+    # The whole page around BODY.
+    method _sitePage {title body fsPath urlPath theme} {
+        set css ""
+        set cssFile [my _styleCss site]
+        if {$cssFile ne ""} {
+            catch { set fh [open $cssFile r]; fconfigure $fh -encoding utf-8; set css [read $fh]; close $fh }
+        }
+        set dark [expr {$theme in {dunkel dark} ? " class=\"dark\"" : ""}]
+        set head ""
+        foreach link [my cfg navlinks] {
+            lassign $link label url
+            append head "<a href=\"$url\">$label</a>"
+        }
+        if {[my cfg navsections]} {
+            foreach link [my _sectionLinks] {
+                lassign $link label url
+                append head "<a href=\"$url\">$label</a>"
+            }
+        }
+        set side  [my _sideNav $fsPath $urlPath]
+        set toc   [my _pageToc $body]
+        set crumbs [my _crumbs $urlPath $title]
+        set pager [expr {[file isfile $fsPath] ? [my _pagerCards $fsPath] : ""}]
+        set cls "mds-layout"
+        # no sidebar content: on a phone the menu still offers the header links
+        if {$side eq ""} { append cls " noside" }
+        if {$toc eq ""}  { append cls " notoc" }
+        set brand [my _esc [my cfg title]]
+        return "<!DOCTYPE html>
+<html lang=\"de\"$dark>
+<head>
+<meta charset=\"utf-8\"/>
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>
+<title>[my _esc $title] &ndash; $brand</title>
+<style>
+$css
+</style>
+</head>
+<body>
+<input type=\"checkbox\" id=\"mds-menu\" class=\"mds-menu-toggle\">
+<header class=\"mds-top\">
+<label for=\"mds-menu\" class=\"mds-menu-btn\" title=\"Navigation\">&#9776;</label>
+<a class=\"mds-brand\" href=\"/\">$brand</a>
+<nav class=\"mds-topnav\">$head</nav>
+<form class=\"mds-search\" action=\"/\" method=\"get\" role=\"search\">\
+<input type=\"search\" name=\"q\" placeholder=\"Suchen\" aria-label=\"Suchen\"></form>
+</header>
+<div class=\"$cls\">
+<aside class=\"mds-side\">$side<nav class=\"mds-side-top\">$head</nav></aside>
+<main class=\"mds-main\">
+$crumbs
+<article class=\"mds-content\">
+$body
+</article>
+$pager
+</main>
+<aside class=\"mds-aside\">$toc</aside>
+</div>
+</body>
+</html>
+"
+    }
+
+    # A Markdown file (or Markdown text) as a site page.
+    method _siteMarkdown {mdText fsPath urlPath theme} {
+        set ast  [mdstack::parser::parse $mdText]
+        set html [mdstack::html::render $ast -theme none -toc 0 -lang de]
+        set body [my _bodyOf $html]
+        set title ""
+        regexp {<h1[^>]*>(.*?)</h1>} $body -> title
+        regsub -all {<[^>]+>} $title {} title
+        set title [string map {&amp; & &lt; < &gt; > &quot; \"} $title]
+        if {$title eq ""} { set title [file rootname [file tail $fsPath]] }
+        return [my _sitePage $title $body $fsPath $urlPath $theme]
+    }
+
+    method _readUtf8 {path} {
+        set fh [open $path r]
+        fconfigure $fh -encoding utf-8
+        set t [read $fh]
+        close $fh
+        return $t
+    }
+
+    # ------------------------------------------------------------------
+    # Full-text search (?q=...).
+    #
+    # All .md under the root, read once and kept with their mtime; a search
+    # walks the tree (cheap) and rereads only what changed. Words are ANDed,
+    # case-insensitive, umlauts match their ae/oe/ue spelling. Dot folders
+    # and symlinks are left out, as for serving.
+    # ------------------------------------------------------------------
+
+    method _fold {s} {
+        return [string map [list \u00e4 ae \u00f6 oe \u00fc ue \u00df ss] [string tolower $s]]
+    }
+
+    method _searchFiles {dir} {
+        set out {}
+        foreach e [glob -nocomplain -directory $dir *] {
+            set n [file tail $e]
+            if {[string index $n 0] eq "." && ![my cfg dotfiles]} continue
+            if {[catch {file type $e} t] || $t eq "link"} continue
+            if {$t eq "directory"} {
+                lappend out {*}[my _searchFiles $e]
+            } elseif {[string tolower [file extension $n]] eq ".md"} {
+                lappend out $e
+            }
+        }
+        return $out
+    }
+
+    # Plain text of a Markdown file: markup off, link targets dropped.
+    method _plainText {md} {
+        regsub -all {\[([^\]]*)\]\([^)]*\)} $md {\1} md
+        regsub -all {\[([^\]]*)\]\{[^\}]*\}} $md {\1} md
+        regsub -all {<!--.*?-->} $md {} md
+        regsub -all {(?n)^\s*([-*_]\s*){3,}$} $md {} md
+        regsub -all {(?n)^[\s|:]*-{3,}[-\s|:]*$} $md {} md
+        regsub -all {(?n)^\s{0,3}(#+|>|[-*+]|\d+\.)\s+} $md {} md
+        regsub -all {[*`|]+} $md { } md
+        regsub -all {\s+} $md { } md
+        return [string trim $md]
+    }
+
+    method _searchIndex {} {
+        my variable _searchIdx
+        if {![info exists _searchIdx]} { set _searchIdx {} }
+        set root [my cfg root]
+        set fresh {}
+        foreach f [my _searchFiles $root] {
+            if {[catch {file mtime $f} mt]} continue
+            if {[dict exists $_searchIdx $f] && [dict get $_searchIdx $f mtime] == $mt} {
+                dict set fresh $f [dict get $_searchIdx $f]
+                continue
+            }
+            if {[catch {my _readUtf8 $f} md]} continue
+            set title [my _h1Title $f]
+            if {$title eq ""} { set title [file rootname [file tail $f]] }
+            set title [my _plainLabel $title]
+            set text [my _plainText $md]
+            dict set fresh $f [dict create mtime $mt title $title text $text \
+                ftitle [my _fold $title] ftext [my _fold $text]]
+        }
+        set _searchIdx $fresh
+        return $fresh
+    }
+
+    # Hits for QUERY: list of dicts {url title path snippet score}, best first.
+    method _search {query {max 50}} {
+        set words {}
+        foreach w [split [my _fold $query] " \t"] {
+            if {[string length $w] >= 2} { lappend words $w }
+        }
+        if {![llength $words]} { return {} }
+        set root [my cfg root]
+        set hits {}
+        dict for {f e} [my _searchIndex] {
+            set ft [dict get $e ftext] ; set fh [dict get $e ftitle]
+            set score 0 ; set all 1
+            foreach w $words {
+                set inTitle [expr {[string first $w $fh] >= 0}]
+                set n [regexp -all -- [my _reQuote $w] $ft]
+                if {!$inTitle && $n == 0} { set all 0 ; break }
+                incr score [expr {$inTitle * 20 + min($n, 10)}]
+            }
+            if {!$all} continue
+            set rel [string range $f [string length $root] end]
+            set url [join [lmap p [file split $rel] {
+                if {$p eq "/" || $p eq "\\"} continue ; set p }] /]
+            set dirTitles {}
+            set fs $root
+            foreach p [lrange [split [string trim $url /] /] 0 end-1] {
+                set fs [file join $fs $p]
+                set dt [my _dirTitle $fs]
+                # bookkit wrapper and edition share the title: once
+                if {[lindex $dirTitles end] ne $dt} { lappend dirTitles $dt }
+            }
+            lappend hits [dict create url "/$url" title [dict get $e title] \
+                path [join $dirTitles " \u203a "] score $score \
+                snippet [my _snippet [dict get $e text] $words]]
+        }
+        set hits [lsort -command [list apply {{a b} {
+            set r [expr {[dict get $b score] - [dict get $a score]}]
+            if {$r == 0} { set r [string compare [dict get $a title] [dict get $b title]] }
+            return $r
+        }}] $hits]
+        return [lrange $hits 0 [expr {$max - 1}]]
+    }
+
+    method _reQuote {s} {
+        return [regsub -all {[][{}()*+?.\\^$|]} $s {\\&}]
+    }
+
+    # Regex for a folded search word: each ae/oe/ue/ss also matches its
+    # umlaut, so "groesse" finds "Grösse" and "Größe" (use with -nocase).
+    method _foldRe {w} {
+        set re ""
+        set n [string length $w]
+        for {set i 0} {$i < $n} {incr i} {
+            set two [string range $w $i [expr {$i + 1}]]
+            switch -- $two {
+                ae { append re "(?:ae|\u00e4)" ; incr i ; continue }
+                oe { append re "(?:oe|\u00f6)" ; incr i ; continue }
+                ue { append re "(?:ue|\u00fc)" ; incr i ; continue }
+                ss { append re "(?:ss|\u00df)" ; incr i ; continue }
+            }
+            append re [my _reQuote [string index $w $i]]
+        }
+        return $re
+    }
+
+    # About 220 characters around the first hit, hits marked (HTML).
+    # Hits are found in the plain text with the fold-aware regex, so mixed
+    # spellings are found and marked; escaping happens per piece afterwards.
+    method _snippet {text words} {
+        set res {}
+        foreach w [lsort -unique $words] {
+            lappend res [list [string length $w] [my _foldRe $w]]
+        }
+        # longer words first, so an alternation prefers the longest hit
+        set re [join [lmap r [lsort -integer -decreasing -index 0 $res] {
+            lindex $r 1 }] |]
+        set pos 0
+        if {$re ne "" && [regexp -nocase -indices -- $re $text m]} {
+            set pos [lindex $m 0]
+        }
+        set from [expr {max(0, $pos - 80)}]
+        set s [string range $text $from [expr {$from + 220}]]
+        set out ""
+        set at 0
+        if {$re ne ""} {
+            foreach m [regexp -all -nocase -inline -indices -- $re $s] {
+                lassign $m a b
+                if {$b < $a} continue
+                append out [my _esc [string range $s $at [expr {$a - 1}]]] \
+                    "<mark>[my _esc [string range $s $a $b]]</mark>"
+                set at [expr {$b + 1}]
+            }
+        }
+        append out [my _esc [string range $s $at end]]
+        if {$from > 0} { set out "&hellip; $out" }
+        if {$from + 220 < [string length $text]} { append out " &hellip;" }
+        return $out
+    }
+
+    # The results as HTML (site style) ...
+    method _searchBody {query} {
+        set hits [my _search $query]
+        set q [my _esc $query]
+        set body "<h1>Suche</h1>
+<form class=\"mds-search-big\" action=\"/\" method=\"get\">\
+<input type=\"search\" name=\"q\" value=\"$q\" autofocus><button>Suchen</button></form>"
+        if {[string trim $query] eq ""} { return $body }
+        if {![llength $hits]} {
+            append body "<p>Nichts gefunden f&uuml;r <strong>$q</strong>.</p>"
+            return $body
+        }
+        append body "<p class=\"mds-lead\">[llength $hits] Treffer f&uuml;r <strong>$q</strong></p><ol class=\"mds-hits\">"
+        foreach h $hits {
+            set path [dict get $h path]
+            append body "<li><a href=\"[my _esc [dict get $h url]]\">[my _esc [dict get $h title]]</a>"
+            if {$path ne ""} { append body "<div class=\"mds-hit-path\">[my _esc $path]</div>" }
+            append body "<p>[dict get $h snippet]</p></li>"
+        }
+        append body "</ol>"
+        return $body
+    }
+
+    # ... and as Markdown for the other styles.
+    method _searchMd {query} {
+        set md "# Suche: [string map {\[ \\\[ \] \\\] * \\* _ \\_ < &lt;} $query]\n\n"
+        set hits [my _search $query]
+        if {![llength $hits]} { return "$md*Nichts gefunden.*\n" }
+        foreach h $hits {
+            append md "- \[[dict get $h title]\]([dict get $h url])"
+            if {[dict get $h path] ne ""} { append md " -- [dict get $h path]" }
+            append md "\n"
+        }
+        return $md
+    }
+
+    # Requests in style "site".
+    method _siteDispatch {chan req urlPath theme} {
+        if {[dict exists [$req params] q]} {
+            set q [$req param q ""]
+            my _notiz $chan "search"
+            my _send $chan "200 OK" "text/html; charset=utf-8" \
+                [my _sitePage "Suche" [my _searchBody $q] [my cfg root] / $theme]
+            return
+        }
+        if {[$req param nav ""] eq "index"} {
+            set html [$_renderer siteIndex [my cfg root] none]
+            my _notiz $chan "site index"
+            my _send $chan "200 OK" "text/html; charset=utf-8" \
+                [my _sitePage "Alle Dokumente" [my _bodyOf $html] [my cfg root] $urlPath $theme]
+            return
+        }
+        set fsPath [my _safePath $urlPath]
+        if {[file isdirectory $fsPath]} {
+            if {![string match "*/" $urlPath]} {
+                set loc "$urlPath/"
+                set q [$req query]
+                if {$q ne ""} { append loc "?$q" }
+                my _redirect $chan $loc
+                return
+            }
+            set indexFile [file join $fsPath [my cfg index]]
+            if {[file exists $indexFile]} {
+                set html [my _siteMarkdown [my _readUtf8 $indexFile] $indexFile $urlPath $theme]
+                my _notiz $chan "index.md"
+            } elseif {[file exists [file join $fsPath book.tcl]]} {
+                set html [my _siteMarkdown [my _bookLandingMd $fsPath] $indexFile $urlPath $theme]
+                my _notiz $chan "book landing"
+            } else {
+                set title [expr {$fsPath eq [my cfg root] ? [my cfg title] : [my _dirTitle $fsPath]}]
+                set body "<h1>[my _esc $title]</h1>"
+                if {[file exists [file join $fsPath README.md]]} {
+                    set p [my _firstPara [file join $fsPath README.md] 400]
+                    if {$p ne ""} { append body "<p class=\"mds-lead\">[my _esc $p]</p>" }
+                }
+                append body [my _folderCards $fsPath $urlPath]
+                set html [my _sitePage $title $body $fsPath $urlPath $theme]
+                my _notiz $chan "directory index"
+            }
+            my _send $chan "200 OK" "text/html; charset=utf-8" $html
+            return
+        }
+        # clean URL: /dict -> dict.md (nroff2md --linkmode server)
+        if {![file exists $fsPath] && [file isfile $fsPath.md]} {
+            set fsPath [my _safePath $urlPath.md]
+        }
+        if {![file exists $fsPath]} {
+            set dir [file dirname $fsPath]
+            if {[file tail $fsPath] eq "index.md" && [file exists [file join $dir book.tcl]]} {
+                my _notiz $chan "book landing"
+                my _send $chan "200 OK" "text/html; charset=utf-8" \
+                    [my _siteMarkdown [my _bookLandingMd $dir] $fsPath $urlPath $theme]
+                return
+            }
+            throw {MDDOCS NOTFOUND} $urlPath
+        }
+        if {[string tolower [file extension $fsPath]] eq ".md"} {
+            my _notiz $chan markdown
+            my _send $chan "200 OK" "text/html; charset=utf-8" \
+                [my _siteMarkdown [my _readUtf8 $fsPath] $fsPath $urlPath $theme]
+            return
+        }
+        my _serveFile $chan $req $fsPath [my _mime [string tolower [file extension $fsPath]]]
+    }
+
     method _dispatch {chan req urlPath theme toc {style plain}} {
         try {
             # Health: fuer nginx, systemd, Ueberwachung.
@@ -1025,6 +1685,19 @@ $bar[string range $html [expr {$e + 1}] end]"
                     my _send $chan "503 Service Unavailable" "text/plain; charset=utf-8" \
                         "root unreadable\n"
                 }
+                return
+            }
+
+            if {$style eq "site"} {
+                my _siteDispatch $chan $req $urlPath $theme
+                return
+            }
+
+            # Full-text search, plain result list for the older styles
+            if {[dict exists [$req params] q]} {
+                set html [$_renderer markdownText [my _searchMd [$req param q ""]] $theme 0 [my _styleCss $style]]
+                my _notiz $chan "search"
+                my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
                 return
             }
 
@@ -1054,13 +1727,37 @@ $bar[string range $html [expr {$e + 1}] end]"
                     set html [my _injectBookNav $html $indexFile $style]
                     my _notiz $chan "index.md"
                     my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
+                } elseif {[file exists [file join $fsPath book.tcl]]} {
+                    set html [$_renderer markdownText [my _bookLandingMd $fsPath] $theme $toc [my _styleCss $style]]
+                    set html [my _injectBookNav $html $indexFile $style]
+                    my _notiz $chan "book landing"
+                    my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
                 } else {
                     set html [$_renderer index $fsPath $urlPath $theme [my _styleCss $style]]
                     my _notiz $chan "directory index"
                     my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
                 }
 
+            } elseif {![file exists $fsPath] && [file isfile $fsPath.md]} {
+                # clean URL: /dict -> dict.md (nroff2md --linkmode server)
+                set fsPath [my _safePath $urlPath.md]
+                set html [$_renderer markdown $fsPath $theme $toc [my _styleCss $style]]
+                set html [my _injectChapterNav $html $fsPath]
+                set html [my _injectBookNav $html $fsPath $style]
+                my _notiz $chan markdown
+                my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
+
             } elseif {![file exists $fsPath]} {
+                # index.md of a book without one: the generated landing page
+                # (chapter bar and sidebar link "Uebersicht" point here)
+                set dir [file dirname $fsPath]
+                if {[file tail $fsPath] eq "index.md" && [file exists [file join $dir book.tcl]]} {
+                    set html [$_renderer markdownText [my _bookLandingMd $dir] $theme $toc [my _styleCss $style]]
+                    set html [my _injectBookNav $html $fsPath $style]
+                    my _notiz $chan "book landing"
+                    my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
+                    return
+                }
                 throw {MDDOCS NOTFOUND} $urlPath
 
             } else {
@@ -1082,6 +1779,13 @@ $bar[string range $html [expr {$e + 1}] end]"
             my _send $chan "403 Forbidden" "text/html; charset=utf-8" \
                 "<html><body><h1>403 Forbidden</h1><p>$msg</p></body></html>"
         } trap {MDDOCS NOTFOUND} {msg} {
+            if {$style eq "site"} {
+                set body "<h1>Nicht gefunden</h1><p>[my _esc $msg] gibt es hier nicht.</p>\
+<p><a href=\"/\">Zur Startseite</a> &middot; <a href=\"/?nav=index\">Alle Dokumente</a></p>"
+                my _send $chan "404 Not Found" "text/html; charset=utf-8" \
+                    [my _sitePage "Nicht gefunden" $body [my cfg root] / $theme]
+                return
+            }
             my _send $chan "404 Not Found" "text/html; charset=utf-8" \
                 "<html><body><h1>404 Not Found</h1><p>$msg</p></body></html>"
         } trap {POSIX ENOENT} {} {

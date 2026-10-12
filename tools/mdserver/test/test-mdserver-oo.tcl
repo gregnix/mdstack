@@ -19,7 +19,10 @@ namespace import tcltest::*
 
 set scriptDir [file dirname [file normalize [info script]]]
 
+# ../../../../docir/lib/tm: a docir checkout next to mdstack
+# (mdstack::html 0.2 needs docir::mdSource and docir::html)
 foreach candidate {
+    "../../../../docir/lib/tm"
     "../lib"
     "lib"
     "../../lib"
@@ -1278,4 +1281,211 @@ $server   destroy
 
 file delete -force $testDir
 file delete -force $navDir
+
+# ============================================================
+# --style site: layout, book landing, shelf, pager
+# ============================================================
+proc siteWurzel {} {
+    set d [file join [tcltest::configure -tmpdir] mdsite[pid]]
+    file delete -force $d
+    set ed [file join $d buecher b1 ed-de]
+    file mkdir $ed [file join $d docs]
+    set fh [open [file join $ed book.tcl] w]
+    puts $fh {set title "Testbuch"; set subtitle "Ein kleines Buch"; set lang de
+set chapters {010-a.md 020-b.md}}
+    close $fh
+    set fh [open [file join $ed 010-a.md] w]
+    puts $fh "# Kapitel A\n\nText.\n\n## Eins\n\nx\n\n## Zwei\n\ny\n\n## Drei\n\nz"
+    close $fh
+    set fh [open [file join $ed 020-b.md] w]; puts $fh "# Kapitel B\n\nMehr."; close $fh
+    set fh [open [file join $d buecher b1 ed-de.pdf] w]; puts $fh "%PDF-1.4"; close $fh
+    set fh [open [file join $d buecher b1 README.md] w]; puts $fh "# Testbuch\n\nWorum es geht."; close $fh
+    set fh [open [file join $d docs x.md] w]; puts $fh "# Notiz X\n\nErster Absatz."; close $fh
+    return $d
+}
+
+test site-1 "book without index.md: generated landing page with chapters and download" -setup {
+    set w [siteWurzel]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /buecher/b1/ed-de/]
+    list [status $a] [string match {*href="010-a.md"*} $a] \
+         [string match {*href="../ed-de.pdf"*} $a] [string match {*Ein kleines Buch*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {200 1 1 1}
+
+test site-2 "index.md of such a book is 200 in every style (the chapter bar links it)" -setup {
+    set w [siteWurzel]
+    set h1 [serverStart $w --no-log --style site]
+    set h2 [serverStart $w --no-log]
+} -body {
+    list [status [holen [serverPort $h1] /buecher/b1/ed-de/index.md]] \
+         [status [holen [serverPort $h2] /buecher/b1/ed-de/index.md]]
+} -cleanup {
+    serverStop $h1 ; serverStop $h2
+    file delete -force $w
+} -result {200 200}
+
+test site-3 "a folder lists books as cards; one edition is linked directly" -setup {
+    set w [siteWurzel]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /buecher/]
+    list [string match {*class="mds-card book" href="b1/ed-de/"*} $a] \
+         [string match {*<strong>Testbuch</strong>*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1}
+
+test site-4 "chapter: current entry, next card, breadcrumbs, on-this-page" -setup {
+    set w [siteWurzel]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /buecher/b1/ed-de/010-a.md]
+    list [string match {*<li class="cur"><a href="010-a.md">*} $a] \
+         [string match {*class="mds-pager next" href="020-b.md"*} $a] \
+         [string match {*class="mds-crumbs"*Testbuch*Kapitel A*} $a] \
+         [regexp -all {>Testbuch</a>} $a] \
+         [string match {*class="mds-toc"*href="#eins"*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 1 1 1}
+
+test site-5 "404 in style site is a page with a way back" -setup {
+    set w [siteWurzel]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /gibts-nicht.md]
+    list [status $a] [string match {*href="/">Zur Startseite*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {404 1}
+
+
+# ============================================================
+# full-text search (?q=)
+# ============================================================
+proc suchWurzel {} {
+    set d [file join [tcltest::configure -tmpdir] mdsuch[pid]]
+    file delete -force $d
+    file mkdir [file join $d a] [file join $d .intern]
+    set fh [open [file join $d a eins.md] w]; fconfigure $fh -encoding utf-8
+    puts $fh "# Netzwerk\n\nDie GROESSE der Freigabe und der proxy_pass Wert."
+    close $fh
+    set fh [open [file join $d a zwei.md] w]; fconfigure $fh -encoding utf-8
+    puts $fh "# Drucker\n\nNur die Freigabe, nichts sonst."
+    close $fh
+    set fh [open [file join $d .intern geheim.md] w]; puts $fh "# Geheim\n\nFreigabe intern."; close $fh
+    return $d
+}
+
+test search-1 "?q finds the document, links it, marks the word" -setup {
+    set w [suchWurzel]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /?q=proxy_pass]
+    list [status $a] [string match {*href="/a/eins.md">Netzwerk</a>*} $a] \
+         [string match {*<mark>proxy_pass</mark>*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {200 1 1}
+
+test search-2 "words are ANDed; umlauts match their ae/oe/ue/ss spelling" -setup {
+    set w [suchWurzel]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /?q=Freigabe+groesse]
+    set b [holen $p "/?q=Gr%C3%B6%C3%9Fe"]
+    list [string match {*eins.md*} $a] [string match {*zwei.md*} $a] [string match {*eins.md*} $b]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 0 1}
+
+test search-3 "the query is escaped, dot folders are not searched" -setup {
+    set w [suchWurzel]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p "/?q=%3Cb%3EFreigabe"]
+    set b [holen $p /?q=intern]
+    list [string match {*<b>Freigabe*} $a] [string match {*&lt;b&gt;Freigabe*} $a] \
+         [string match {*geheim*} $b]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {0 1 0}
+
+test search-5 "mixed spellings are marked, also far into the text" -setup {
+    set w [suchWurzel]
+    set fh [open [file join $w a drei.md] w]; fconfigure $fh -encoding utf-8
+    puts $fh "# Masse\n\n[string repeat {Fuelltext ohne Treffer. } 20]Die Gr\u00f6sse\
+        und die Gr\u00f6\u00dfe, dazu GROESSE & mehr."
+    close $fh
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [encoding convertfrom utf-8 [holen $p /?q=groesse]]
+    set b [encoding convertfrom utf-8 [holen $p "/?q=Gr%C3%B6%C3%9Fe"]]
+    list [string match "*<mark>Gr\u00f6sse</mark>*" $a] \
+         [string match "*<mark>Gr\u00f6\u00dfe</mark>*" $a] \
+         [string match {*<mark>GROESSE</mark> &amp; mehr*} $a] \
+         [string match "*<mark>Gr\u00f6sse</mark>*" $b] \
+         [string match "*<mark>GROESSE</mark>*" $b]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 1 1 1}
+
+test search-4 "the older styles answer with a plain list" -setup {
+    set w [suchWurzel]
+    set h [serverStart $w --no-log]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /?q=Drucker]
+    list [status $a] [string match {*href="/a/zwei.md"*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {200 1}
+
+
+test site-6 "without --style the server uses site; --style plain keeps the old page" -setup {
+    set w [siteWurzel]
+    set h1 [serverStart $w --no-log]
+    set h2 [serverStart $w --no-log --style plain]
+} -body {
+    list [string match {*class="mds-search"*} [holen [serverPort $h1] /docs/x.md]] \
+         [string match {*class="mds-search"*} [holen [serverPort $h2] /docs/x.md]]
+} -cleanup {
+    serverStop $h1 ; serverStop $h2
+    file delete -force $w
+} -result {1 0}
+
+
+test site-7 "clean URL: /docs/x serves docs/x.md, in site and plain" -setup {
+    set w [siteWurzel]
+    set h1 [serverStart $w --no-log]
+    set h2 [serverStart $w --no-log --style plain]
+} -body {
+    set a [holen [serverPort $h1] /docs/x]
+    set b [holen [serverPort $h2] /docs/x]
+    list [status $a] [string match {*Notiz X*} $a] [status $b] [string match {*Notiz X*} $b]
+} -cleanup {
+    serverStop $h1 ; serverStop $h2
+    file delete -force $w
+} -result {200 1 200 1}
+
 tcltest::cleanupTests

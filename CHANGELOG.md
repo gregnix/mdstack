@@ -1,5 +1,58 @@
 # mdstack — Changelog
 
+## 2026-10-05 — fixes
+
+- `mdstack::currentText` returned the stack text although an editor was
+  attached: `return` inside `catch` gave code 2, which `catch` swallowed. The
+  editor text is returned now; if the editor call fails, the stack text.
+  Tests `text-editor-1`, `-2`.
+- `uicontextmenu::createFromSpec`: a multi-word command (`{Save {puts saved}}`)
+  was taken for a submenu. The short form `{label {spec}}` is a submenu only if
+  every element is `-` or an entry of at least two words; `{label -menu spec}`
+  and `{label -command cmd ...}` are explicit. Submenus get generated paths
+  (`.m.sub0`); capitalised labels broke the window name. A one-entry submenu
+  works now. Syntax in `mdcontextmenu.md`; tests in `tests/uicontextmenu.tcl`.
+- `tests/all.tcl`: `test-emoji-sanitize.tcl` was sourced and ended the whole
+  run with `exit 0` when pdf4tcllib was missing (no further groups, no
+  GESAMT). It runs in its own interpreter now and prints a tcltest-style
+  summary, so skips and failures are counted; `test-emoji-pdf.tcl` runs in
+  its own interpreter as well. `test-emoji-pdf.tcl` and `test-toc.tcl` skip
+  cleanly without pdf4tcllib/docir; `test-toc.tcl` finds a sibling docir.
+- `indexgen` header and manual named `updateSub` and an `indexsub.md` output,
+  neither exists. Now: `scan`, `updateIndex`, `readTitle`, `readDescription`,
+  `configure`; only `index.md` is generated. Test `indexgen-api`.
+- mdserver search: snippets mark mixed spellings. A hit like `groesse` in
+  `Grösse` or `Größe` was found but not marked, and the snippet started at
+  the top of the file. Each `ae`/`oe`/`ue`/`ss` of the folded word now also
+  matches its umlaut, for the snippet position and for `<mark>`. Test
+  `search-5`.
+- mdserver docs: the demo lives in `tools/mdserver/demo/`, not
+  `mdserver-demo/`.
+
+## 2026-10-04 — mdserver: modules from the repo
+
+- `mdserver.tcl` also searches `../../lib` (mdstack) and a sibling
+  `docir/lib/tm`; from the repo it found neither `mdstack::parser` nor
+  `docir`. `test-mdserver-oo.tcl` finds the sibling docir too (95/95 without
+  any env variable).
+- mdserver docs: version 0.4; the dependency table lists the docir modules
+  `mdstack::html` 0.2 needs.
+- mdserver `--style site`: the page is built around the rendered body with one
+  stylesheet (`styles/site.css`) -- header, sidebar (book chapters with
+  PDF/HTML, or the folder), breadcrumbs, "on this page", folders as cards,
+  previous/next cards, dark mode, mobile menu, 404 page. The other styles made
+  `<body>` a grid, and a long sidebar pushed the text below a gap.
+- A book folder without `index.md` gets a generated landing page (title,
+  subtitle, README paragraph, downloads, chapters) in every style; the
+  "Uebersicht" link of the chapter bar gave 404 before. Tests `site-1` to `-5`.
+- mdserver full-text search: `/?q=words` (search field in the `site` header),
+  words ANDed, case-insensitive, umlauts match ae/oe/ue/ss, snippets with
+  marks; texts cached by mtime; dot folders and symlinks left out. Tests
+  `search-1` to `-4`.
+- mdserver: `site` is the default style; `--style plain` gives the old pages.
+- mdserver: clean URLs `/dict` -> `dict.md` (nroff2md `--linkmode server`) also
+  in style `site`, and in subfolders. Test `site-7`.
+
 ## 2026-09-29 — mdserver 0.4
 
 ### Fixed

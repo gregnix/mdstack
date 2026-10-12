@@ -1,7 +1,7 @@
 #!/usr/bin/env tclsh
 # mdserver.tcl -- Markdown web server (launcher)
 # ============================================================================
-# Starts mdserver. Requires mdserver-0.2.tm on the module path.
+# Starts mdserver. Requires mdserver-0.4.tm on the module path.
 #
 # Usage:
 #   tclsh mdserver.tcl ?--port 8080? ?--bind 127.0.0.1? ?--root /path? ?--theme hell?
@@ -11,9 +11,11 @@
 
 package require Tcl 8.6 9
 
-# Modul-Pfad: lib/ relativ zum Skript (Regelbuch-Konvention)
+# Modul-Pfad: lib/ relativ zum Skript; ../../lib ist das lib/ von mdstack
+# (mdstack::parser, ::html, ::theme) und ../../../docir/lib/tm ein docir
+# daneben (mdstack::html braucht docir), falls der Server aus dem Repo laeuft.
 set _scriptDir [file dirname [file normalize [info script]]]
-foreach _candidate {lib ../lib} {
+foreach _candidate {../../../docir/lib/tm ../../lib ../lib lib} {
     set _d [file normalize [file join $_scriptDir $_candidate]]
     if {[file exists $_d]} { tcl::tm::path add $_d }
 }
@@ -21,7 +23,7 @@ unset -nocomplain _scriptDir _candidate _d
 
 if {[catch {package require mdserver 0.4} err]} {
     puts stderr "ERROR: mdserver 0.4 nicht gefunden: $err"
-    puts stderr "       mdserver-0.2.tm muss in lib/ liegen."
+    puts stderr "       mdserver-0.4.tm muss in lib/ liegen."
     exit 1
 }
 
@@ -88,7 +90,7 @@ proc parseArgs {argv} {
                 puts "                    (default: 16384; 0 = ohne Grenze)"
                 puts "  --healthpath PATH Pfad des Health-Endpunkts"
                 puts "                    (default: /__mdserver/health)"
-                puts "  --style   NAME    TOC style: plain|sidebar|sticky|collapsible"
+                puts "  --style   NAME    Page style: site (default)|plain|sidebar|sticky|collapsible"
                 puts "  --stylesdir DIR   CSS style directory (default: ../styles)"
                 puts "  --navbg   COLOR   Nav bar background color"
                 puts "  --navfg   COLOR   Nav bar text color"

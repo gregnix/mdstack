@@ -45,6 +45,25 @@ if {[haveDocir]} {
 }
 
 # --------------------------------------------------------
+# indexgen-api: every command the module header documents exists
+# (the header used to name updateSub, which was never there)
+# --------------------------------------------------------
+test indexgen-api "indexgen header names only real commands" -body {
+    package require mdstack::indexgen 0.1
+    set f [open [file join [file dirname [info script]] .. lib mdstack indexgen-0.1.tm]]
+    fconfigure $f -encoding utf-8
+    set head {}
+    while {[gets $f line] >= 0 && [string match "#*" $line]} { append head $line\n }
+    close $f
+    set names [lsort -unique [regexp -all -inline {mdstack::indexgen::[A-Za-z_]+} $head]]
+    set missing {}
+    foreach n $names {
+        if {[info commands ::$n] eq ""} { lappend missing $n }
+    }
+    list [llength $names] $missing
+} -match glob -result {[1-9]* {}}
+
+# --------------------------------------------------------
 # stack-2: GUI -- nur wenn Tk verfuegbar
 # --------------------------------------------------------
 if {![catch {package require Tk}]} {

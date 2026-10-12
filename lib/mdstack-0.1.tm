@@ -317,10 +317,12 @@ proc mdstack::currentText {} {
     variable stack
     variable currentIndex
     
-    # Direkt vom Editor holen wenn API gesetzt
+    # Direkt vom Editor holen wenn API gesetzt. Kein "return" innerhalb
+    # von catch: das liefert Code 2, catch schluckt ihn und der Text des
+    # Editors ginge verloren. Faellt der Editor-Aufruf, gilt der Stack.
     if {$editorAPI(getText) ne ""} {
-        catch {
-            return [editorGetText]
+        if {![catch {editorGetText} text]} {
+            return $text
         }
     }
     

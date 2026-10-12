@@ -80,6 +80,40 @@ After this, **right-click** in the editor opens the menu.
 
 ---
 
+## Spec syntax of `mdstack::uicontextmenu::createFromSpec`
+
+`createFromSpec path spec` builds a menu from a list of entries:
+
+```tcl
+mdstack::uicontextmenu::createFromSpec .m {
+    {Save   {app::save $w}}                      ;# command (multi-word is fine)
+    {Quit   {exit 0} -accelerator Ctrl+Q}        ;# command with options
+    {Run    -command {app::run} -state disabled} ;# explicit command
+    -                                            ;# separator
+    {Insert -menu {{Link {app::link}} {Image {app::image}}}}  ;# explicit submenu
+    {Format {{Bold {app::wrap **}} - {Italic {app::wrap *}}}} ;# short submenu form
+    {check  Wrap  -variable ::wrap -command app::rewrap}
+    {radio  Small -variable ::size -value s}
+}
+```
+
+How an entry `{label X ...}` is read:
+
+- `{label -menu spec}` is always a submenu, `{label -command cmd ?opts?}`
+  always a command entry.
+- Options after the command (`{label cmd -accelerator ...}`) make it a
+  command entry.
+- In the short form `{label X}`, X is a submenu only when it is a
+  well-formed spec: every element is `-` or an entry with at least two words.
+  A Tcl command starts with a one-word command name, so `{puts hello}` or
+  `{app::save $w}` is a command, not a submenu. Use `-menu` or `-command` to
+  state the intent explicitly.
+
+Submenu widgets get generated child paths (`.m.sub0`, `.m.sub1`, ...), so
+labels may contain capitals, spaces and dots.
+
+---
+
 ## Non-goals
 
 - No file operations
