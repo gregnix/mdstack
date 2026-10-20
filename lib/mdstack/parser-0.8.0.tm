@@ -1032,6 +1032,20 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
         }
         if {[regexp {^:[[:space:]]+(.*)$} $cur -> defText]} {
             # Definitions-Zeile -> an letzten Term anhaengen
+            #
+            # A definition may wrap: the following lines, indented and
+            # without a blank line in between, continue the same definition
+            # (Pandoc). Until 2026-10-19 each such line became a term of
+            # its own with no definition -- every multi-line glossary entry
+            # of the bookkit books fell apart line by line.
+            while {($i + 1) < $n} {
+                set nxt [lindex $lines [expr {$i + 1}]]
+                if {[string trim $nxt] eq ""} break
+                if {![regexp {^[ \t]+(.*)$} $nxt -> rest]} break
+                if {[regexp {^:[[:space:]]+} [string trimleft $nxt]]} break
+                append defText " " [string trim $rest]
+                incr i
+            }
             if {[llength $dlItems] > 0} {
                 set lastIdx [expr {[llength $dlItems] - 1}]
                 set lastItem [lindex $dlItems $lastIdx]

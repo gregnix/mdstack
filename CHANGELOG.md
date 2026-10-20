@@ -1,5 +1,14 @@
 # mdstack — Changelog
 
+## 2026-10-19 — definition lists
+
+- `parseDefList`: a definition that wraps onto indented lines stays one
+  definition. Until now each continuation line became a term of its own with
+  no definition -- measured on the bookkit glossaries, where every
+  multi-line entry fell apart line by line (`APFS`, `AppMain.tcl`, ...).
+  Indented lines directly after a `: ` line, without a blank line, now
+  continue that definition. Tests `dl-wrap-*` in `tests/parser-deflist.tcl`.
+
 ## 2026-10-05 — fixes
 
 - `mdstack::currentText` returned the stack text although an editor was

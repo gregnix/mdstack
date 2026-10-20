@@ -231,6 +231,38 @@ assert "dl-termText-field" {[dict exists $item termText]}
 assert "dl-termText-value" {[dict get $item termText] eq "Mein Term"}
 
 # ============================================================
+# 14. Mehrzeilige Definition (eingerueckte Folgezeilen)
+# ============================================================
+#
+# Bis 2026-10-19 wurde jede eingerueckte Folgezeile ein eigener Term ohne
+# Definition -- gemessen an den Glossaren der bookkit-Buecher.
+
+set ast [mdstack::parser::parse {**AppMain.tcl**
+: Startskript in `Contents`. Tk laedt es selbst, wenn
+  `wish` ohne Skriptargument startet. Siehe
+  [App weitergeben](108-app.md).
+
+**Aqua**
+: Natives Fenstersystem.}]
+set dl [getBlock $ast 0]
+assert "dl-wrap-two-items" {[llength [dict get $dl items]] == 2}
+set item [getDlItem $dl 0]
+assert "dl-wrap-one-def" {[llength [dict get $item definitions]] == 1}
+set hasLink 0
+foreach i [lindex [dict get $item definitions] 0] {
+    if {[dict get $i type] eq "link"} { set hasLink 1 }
+}
+assert "dl-wrap-link-in-def" {$hasLink == 1}
+assert "dl-wrap-second-term" {[dict get [getDlItem $dl 1] termText] eq "**Aqua**"}
+
+# Gegenprobe: ein nicht eingerueckter Term direkt danach bleibt ein Term.
+set ast [mdstack::parser::parse {A
+: eins
+B
+: zwei}]
+assert "dl-wrap-unindented-term" {[llength [dict get [getBlock $ast 0] items]] == 2}
+
+# ============================================================
 # Result
 # ============================================================
 
