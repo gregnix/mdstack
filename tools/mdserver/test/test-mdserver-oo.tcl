@@ -1488,4 +1488,250 @@ test site-7 "clean URL: /docs/x serves docs/x.md, in site and plain" -setup {
     file delete -force $w
 } -result {200 1 200 1}
 
+# ============================================================
+# PDFs in the search (--pdf-search), with tclutils::tupdftext
+# ============================================================
+# The server is a child process; it finds tclutils through TCLUTILS_TM, as
+# in production. Without tclutils the tests are skipped.
+proc pdfTextAvailable {} {
+    if {[info exists ::env(TCLUTILS_TM)]} { catch {tcl::tm::path add $::env(TCLUTILS_TM)} }
+    expr {![catch {package require tclutils::tupdftext 0.1}]}
+}
+testConstraint tupdftext [pdfTextAvailable]
+
+# a PDF with "Netzwerkfreigabe" on page 2
+proc suchPdf {path} {
+    set objs [list "<< /Type /Catalog /Pages 2 0 R >>" \
+        "<< /Type /Pages /Kids \[3 0 R 4 0 R\] /Count 2 >>" \
+        "<< /Type /Page /Parent 2 0 R /Contents 5 0 R /Resources << /Font << /F1 7 0 R >> >> >>" \
+        "<< /Type /Page /Parent 2 0 R /Contents 6 0 R /Resources << /Font << /F1 7 0 R >> >> >>"]
+    foreach t {{Erste Seite ohne Treffer} {Die Netzwerkfreigabe steht auf Seite zwei}} {
+        set c "BT /F1 12 Tf 72 700 Td ($t) Tj ET"
+        lappend objs "<< /Length [string length $c] >>\nstream\n$c\nendstream"
+    }
+    lappend objs "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+    set out "%PDF-1.4\n"
+    set i 0
+    foreach o $objs { append out "[incr i] 0 obj\n$o\nendobj\n" }
+    append out "trailer\n<< /Root 1 0 R >>\n%%EOF\n"
+    set fh [open $path wb]; puts -nonewline $fh $out; close $fh
+}
+
+# The PDF worker reads in the background: ask again until PATTERN shows
+# up, at most MS milliseconds. Returns the last answer.
+proc holenBis {port pfad muster {ms 15000}} {
+    set ende [expr {[clock milliseconds] + $ms}]
+    while 1 {
+        set a [holen $port $pfad]
+        if {[string match $muster $a] || [clock milliseconds] > $ende} { return $a }
+        after 200
+    }
+}
+
+# A PDF with N pages of text, for the timing test.
+proc grossPdf {path n} {
+    set kids {}
+    for {set i 0} {$i < $n} {incr i} { lappend kids "[expr {4 + 2*$i}] 0 R" }
+    set objs [list "<< /Type /Catalog /Pages 2 0 R >>" \
+        "<< /Type /Pages /Kids \[[join $kids]\] /Count $n >>" \
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    for {set i 0} {$i < $n} {incr i} {
+        set c "BT /F1 10 Tf 12 TL 72 760 Td"
+        for {set z 0} {$z < 50} {incr z} {
+            append c " (Zeile $z auf Seite $i mit etwas Text zum Lesen und Suchen) Tj T*"
+        }
+        append c " ET"
+        lappend objs "<< /Type /Page /Parent 2 0 R /Contents [expr {5 + 2*$i}] 0 R /Resources << /Font << /F1 3 0 R >> >> >>" \
+            "<< /Length [string length $c] >>\nstream\n$c\nendstream"
+    }
+    set out "%PDF-1.4\n"
+    set k 0
+    foreach o $objs { append out "[incr k] 0 obj\n$o\nendobj\n" }
+    append out "trailer\n<< /Root 1 0 R >>\n%%EOF\n"
+    set fh [open $path wb]; puts -nonewline $fh $out; close $fh
+}
+
+test search-pdf-1 "a PDF page is found and linked with #page=N" -constraints tupdftext -setup {
+    set w [suchWurzel]
+    suchPdf [file join $w a handbuch.pdf]
+    set cache [file join [tcltest::configure -tmpdir] mdpdfcache[pid]]
+    file delete -force $cache
+    set h [serverStart $w --no-log --style site --pdf-search 1 --pdf-cache $cache]
+    set p [serverPort $h]
+} -body {
+    set a [holenBis $p /?q=netzwerkfreigabe *handbuch.pdf*]
+    list [string match {*href="/a/handbuch.pdf#page=2"*} $a] \
+         [string match {*handbuch, S. 2*} $a] \
+         [string match {*<mark>Netzwerkfreigabe</mark>*} $a] \
+         [string match {*page=1*} $a] \
+         [llength [glob -nocomplain -directory $cache *.txt]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w $cache
+} -result {1 1 1 0 1}
+
+test search-pdf-2 "--pdf-search 0: PDFs are not searched" -constraints tupdftext -setup {
+    set w [suchWurzel]
+    suchPdf [file join $w a handbuch.pdf]
+    set h [serverStart $w --no-log --style site --pdf-search 0]
+    set p [serverPort $h]
+} -body {
+    string match {*handbuch.pdf*} [holen $p /?q=netzwerkfreigabe]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result 0
+
+test search-pdf-3 "a cached text is used; a changed PDF is read again" -constraints tupdftext -setup {
+    set w [suchWurzel]
+    set pdfFile [file join $w a handbuch.pdf]
+    suchPdf $pdfFile
+    set cache [file join [tcltest::configure -tmpdir] mdpdfcache3[pid]]
+    file delete -force $cache
+    set h [serverStart $w --no-log --style site --pdf-search 1 --pdf-cache $cache]
+    set p [serverPort $h]
+} -body {
+    holenBis $p /?q=netzwerkfreigabe *handbuch.pdf*
+    # same mtime and size, other text in the cache: the cache wins
+    set cf [lindex [glob -directory $cache *.txt] 0]
+    set fh [open $cf r]; fconfigure $fh -encoding utf-8; set c [read $fh]; close $fh
+    lset c 3 [list "" "Zwischengespeichert Blumenkohl"]
+    set fh [open $cf w]; fconfigure $fh -encoding utf-8; puts -nonewline $fh $c; close $fh
+    serverStop $h
+    set h [serverStart $w --no-log --style site --pdf-search 1 --pdf-cache $cache]
+    set p [serverPort $h]
+    set a [holen $p /?q=blumenkohl]
+    # touch the PDF: the cache entry no longer matches
+    file mtime $pdfFile [expr {[file mtime $pdfFile] + 10}]
+    set b [holen $p /?q=blumenkohl]
+    list [string match {*handbuch.pdf#page=2*} $a] [string match {*handbuch.pdf*} $b]
+} -cleanup {
+    serverStop $h
+    file delete -force $w $cache
+} -result {1 0}
+
+test search-pdf-4 "--pdf-worker 0: read in the server process, hit at once" -constraints tupdftext -setup {
+    set w [suchWurzel]
+    suchPdf [file join $w a handbuch.pdf]
+    set cache [file join [tcltest::configure -tmpdir] mdpdfcache4[pid]]
+    file delete -force $cache
+    set h [serverStart $w --no-log --style site --pdf-search 1 --pdf-cache $cache --pdf-worker 0]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /?q=netzwerkfreigabe]
+    list [string match {*handbuch.pdf#page=2*} $a] [string match {*noch gelesen*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w $cache
+} -result {1 0}
+
+test search-pdf-5 "while the worker reads a large PDF, pages are served at once" -constraints tupdftext -setup {
+    set w [suchWurzel]
+    grossPdf [file join $w a gross.pdf] 400
+    set cache [file join [tcltest::configure -tmpdir] mdpdfcache5[pid]]
+    file delete -force $cache
+    set h [serverStart $w --no-log --style site --pdf-search 1 --pdf-cache $cache]
+    set p [serverPort $h]
+} -body {
+    set t0 [clock milliseconds]
+    set a [holen $p /?q=zeile]
+    set b [holen $p /]
+    set dt [expr {[clock milliseconds] - $t0}]
+    set c [holenBis $p /?q=zeile {*gross.pdf#page=*} 120000]
+    list [string match {*1 PDF wird noch gelesen*} $a] [expr {$dt < 2000 ? "fast" : $dt}] \
+        [string match {*gross.pdf#page=*} $c] [string match {*noch gelesen*} $c]
+} -cleanup {
+    serverStop $h
+    file delete -force $w $cache
+} -result {1 fast 1 0}
+
+# ============================================================
+# PDFs in the navigation (no tclutils needed)
+# ============================================================
+proc pdfWurzel {} {
+    set d [file join [tcltest::configure -tmpdir] mdpdfnav[pid]]
+    file delete -force $d
+    file mkdir [file join $d nurpdf] [file join $d gemischt]
+    suchPdf [file join $d nurpdf "Mein Handbuch.pdf"]
+    suchPdf [file join $d gemischt anleitung.pdf]
+    set fh [open [file join $d gemischt notiz.md] w]; puts $fh "# Notiz\n\nText."; close $fh
+    return $d
+}
+
+test nav-pdf-1 "a folder with only PDFs is a folder of documents" -setup {
+    set w [pdfWurzel]
+    set h [serverStart $w --no-log --style site --pdf-search 0]
+    set p [serverPort $h]
+} -body {
+    set root [holen $p /]
+    set f [holen $p /nurpdf/]
+    list [string match {*href="nurpdf/"*} $root] \
+         [string match {*class="mds-card doc" href="Mein%20Handbuch.pdf"*PDF, *KB*} $f] \
+         [status [holen $p /nurpdf/Mein%20Handbuch.pdf]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 200}
+
+test nav-pdf-2 "sidebar and 'Alle Dokumente' list PDFs" -setup {
+    set w [pdfWurzel]
+    set h [serverStart $w --no-log --style site --pdf-search 0]
+    set p [serverPort $h]
+} -body {
+    set doc [holen $p /gemischt/notiz.md]
+    set all [holen $p /?nav=index]
+    list [string match {*<a href="anleitung.pdf">anleitung</a>*<small>PDF</small>*} $doc] \
+         [string match {*href="/gemischt/anleitung.pdf"*} $all] \
+         [string match {*href="/nurpdf/Mein%20Handbuch.pdf"*} $all]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 1}
+
+# ============================================================
+# Manual pages: several H1, title from YAML or the NAME line
+# ============================================================
+proc manWurzel {} {
+    set d [file join [tcltest::configure -tmpdir] mdman[pid]]
+    file delete -force $d
+    file mkdir [file join $d tk]
+    set fh [open [file join $d tk canvas.md] w]; fconfigure $fh -encoding utf-8
+    puts $fh "---\nCommandName: canvas\nManualSection: n\n---\n\n# NAME\n\ncanvas - Erstellt Canvas-Widgets\n\n# \u00dcBERSICHT\n\ncanvas pathName\n\n# BESCHREIBUNG\n\nText.\n\n# BEISPIEL\n\nMehr."
+    close $fh
+    set fh [open [file join $d tk grab.md] w]; fconfigure $fh -encoding utf-8
+    puts $fh "# NAME\n\ngrab - Maus- und Tastaturereignisse beschr\u00e4nken\n\n# \u00dcBERSICHT\n\ngrab ?-global? window"
+    close $fh
+    return $d
+}
+
+test man-1 "several H1: title is not the whole page; YAML CommandName wins" -setup {
+    set w [manWurzel]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /tk/canvas.md]
+    regexp {<title>([^<]*)</title>} $a -> t
+    regexp {class="mds-crumbs">(.*?)</nav>} $a -> c
+    list $t [string match {*<span>canvas</span>*} $c] [string match {*BESCHREIBUNG*} $c] \
+        [string match {*class="mds-toc"*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {{canvas &ndash; mdserver} 1 0 1}
+
+test man-2 "no YAML: title from the NAME line, also in the sidebar" -setup {
+    set w [manWurzel]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /tk/grab.md]
+    regexp {<title>([^<]*)</title>} $a -> t
+    set side [holen $p /tk/]
+    list $t [string match {*<a href="canvas.md">canvas</a>*} $side] \
+        [string match {*<a href="grab.md">grab</a>*} $side] [string match {*>NAME<*} $side]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {{grab &ndash; mdserver} 1 1 0}
+
 tcltest::cleanupTests

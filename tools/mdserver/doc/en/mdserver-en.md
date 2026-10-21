@@ -55,6 +55,9 @@ tclsh mdserver.tcl [options]
 | `--port` | `8080` | HTTP port |
 | `--bind` | (empty) | Listen address. Empty means **all interfaces**. Behind a proxy that does the authentication this must be `127.0.0.1` -- otherwise the port is reachable from outside and unauthenticated. |
 | `--dotfiles` | `0` | Serve hidden files and directories (`.git`, `.env`, …). Off by default: a document root that is also a working copy would otherwise hand out `/.git/config`. |
+| `--pdf-search` | `auto` | PDFs in the full-text search, one hit per page. Needs `tclutils::tupdftext` (tclutils 0.67.0) on the module path or in `TCLUTILS_TM`. `auto`: when it loads; `1`: otherwise a warning; `0`: off. |
+| `--pdf-cache` | `~/.cache/mdserver-pdf` | Folder for the PDF text read, one file per PDF, valid while mtime and size match. Never inside the root. |
+| `--pdf-worker` | `1` | Read PDFs in a second `tclsh`, so a search does not hold up other requests. `0`: in the server process. |
 | `--trusted-proxy` | (empty) | Peer addresses whose `X-Forwarded-For` is believed in the log. Exact match, no netmasks. Empty means the header is ignored. Several as a list: `--trusted-proxy "127.0.0.1 10.0.0.5"`. |
 | `--maxline` | `8190` | Bytes per request/header line; over that **414**. `0` = no limit. |
 | `--maxheader` | `16384` | Bytes of all headers; over that **431**. `0` = no limit. |
@@ -129,7 +132,7 @@ index** of all documents.
 
 **Site index** via the route **`?nav=index`**: recursively lists every `.md`
 under the root as a tree (titles from the first `# H1`, directories bold),
-reached via the **Alle Dokumente** link.
+reached via the **Alle Dokumente** link. PDFs are listed too, by file name and marked "(PDF)"; a folder that holds only PDFs counts as a folder of documents (up to 2026-10-20 it was hidden from the bar, the sidebar and the tiles). Folder tiles show a PDF as a document with "PDF" and its size; the folder sidebar lists PDFs after the Markdown documents. The start banner has a line `PDF:` saying whether the PDF search is on, and if not, why.
 
 **Sections automatically.** The bar also appends the **top-level folders** of
 the root as links (label from the section's `index.md` H1, else the folder
@@ -189,6 +192,25 @@ the umlauts), best first (title hits weigh more), each with its folder path and
 a snippet with the words marked. The texts are read once and kept with their
 mtime; a search rereads only changed files. Dot folders and symlinks are left
 out, as for serving. The other styles answer `?q=` with a plain list.
+
+**PDFs in the search.** When `tclutils::tupdftext` loads (`--pdf-search
+auto`, the default), `?q=` also searches every `.pdf` below the root, page by
+page. A hit reads `handbook, S. 17` and links to `handbook.pdf#page=17`;
+pdf.js (Firefox) and Chrome open that page. `tupdftext` reads the text in pure
+Tcl, about 30 ms per page; it goes into `--pdf-cache` and is read again only
+for a new or changed PDF (mtime, size). The reading runs in a `tclsh` per PDF
+(`lib/pdftext-worker.tcl`, `--pdf-worker 1`, the default), started and awaited
+through `tclutils::tutask` (`await [pipe ...] -timeout`), one PDF after the
+other, right after the start and then for every new or changed PDF. mdserver does not wait for it: a search returns what is in the
+cache and says "3 PDFs werden noch gelesen"; pages and other requests are
+answered at once. Up to 2026-10-20 mdserver read in its own process and every
+request waited (measured: 16 PDFs, 1804 pages, empty cache: 36 s for the
+search and 36 s for a page asked for at the same time; with the worker 0.03
+and 0.04 s). `--pdf-worker 0` reads in the server process again; so does a server
+without `tutask` or `pdftext-worker.tcl`, or one running as a starpack. If the
+worker fails on a PDF (crash, exit code, more than 10 minutes), the next search
+tries again; if it fails a second time, the PDF stays out until it changes. A PDF without text (scan, encrypted) gives no
+hit.
 
 **Book landing page.** A book folder (with `book.tcl`) without `index.md` gets
 a generated one, in every style: title, subtitle, the first paragraph of the
@@ -354,6 +376,7 @@ Server cannot find the CSS styles. Ensure `tools/mdserver/styles/` exists (or se
 tools/mdserver/
   mdserver.tcl        -- CLI launcher
   lib/mdserver-0.4.tm -- server module
+  lib/pdftext-worker.tcl -- reads one PDF for the search (--pdf-worker)
   styles/             -- TOC CSS styles (sidebar/sticky-top/collapsible)
   mkcert.tcl          -- certificate helper
   mdctl.tcl           -- control port client (stop|ping), systemd ExecStop=
@@ -365,6 +388,11 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+**Unreleased (2026-10-21)** -- PDFs in the full-text search (`--pdf-search
+auto|0|1`, `--pdf-cache DIR`): one hit per page, linked as
+`file.pdf#page=N`, text through `tclutils::tupdftext`, cached outside the root. PDF worker (`--pdf-worker 0|1`): PDFs are read in a tclsh per PDF through tclutils::tutask, a search no longer blocks the server. PDFs in the navigation: PDF-only folders appear,
+PDFs as document tiles, in the sidebar and in the site index; banner line `PDF:`.
 
 **0.4 (2026-09-29)** -- the start banner names the address actually bound
 (`0.0.0.0:8080 (alle Schnittstellen)` vs `127.0.0.1:8080`) instead of always

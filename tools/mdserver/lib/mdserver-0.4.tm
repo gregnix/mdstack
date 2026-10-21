@@ -334,6 +334,12 @@ oo::class create mdserver::Renderer {
             set title [my _mdTitle $fpath]
             append out "$pad- \[$title\]\($rel\)\n"
         }
+        # PDFs as well, marked as such
+        foreach fpath [lsort -dictionary [glob -nocomplain -type f -directory $dir *]] {
+            if {[string tolower [file extension $fpath]] ne ".pdf"} continue
+            set rel [string map {" " %20} [my _relUrl $rootDir $fpath]]
+            append out "$pad- \[[file rootname [file tail $fpath]]\]\($rel\) (PDF)\n"
+        }
         return $out
     }
 
@@ -383,6 +389,9 @@ oo::class create mdserver::Server {
             port    8080
             bind    ""
             dotfiles 0
+            pdfsearch auto
+            pdfcache  ""
+            pdfworker 1
             trustedproxy ""
             maxline    8190
             maxheader  16384
@@ -501,6 +510,11 @@ oo::class create mdserver::Server {
         }
 
         my _printStatus
+        # Read the PDFs not yet in the cache now, in the background, so the
+        # first search does not find them missing.
+        if {[my _pdfOn] && [my _pdfWorkerOn]} {
+            after 300 [namespace code {catch {my _searchIndex}}]
+        }
     }
 
     method stop {} {
@@ -509,6 +523,7 @@ oo::class create mdserver::Server {
         catch { close $_ctrlSock  }
         foreach ch [dict keys $_conns] { catch { close $ch } }
         set _conns {}
+        my _pdfWorkerClose
     }
 
     # Style name (?style=) -> path to a CSS file in styles/, or "" (default).
@@ -550,9 +565,12 @@ oo::class create mdserver::Server {
         return $out
     }
 
-    # True if $dir contains any .md file (transitively).
+    # True if $dir contains any .md or .pdf file (transitively). A folder of
+    # PDFs is a folder of documents too (up to 2026-10-20 it was hidden from
+    # the navigation, the sidebar and the folder cards).
     method _dirHasAnyMd {dir} {
         if {[llength [glob -nocomplain -directory $dir *.md]] > 0} { return 1 }
+        if {[llength [my _pdfsIn $dir]] > 0} { return 1 }
         foreach d [glob -nocomplain -directory $dir -type d *] {
             if {[string index [file tail $d] 0] eq "."} continue
             if {[my _dirHasAnyMd $d]} { return 1 }
@@ -560,19 +578,77 @@ oo::class create mdserver::Server {
         return 0
     }
 
+    # PDFs in a folder (any case of the extension), sorted.
+    method _pdfsIn {dir} {
+        set out {}
+        foreach f [glob -nocomplain -directory $dir -type f *] {
+            if {[string tolower [file extension $f]] eq ".pdf"
+                && [string index [file tail $f] 0] ne "."} { lappend out $f }
+        }
+        return [lsort -dictionary $out]
+    }
+
+    # Size for a listing: "820 KB", "2,8 MB".
+    method _sizeLabel {f} {
+        set b [file size $f]
+        if {$b < 1024 * 1024} { return "[expr {($b + 1023) / 1024}] KB" }
+        return "[string map {. ,} [format %.1f [expr {$b / 1048576.0}]]] MB"
+    }
+
     # First "# H1" of a Markdown file, or "" if none.
     method _h1Title {file} {
         set title ""
+        set cmdName ""
+        set nameLine ""
         if {![catch {open $file r} fh]} {
             fconfigure $fh -encoding utf-8
+            set n 0
+            set inYaml 0
+            set afterName 0
             while {[gets $fh line] >= 0} {
+                incr n
+                # YAML head of a Tcl manual page (TIP 700): CommandName
+                if {$n == 1 && $line eq "---"} { set inYaml 1; continue }
+                if {$inYaml} {
+                    if {$line eq "---"} { set inYaml 0; continue }
+                    regexp {^CommandName:\s*(\S.*?)\s*$} $line -> cmdName
+                    continue
+                }
+                if {$afterName} {
+                    if {[string trim $line] eq ""} continue
+                    set nameLine [string trim $line]
+                    break
+                }
                 if {[regexp {^#\s+(.+)$} $line -> t]} {
-                    set title [string trim $t]; break
+                    set title [string trim $t]
+                    if {![my _isManSection $title]} break
+                    set afterName 1
                 }
             }
             close $fh
         }
+        if {[my _isManSection $title]} {
+            set t [my _manTitle $cmdName $nameLine]
+            if {$t ne ""} { return $t }
+        }
         return $title
+    }
+
+    # A manual page converted to Markdown starts with "# NAME" (or the
+    # German "# NAME"/"# BEZEICHNUNG"). Then every page would be called
+    # NAME in the sidebar and in the title. Gemessen 2026-10-21 an den
+    # deutschen Tcl/Tk-Handbuchseiten: 645 Seiten, alle hiessen "NAME".
+    method _isManSection {t} {
+        return [expr {[string toupper $t] in {NAME BEZEICHNUNG}}]
+    }
+
+    # Title of a manual page: CommandName from the YAML head, else the
+    # part of the NAME line before " - " ("canvas - Erstellt ..." -> canvas).
+    method _manTitle {cmdName nameLine} {
+        if {$cmdName ne ""} { return $cmdName }
+        regsub -all {[*`\\]} $nameLine {} nameLine
+        if {[regexp {^(.+?)\s+[-\u2013\u2014]\s} $nameLine -> t]} { return [string trim $t] }
+        return ""
     }
 
     # Chapter list of a bookkit book (dir with book.tcl): the "chapters" list
@@ -808,6 +884,8 @@ $bar[string range $html [expr {$e + 1}] end]"
         set _httpsSock ""
         set _ctrlSock  ""
         catch { set ::mdserver::running 0 }
+        # a PDF being read for the search: kill the worker (tutask cancel)
+        catch { my _pdfWorkerClose }
     }
 
     # Eine Antwort auf den Steuerport -- blockierend geschrieben.
@@ -1193,9 +1271,15 @@ $bar[string range $html [expr {$e + 1}] end]"
     method _pageToc {body} {
         set items ""
         set n 0
-        foreach {- lvl id text} [regexp -all -inline {<h([23])[^>]*?\mid="([^"]+)"[^>]*?>(.*?)</h\1>} $body] {
+        # A page with several H1 (manual pages: NAME, SYNOPSIS, DESCRIPTION
+        # each as "# ...") has its sections one level up: then h1/h2.
+        set lv 23
+        set shift 0
+        if {[regexp -all {<h1[\s>]} $body] > 1} { set lv 12; set shift 1 }
+        foreach {- lvl id text} [regexp -all -inline "<h(\[$lv\])\[^>\]*?\\mid=\"(\[^\"\]+)\"\[^>\]*?>(.*?)</h\\1>" $body] {
             regsub -all {<[^>]+>} $text {} text
-            append items "<li class=\"l$lvl\"><a href=\"#$id\">$text</a></li>"
+            set cls [expr {$lvl + $shift}]
+            append items "<li class=\"l$cls\"><a href=\"#$id\">$text</a></li>"
             incr n
         }
         if {$n < 3} { return "" }
@@ -1235,6 +1319,11 @@ $bar[string range $html [expr {$e + 1}] end]"
             set t [my _h1Title $f]
             if {$t eq ""} { set t [file rootname $n] }
             append items "<li$c><a href=\"$n\">[my _esc [my _plainLabel $t]]</a></li>"
+        }
+        foreach f [my _pdfsIn $dir] {
+            set n [file tail $f]
+            append items "<li><a href=\"[my _esc [string map {" " %20} $n]]\">[my _esc [file rootname $n]]</a>\
+                <small>PDF</small></li>"
         }
         if {$items eq ""} { return "" }
         set title [expr {$dir eq [my cfg root] ? [my cfg title] : [my _dirTitle $dir]}]
@@ -1299,9 +1388,14 @@ $bar[string range $html [expr {$e + 1}] end]"
             append docs "<a class=\"mds-card doc\" href=\"$n\"><strong>[my _esc [my _plainLabel $t]]</strong>\
 <span>[my _esc [my _firstPara $f]]</span></a>"
         }
+        foreach f [my _pdfsIn $dir] {
+            set n [file tail $f]
+            append docs "<a class=\"mds-card doc\" href=\"[my _esc [string map {" " %20} $n]]\"><strong>[my _esc [file rootname $n]]</strong>\
+<span>PDF, [my _sizeLabel $f]</span></a>"
+        }
         foreach f [lsort -dictionary [glob -nocomplain -directory $dir -type f *]] {
             set ext [string tolower [file extension $f]]
-            if {$ext in {.md .tcl .tsv .css} || [string index [file tail $f] 0] eq "."} continue
+            if {$ext in {.md .tcl .tsv .css .pdf} || [string index [file tail $f] 0] eq "."} continue
             set kb [expr {([file size $f] + 1023) / 1024}]
             append files "<li><a href=\"[my _esc [file tail $f]]\">[my _esc [file tail $f]]</a> <small>[string toupper [string range $ext 1 end]], $kb KB</small></li>"
         }
@@ -1383,9 +1477,18 @@ $pager
         set html [mdstack::html::render $ast -theme none -toc 0 -lang de]
         set body [my _bodyOf $html]
         set title ""
-        regexp {<h1[^>]*>(.*?)</h1>} $body -> title
+        # Non-greedy throughout: in a Tcl regexp the FIRST quantifier sets
+        # the greediness of the whole expression. With "<h1[^>]*>(.*?)</h1>"
+        # the ".*?" was greedy too and took everything up to the LAST
+        # </h1> -- a page with several H1 (manual pages: NAME, SYNOPSIS, ...)
+        # had its whole text in the title and the breadcrumbs.
+        regexp {<h1[^>]*?>(.*?)</h1>} $body -> title
         regsub -all {<[^>]+>} $title {} title
         set title [string map {&amp; & &lt; < &gt; > &quot; \"} $title]
+        if {[my _isManSection $title] && [file isfile $fsPath]} {
+            set t [my _h1Title $fsPath]
+            if {$t ne ""} { set title $t }
+        }
         if {$title eq ""} { set title [file rootname [file tail $fsPath]] }
         return [my _sitePage $title $body $fsPath $urlPath $theme]
     }
@@ -1413,17 +1516,227 @@ $pager
 
     method _searchFiles {dir} {
         set out {}
+        set pdf [my _pdfOn]
         foreach e [glob -nocomplain -directory $dir *] {
             set n [file tail $e]
             if {[string index $n 0] eq "." && ![my cfg dotfiles]} continue
             if {[catch {file type $e} t] || $t eq "link"} continue
             if {$t eq "directory"} {
                 lappend out {*}[my _searchFiles $e]
-            } elseif {[string tolower [file extension $n]] eq ".md"} {
-                lappend out $e
+            } else {
+                set ext [string tolower [file extension $n]]
+                if {$ext eq ".md" || ($pdf && $ext eq ".pdf")} { lappend out $e }
             }
         }
         return $out
+    }
+
+    # ------------------------------------------------------------------
+    # PDFs in the search (--pdf-search auto|0|1).
+    #
+    # The text comes from tclutils::tupdftext (pure Tcl, tclutils 0.67.0),
+    # found on the module path or through TCLUTILS_TM. "auto" uses it when
+    # it loads and stays quiet otherwise; "1" says once why it does not.
+    # One hit per page, linked as file.pdf#page=N (pdf.js and Chrome follow
+    # it). Reading a PDF takes about 30 ms per page, so the text is kept in
+    # a cache directory (--pdf-cache, default ~/.cache/mdserver-pdf), one
+    # file per PDF, valid while mtime and size match. Never in the served
+    # root.
+    #
+    # The reading itself runs in a tclsh per PDF, through tclutils::tutask
+    # (--pdf-worker 1, default):
+    # in the server process it stopped every other request until it was
+    # done. Measured 2026-10-21, 16 PDFs with 1804 pages, empty cache: the
+    # first search took 36 s, and a page asked for at the same time also
+    # 36 s. With the worker the page comes at once; the search answers
+    # with what is in the cache and says how many PDFs are still being
+    # read. --pdf-worker 0 reads in the server process as before.
+    # ------------------------------------------------------------------
+
+    method _pdfOn {} {
+        my variable _pdfOn
+        if {[info exists _pdfOn]} { return $_pdfOn }
+        set mode [my cfg pdfsearch]
+        if {$mode in {0 off no false}} { return [set _pdfOn 0] }
+        if {[info exists ::env(TCLUTILS_TM)] && [file isdirectory $::env(TCLUTILS_TM)]} {
+            catch {tcl::tm::path add $::env(TCLUTILS_TM)}
+        }
+        if {[catch {package require tclutils::tupdftext 0.1} err]} {
+            if {$mode ni {auto}} {
+                puts stderr "WARNING: --pdf-search: tclutils::tupdftext not found\
+                    (TCLUTILS_TM or module path) -- PDFs are not searched: $err"
+            }
+            return [set _pdfOn 0]
+        }
+        return [set _pdfOn 1]
+    }
+
+    # One line for the start banner: is the PDF search on, and if not, why.
+    method _pdfStatus {} {
+        if {[my cfg pdfsearch] in {0 off no false}} { return "Suche aus (--pdf-search 0)" }
+        if {[my _pdfOn]} {
+            return "Suche an (tclutils::tupdftext [package present tclutils::tupdftext],\
+                Cache [my _pdfCacheDir])"
+        }
+        return "Suche aus: tclutils::tupdftext nicht gefunden (TCLUTILS_TM setzen\
+            oder tclutils/lib/tm auf den Modulpfad)"
+    }
+
+    method _pdfCacheDir {} {
+        set d [my cfg pdfcache]
+        if {$d eq ""} {
+            set home [expr {[info exists ::env(HOME)] ? $::env(HOME) : [pwd]}]
+            set d [file join $home .cache mdserver-pdf]
+        }
+        return $d
+    }
+
+    # Cache file for a PDF; the file holds [list path mtime size pages].
+    method _pdfCacheFile {f} {
+        set key [format %08x [zlib crc32 [encoding convertto utf-8 [file normalize $f]]]]
+        return [file join [my _pdfCacheDir] $key.txt]
+    }
+
+    # Pages from the cache, if it fits the file: {1 pages}, else {0 {}}.
+    method _pdfCached {f mt} {
+        set cf [my _pdfCacheFile $f]
+        if {[file exists $cf] && ![catch {file size $f} size]
+                && ![catch {my _readUtf8 $cf} c]
+                && [lrange $c 0 2] eq [list [file normalize $f] $mt $size]} {
+            return [list 1 [lindex $c 3]]
+        }
+        return {0 {}}
+    }
+
+    # Pages of a PDF as a list of texts, through the cache, read in this
+    # process. A PDF without text (scan, encrypted, damaged) gives {} and
+    # is cached as such.
+    method _pdfPages {f mt} {
+        lassign [my _pdfCached $f $mt] ok pages
+        if {$ok} { return $pages }
+        if {[catch {::tclutils::tupdftext::pages $f} pages]} { set pages {} }
+        my _pdfCacheWrite $f $mt $pages
+        return $pages
+    }
+
+    method _pdfCacheWrite {f mt pages} {
+        set cf [my _pdfCacheFile $f]
+        catch {
+            file mkdir [file dirname $cf]
+            set fh [open $cf.tmp w]
+            fconfigure $fh -encoding utf-8
+            puts -nonewline $fh [list [file normalize $f] $mt [file size $f] $pages]
+            close $fh
+            file rename -force $cf.tmp $cf
+        }
+    }
+
+    # ---- PDF worker ---------------------------------------------------
+    #
+    # One tclsh per PDF (lib/pdftext-worker.tcl), started and awaited with
+    # tclutils::tutask: a task "pdfReader" takes the queue one PDF at a
+    # time, `await [pipe ...] -timeout`. The event loop keeps serving while
+    # it waits. tutask comes with the same tclutils as tupdftext. A crash,
+    # a timeout or a non-zero exit is an error of the await; the process is
+    # killed on timeout and when the server stops.
+
+    method _pdfWorkerOn {} {
+        my variable _pdfWOn
+        if {[info exists _pdfWOn]} { return $_pdfWOn }
+        if {[my cfg pdfworker] in {0 off no false}} { return [set _pdfWOn 0] }
+        # a starpack's executable runs its own application, not the script
+        if {[info exists ::starkit::topdir]} {
+            my _log "pdf worker: starpack -- reading in the server"
+            return [set _pdfWOn 0]
+        }
+        if {![file readable [file join $::mdserver::moduleDir pdftext-worker.tcl]]} {
+            my _log "pdf worker: lib/pdftext-worker.tcl missing -- reading in the server"
+            return [set _pdfWOn 0]
+        }
+        if {[catch {package require tclutils::tutask 0.2} err]} {
+            my _log "pdf worker: tclutils::tutask not found -- reading in the server"
+            return [set _pdfWOn 0]
+        }
+        return [set _pdfWOn 1]
+    }
+
+    method _pdfWorkerClose {} {
+        my variable _pdfReader _pdfQ
+        if {[info exists _pdfReader] && $_pdfReader ne ""} {
+            catch {$_pdfReader cancel}
+        }
+        set _pdfReader ""
+        set _pdfQ {}
+    }
+
+    # Queue F for the worker unless it is queued already.
+    method _pdfQueue {f mt} {
+        my variable _pdfQ _pdfReader
+        if {![info exists _pdfQ]} { set _pdfQ {} }
+        if {![info exists _pdfReader]} { set _pdfReader "" }
+        set nf [file normalize $f]
+        if {[dict exists $_pdfQ $nf]} { return }
+        if {[catch {file size $f} size]} { return }
+        dict set _pdfQ $nf [list $mt $size]
+        if {$_pdfReader eq ""} {
+            set _pdfReader [::tclutils::tutask::spawn -detach 1 \
+                {*}[namespace code [list my _pdfReader]]]
+        }
+    }
+
+    # The task: one PDF after the other until the queue is empty. A PDF
+    # whose worker fails twice gets an empty cache entry and stays out of
+    # the search until it changes.
+    method _pdfReader {} {
+        my variable _pdfQ _pdfReader _pdfFails
+        if {![info exists _pdfFails]} { set _pdfFails {} }
+        set script [file join $::mdserver::moduleDir pdftext-worker.tcl]
+        set exe [info nameofexecutable]
+        try {
+            while {[dict size $_pdfQ]} {
+                set nf [lindex [dict keys $_pdfQ] 0]
+                lassign [dict get $_pdfQ $nf] mt size
+                set cmd [list $exe $script $nf $mt $size [my _pdfCacheFile $nf] \
+                    [tcl::tm::path list]]
+                try {
+                    ::tclutils::tutask::await \
+                        [::tclutils::tutask::pipe $cmd -encoding utf-8] -timeout 600000
+                    dict unset _pdfFails $nf
+                } trap {TCLUTILS TUTASK CANCELLED} {} {
+                    return
+                } on error {msg} {
+                    set msg [string trim $msg]
+                    if {[string match "*tupdftext not found*" $msg]} {
+                        # no PDF is to blame: read in the server from now on
+                        my variable _pdfWOn
+                        set _pdfWOn 0
+                        set _pdfQ {}
+                        my _log "pdf worker: $msg -- reading in the server"
+                        return
+                    }
+                    if {[dict exists $_pdfFails $nf]} {
+                        my _log "pdf worker failed again on $nf ($msg) -- skipped until it changes"
+                        if {![catch {file mtime $nf} m] && $m == $mt} {
+                            my _pdfCacheWrite $nf $mt {}
+                        }
+                        dict unset _pdfFails $nf
+                    } else {
+                        my _log "pdf worker failed on $nf ($msg) -- the next search tries again"
+                        dict set _pdfFails $nf 1
+                    }
+                }
+                if {[dict exists $_pdfQ $nf]} { dict unset _pdfQ $nf }
+            }
+        } finally {
+            set _pdfReader ""
+        }
+    }
+
+    # PDFs still being read by the worker.
+    method _pdfPending {} {
+        my variable _pdfQ
+        if {![info exists _pdfQ]} { return 0 }
+        return [dict size $_pdfQ]
     }
 
     # Plain text of a Markdown file: markup off, link targets dropped.
@@ -1450,6 +1763,31 @@ $pager
                 dict set fresh $f [dict get $_searchIdx $f]
                 continue
             }
+            if {[string tolower [file extension $f]] eq ".pdf"} {
+                if {[my _pdfWorkerOn]} {
+                    lassign [my _pdfCached $f $mt] ok raw
+                    if {!$ok} {
+                        # not in the index yet: the next scan looks again
+                        my _pdfQueue $f $mt
+                        continue
+                    }
+                } else {
+                    set raw [my _pdfPages $f $mt]
+                }
+                set pages {}
+                set title [file rootname [file tail $f]]
+                set n 0
+                foreach t $raw {
+                    incr n
+                    set t [string trim [regsub -all {\s+} $t " "]]
+                    if {$t eq ""} continue
+                    set pt "$title, S. $n"
+                    lappend pages [dict create page $n title $pt text $t \
+                        ftitle [my _fold $pt] ftext [my _fold $t]]
+                }
+                dict set fresh $f [dict create mtime $mt kind pdf pages $pages]
+                continue
+            }
             if {[catch {my _readUtf8 $f} md]} continue
             set title [my _h1Title $f]
             if {$title eq ""} { set title [file rootname [file tail $f]] }
@@ -1471,7 +1809,14 @@ $pager
         if {![llength $words]} { return {} }
         set root [my cfg root]
         set hits {}
-        dict for {f e} [my _searchIndex] {
+        dict for {f e0} [my _searchIndex] {
+          # a Markdown file is one entry, a PDF one entry per page
+          if {[dict exists $e0 kind] && [dict get $e0 kind] eq "pdf"} {
+              set entries [dict get $e0 pages]
+          } else {
+              set entries [list $e0]
+          }
+          foreach e $entries {
             set ft [dict get $e ftext] ; set fh [dict get $e ftitle]
             set score 0 ; set all 1
             foreach w $words {
@@ -1492,9 +1837,11 @@ $pager
                 # bookkit wrapper and edition share the title: once
                 if {[lindex $dirTitles end] ne $dt} { lappend dirTitles $dt }
             }
+            if {[dict exists $e page]} { append url "#page=[dict get $e page]" }
             lappend hits [dict create url "/$url" title [dict get $e title] \
                 path [join $dirTitles " \u203a "] score $score \
                 snippet [my _snippet [dict get $e text] $words]]
+          }
         }
         set hits [lsort -command [list apply {{a b} {
             set r [expr {[dict get $b score] - [dict get $a score]}]
@@ -1568,6 +1915,10 @@ $pager
 <form class=\"mds-search-big\" action=\"/\" method=\"get\">\
 <input type=\"search\" name=\"q\" value=\"$q\" autofocus><button>Suchen</button></form>"
         if {[string trim $query] eq ""} { return $body }
+        set offen [my _pdfPending]
+        if {$offen} {
+            append body "<p class=\"mds-note\">[my _pdfPendingText $offen]</p>"
+        }
         if {![llength $hits]} {
             append body "<p>Nichts gefunden f&uuml;r <strong>$q</strong>.</p>"
             return $body
@@ -1583,10 +1934,18 @@ $pager
         return $body
     }
 
+    method _pdfPendingText {n} {
+        set was [expr {$n == 1 ? "1 PDF wird" : "$n PDFs werden"}]
+        return "$was noch gelesen; ihre Seiten fehlen in dieser Liste.\
+            Sp\u00e4ter noch einmal suchen."
+    }
+
     # ... and as Markdown for the other styles.
     method _searchMd {query} {
         set md "# Suche: [string map {\[ \\\[ \] \\\] * \\* _ \\_ < &lt;} $query]\n\n"
         set hits [my _search $query]
+        set offen [my _pdfPending]
+        if {$offen} { append md "*[my _pdfPendingText $offen]*\n\n" }
         if {![llength $hits]} { return "$md*Nichts gefunden.*\n" }
         foreach h $hits {
             append md "- \[[dict get $h title]\]([dict get $h url])"
@@ -2133,6 +2492,7 @@ $pager
         puts "$::mdserver::serverHeader -- Tcl Markdown Server"
         puts "  Root:  [my cfg root]"
         puts "  Theme: [my cfg theme]"
+        puts "  PDF:   [my _pdfStatus]"
         puts ""
         puts "  HTTP:  [my _horchtAuf [my cfg port]]"
         puts "         http://$url:[my cfg port]/"

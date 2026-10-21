@@ -57,6 +57,9 @@ proc parseArgs {argv} {
             --navmax  -
             --tlsport { lappend args $arg [lindex $argv [incr i]] }
             --no-log  { lappend args --log 0 }
+            --pdf-search { lappend args --pdfsearch [lindex $argv [incr i]] }
+            --pdf-cache  { lappend args --pdfcache [lindex $argv [incr i]] }
+            --pdf-worker { lappend args --pdfworker [lindex $argv [incr i]] }
             --trusted-proxy {
                 # Der Konstruktor macht aus "--x" den Schluessel "x"; sein
                 # Schluessel heisst trustedproxy, in einem Wort wie alle
@@ -75,6 +78,12 @@ proc parseArgs {argv} {
                 puts "                    is believed in the log. Exact match, no"
                 puts "                    netmasks. Default: empty -- header ignored."
                 puts "  --root    DIR     Document root (default: .)"
+                puts "  --pdf-search auto|0|1  PDFs in the full-text search, one hit"
+                puts "                    per page (needs tclutils::tupdftext; auto:"
+                puts "                    when it loads, default)"
+                puts "  --pdf-cache DIR   Cache for PDF text (default: ~/.cache/mdserver-pdf)"
+                puts "  --pdf-worker 0|1  Read PDFs in a second tclsh, so a search"
+                puts "                    does not hold up other requests (default: 1)"
                 puts "  --theme   NAME    hell|dunkel|solarized (default: hell)"
                 puts "  --title   TEXT    Site title (default: mdserver)"
                 puts "  --toc     0|1     Table of contents (default: 1)"

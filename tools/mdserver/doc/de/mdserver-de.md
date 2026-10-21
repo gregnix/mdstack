@@ -60,6 +60,9 @@ tclsh mdserver.tcl [Optionen]
 | `--port` | `8080` | HTTP-Port |
 | `--bind` | (leer) | Adresse, auf der gehorcht wird. Leer heisst **alle Schnittstellen**. Hinter einem Proxy, der die Anmeldung macht, gehoert hier `127.0.0.1` hin — sonst ist der Port von aussen offen und unangemeldet. |
 | `--dotfiles` | `0` | Versteckte Dateien und Ordner (`.git`, `.env`, …) ausliefern. Aus, weil eine Wurzel, die zugleich Arbeitskopie ist, sonst `/.git/config` herausgibt. |
+| `--pdf-search` | `auto` | PDFs in die Volltextsuche aufnehmen, ein Treffer je Seite. Braucht `tclutils::tupdftext` (tclutils 0.67.0) auf dem Modulpfad oder in `TCLUTILS_TM`. `auto`: wenn es ladbar ist; `1`: sonst eine Warnung; `0`: aus. |
+| `--pdf-cache` | `~/.cache/mdserver-pdf` | Ordner für den gelesenen PDF-Text, eine Datei je PDF, gültig solange mtime und Größe stimmen. Nie in der Wurzel. |
+| `--pdf-worker` | `1` | PDFs in einem zweiten `tclsh` lesen, damit eine Suche andere Anfragen nicht aufhält. `0`: im Serverprozess. |
 | `--trusted-proxy` | (leer) | Gegenstellen, deren `X-Forwarded-For` im Protokoll geglaubt wird. Genaue Uebereinstimmung, keine Netzmasken. Leer heisst: der Kopf wird ignoriert. Mehrere als Liste: `--trusted-proxy "127.0.0.1 10.0.0.5"`. |
 | `--maxline` | `8190` | Bytes je Anfrage-/Kopfzeile; darueber **414**. `0` = ohne Grenze. |
 | `--maxheader` | `16384` | Bytes aller Koepfe zusammen; darueber **431**. `0` = ohne Grenze. |
@@ -177,7 +180,8 @@ bietet einen **Gesamt-Index** ueber alle Dokumente.
 Leiste fuehrt immer dorthin (`/`).
 
 **Gesamt-Index** ueber die Route **`?nav=index`**: listet rekursiv alle `.md`
-unter der Wurzel als Baum (Titel aus dem ersten `# H1`, Verzeichnisse fett).
+unter der Wurzel als Baum (Titel aus dem ersten `# H1`, Verzeichnisse fett),
+dazu jede `.pdf` mit dem Dateinamen und dem Zusatz „(PDF)“.
 Erreichbar ueber den Link **Alle Dokumente**:
 
 ```
@@ -188,7 +192,8 @@ http://localhost:8080/?nav=index
 der Wurzel als Links an (Label aus der Sektions-`index.md`-H1, sonst Ordnername)
 -- Bereiche wie `Programmiersprachen/` sind so von jeder Seite einen Klick
 entfernt, nicht nur ueber *Alle Dokumente*. Ein Ordner erscheint, wenn er
-transitiv irgendeine `.md` enthaelt. Abschaltbar mit der Config-Option
+transitiv irgendeine `.md` oder `.pdf` enthaelt (bis 2026-10-20 nur `.md`:
+ein Ordner nur mit PDFs fehlte in Leiste, Seitenleiste und Kacheln). Abschaltbar mit der Config-Option
 `navsections 0`.
 
 **Ueberlauf: das Sektions-Dropdown.** Waechst die Wurzel, waechst sonst auch die
@@ -238,7 +243,10 @@ Seitenleiste (Kapitel des Buchs mit PDF/HTML, sonst der aktuelle Ordner), in
 der Mitte der Text mit Brotkrumen, rechts "Auf dieser Seite" ab drei
 Ueberschriften h2/h3. Ordner ohne `index.md` erscheinen als Kacheln: zuerst
 Buecher (Titel und Untertitel aus `book.tcl`), dann Ordner, Dokumente (mit dem
-ersten Absatz) und sonstige Dateien. Im Buch sind Zurueck/Weiter zwei Kacheln.
+ersten Absatz; eine PDF mit „PDF“ und Groesse) und sonstige Dateien. Die
+Seitenleiste eines Ordners nennt seine PDFs nach den Markdown-Dokumenten. Das
+Start-Banner sagt in der Zeile `PDF:`, ob die PDF-Suche an ist und, wenn nicht,
+warum. Im Buch sind Zurueck/Weiter zwei Kacheln.
 Schmale Bildschirme bekommen einen Menueknopf fuer die Seitenleiste (nur CSS).
 Dunkel folgt der Systemeinstellung oder `?theme=dunkel`. Eine fehlende Seite
 ist eine 404-Seite mit Weg zurueck.
@@ -250,6 +258,28 @@ Ordnerpfad und einem Ausschnitt mit markierten Woertern. Die Texte werden einmal
 gelesen und mit ihrer mtime behalten; eine Suche liest nur Geaendertes neu.
 Punkt-Ordner und Symlinks bleiben aussen vor, wie beim Ausliefern. Die anderen
 Stile beantworten `?q=` mit einer schlichten Liste.
+
+**PDFs in der Suche.** Ist `tclutils::tupdftext` ladbar (`--pdf-search auto`,
+die Vorgabe), durchsucht `?q=` auch jede `.pdf` unter der Wurzel, Seite fuer
+Seite. Ein Treffer heisst `handbuch, S. 17` und verlinkt auf
+`handbuch.pdf#page=17`; pdf.js (Firefox) und Chrome springen damit auf die
+Seite. Den Text liest `tupdftext` in reinem Tcl, etwa 30 ms je Seite; er landet
+in `--pdf-cache` und wird nur fuer eine neue oder geaenderte PDF (mtime, Groesse)
+neu gelesen. Das Lesen laeuft in einem eigenen `tclsh` je PDF
+(`lib/pdftext-worker.tcl`, `--pdf-worker 1`, die Vorgabe), gestartet und
+abgewartet mit `tclutils::tutask` (`await [pipe ...] -timeout`), eine PDF nach
+der anderen, gleich nach dem Start und danach fuer jede neue oder geaenderte PDF.
+mdserver wartet nicht darauf: eine Suche liefert, was im Cache steht, und
+meldet „3 PDFs werden noch gelesen“; Seiten und andere Anfragen kommen sofort.
+Bis 2026-10-20 las mdserver im eigenen Prozess, und jede Anfrage wartete mit
+(gemessen: 16 PDFs, 1804 Seiten, leerer Cache: 36 s fuer die Suche und 36 s
+fuer eine gleichzeitig angefragte Seite; mit Worker 0,03 und 0,04 s).
+`--pdf-worker 0` liest wieder im eigenen Prozess; ebenso, wenn `tutask` oder
+`pdftext-worker.tcl` fehlt oder mdserver als Starpack laeuft. Scheitert der
+Worker an einer PDF (Absturz, Exit-Code, mehr als 10 Minuten), versucht die
+naechste Suche es noch einmal; scheitert er ein zweites Mal, bleibt die PDF
+draussen, bis sie sich aendert. Eine PDF ohne Text (Scan,
+verschluesselt) liefert keinen Treffer.
 
 **Startseite eines Buchs.** Ein Buchordner (mit `book.tcl`) ohne `index.md`
 bekommt in jedem Stil eine erzeugte: Titel, Untertitel, erster Absatz der
@@ -740,6 +770,7 @@ tools/mdserver/
   mdserver.tcl          -- Startskript (CLI)
   lib/
     mdserver-0.4.tm   -- Server-Modul
+    pdftext-worker.tcl -- liest eine PDF fuer die Suche (--pdf-worker)
   styles/               -- TOC-CSS-Stile
     sidebar.css
     sticky-top.css
@@ -760,6 +791,18 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+### unveroeffentlicht (2026-10-21)
+
+- **PDFs in der Volltextsuche** (`--pdf-search auto|0|1`, `--pdf-cache DIR`):
+  ein Treffer je Seite, Link `datei.pdf#page=N`, Text ueber
+  `tclutils::tupdftext`, im Cache ausserhalb der Wurzel
+- **PDF-Worker** (`--pdf-worker 0|1`): PDFs werden in einem `tclsh` je PDF
+  gelesen, ueber `tclutils::tutask`; eine Suche blockiert den Server nicht mehr (vorher 36 s fuer alle
+  Anfragen bei 1804 Seiten ohne Cache)
+- **PDFs in der Navigation**: Ordner nur mit PDFs erscheinen; PDFs als
+  Dokument-Kacheln, in der Seitenleiste und unter *Alle Dokumente*;
+  Banner-Zeile `PDF:` mit dem Zustand der PDF-Suche
 
 ### unveroeffentlicht (2026-10-04)
 

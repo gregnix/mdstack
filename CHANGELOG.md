@@ -1,5 +1,52 @@
 # mdstack — Changelog
 
+## 2026-10-21 — mdserver: manual pages with several H1
+
+- Page title and breadcrumbs: the title regex `<h1[^>]*>(.*?)</h1>` was
+  greedy as a whole (in a Tcl regexp the first quantifier sets the
+  greediness), so on a page with several H1 it took everything up to the
+  last `</h1>`. Measured on the German Tcl/Tk manual pages: the whole page
+  text stood in `<title>` and in the breadcrumbs. Now `<h1[^>]*?>(.*?)</h1>`.
+- Manual pages start with `# NAME`: every page was called "NAME" in the
+  folder sidebar, the tiles and the title. Now the title is `CommandName`
+  from the YAML head (TIP 700 form) or the part of the NAME line before
+  " - " (`grab - …` -> `grab`).
+- "On this page": a page with several H1 lists h1/h2 instead of h2/h3.
+- Tests `man-1`, `man-2`; 116 tests, Tcl 8.6 and 9.0.
+
+## 2026-10-21 — mdserver: PDFs in the full-text search
+
+- `?q=` also searches PDFs below the root, one hit per page, linked as
+  `file.pdf#page=N`. The text comes from `tclutils::tupdftext` (tclutils
+  0.67.0, pure Tcl), found on the module path or through `TCLUTILS_TM`.
+  Options `--pdf-search auto|0|1` (default `auto`: on when the package
+  loads) and `--pdf-cache DIR` (default `~/.cache/mdserver-pdf`; one file
+  per PDF, valid while mtime and size match, never inside the root).
+- PDFs in the navigation: a folder that holds only PDFs counts as a folder
+  of documents (it was hidden from the section bar, the sidebar and the
+  folder tiles). Folder tiles show a PDF as a document card ("PDF", size);
+  the folder sidebar lists PDFs after the Markdown documents; `?nav=index`
+  lists them marked "(PDF)". Works without tclutils.
+- PDF worker: the PDFs are read in a tclsh per PDF
+  (`lib/pdftext-worker.tcl`, `--pdf-worker 1`, default), started and
+  awaited with `tclutils::tutask` (`await [pipe ...] -timeout 600000`),
+  one PDF after the other. Before, the
+  reading ran in the server process and held up every request: 16 PDFs,
+  1804 pages, empty cache -- 36 s for the search and 36 s for a page asked
+  for at the same time; now 0.03 s and 0.04 s. A search returns what is
+  cached and says how many PDFs are still being read. The cache is filled
+  right after the start. Without tutask or the worker script, or in a
+  starpack: read in the server process. A PDF the worker fails on twice
+  (crash, exit code, timeout) is skipped until it changes. `--pdf-worker 0`
+  keeps the old way.
+- Start banner line `PDF:`: search on (with the cache folder) or off, and
+  why (`--pdf-search 0`, or tclutils::tupdftext not found).
+- Tests `search-pdf-1` to `-5` (hit and link, switched off, cache used and
+  dropped after a change, `--pdf-worker 0`, pages served while a 400-page
+  PDF is read; skipped without tclutils), `nav-pdf-1`, `-2` (folder of
+  PDFs, card, sidebar, site index). 114 tests, Tcl 8.6.14 and 9.0.4;
+  mdstack suite 828.
+
 ## 2026-10-19 — definition lists
 
 - `parseDefList`: a definition that wraps onto indented lines stays one
