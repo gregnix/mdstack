@@ -1,5 +1,22 @@
 # mdstack — Changelog
 
+## 2026-10-24 — bare URLs end at emphasis and brackets; PDF search worker
+
+From the bookkit review of 2026-10-24 (M01, M02, S01).
+
+- Parser, bare `http(s)://` URLs: trailing `*`, `_`, `~` and quotes no
+  longer belong to the URL, so `*https://example.org/test*` links to
+  `https://example.org/test` and the emphasis still forms. A trailing `)`
+  is dropped only while the URL has more `)` than `(`:
+  `https://example.org/a(b)` keeps its bracket, `(see https://…/x)` does
+  not. Before, the `*` went into the link target (ten links in the tklib
+  and Tcl/Tk manuals) and `a(b)` lost its `)`. Tests in
+  `parser-link-features.tcl` (5 new).
+- mdserver `pdftext-worker.tcl`: a PDF whose text could not be read is
+  still cached as empty, but the worker now says why
+  (`ok 0 (error: …)`) and the server logs it. Before, a reader error
+  looked like a PDF without text.
+
 ## 2026-10-24 — mdserver test bind-1 without a LAN address
 
 - `bind-1` ("without --bind the port listens on all interfaces") needs an

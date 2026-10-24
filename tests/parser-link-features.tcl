@@ -65,4 +65,34 @@ test autolink-https {https angle autolink still works} -body {
     fld {<https://example.com>} url
 } -result {https://example.com}
 
+# --- bare URLs: end of the link (review 2026-10-24, M01/M02) ----------------
+proc bareUrl {md} {
+    foreach i [mdstack::parser::parseInlines $md] {
+        if {[dict get $i type] eq "link"} { return [dict get $i url] }
+        if {[dict exists $i content]} {
+            foreach c [dict get $i content] {
+                if {[dict get $c type] eq "link"} { return [dict get $c url] }
+            }
+        }
+    }
+    return -
+}
+test autolink-bare-emph {emphasis star is not part of the URL} -body {
+    list [bareUrl {*https://example.org/test*}] [bareUrl {**https://example.org/test**}] \
+         [bareUrl {_https://example.org/u_ und}]
+} -result {https://example.org/test https://example.org/test https://example.org/u}
+test autolink-bare-emph-node {emphasis around the URL still parses} -body {
+    dict get [first {*https://example.org/test*}] type
+} -result emphasis
+test autolink-bare-paren-balanced {balanced bracket stays in the URL} -body {
+    bareUrl {https://example.org/a(b)}
+} -result {https://example.org/a(b)}
+test autolink-bare-paren-outer {surrounding bracket is not part of it} -body {
+    list [bareUrl {(see https://example.org/x)}] \
+         [bareUrl {https://de.wikipedia.org/wiki/Tcl_(Programmiersprache))}]
+} -result {https://example.org/x https://de.wikipedia.org/wiki/Tcl_(Programmiersprache)}
+test autolink-bare-inner-star {star inside the URL stays} -body {
+    bareUrl {https://example.org/a_b*c.}
+} -result {https://example.org/a_b*c}
+
 cleanupTests

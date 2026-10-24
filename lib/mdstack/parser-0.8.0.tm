@@ -2166,8 +2166,21 @@ proc mdstack::parser::_tryAutolink {s rest idx} {
     # Bare URL
     if {[regexp -indices {^https?://[^\s<>"\u0000]+} $rest matchRange]} {
         set url [string range $rest 0 [lindex $matchRange 1]]
-        while {[string length $url] > 10 && [string index $url end] in {. , ; : ! ? \)}} {
-            set url [string range $url 0 end-1]
+        # Trailing characters that end the sentence or close Markdown
+        # emphasis do not belong to the URL (GFM extended autolinks):
+        # punctuation and * _ ~ ' ". A ")" only while the URL has more ")"
+        # than "(" -- https://example.org/a(b) keeps its bracket,
+        # "(see https://example.org/x)" loses it. Review 2026-10-24 (M01,
+        # M02): "*https://x/test*" linked to "https://x/test*".
+        while {[string length $url] > 10} {
+            set c [string index $url end]
+            if {$c in {. , ; : ! ? * _ ~ ' \"}} {
+                set url [string range $url 0 end-1]
+            } elseif {$c eq ")" && [regexp -all {\)} $url] > [regexp -all {\(} $url]} {
+                set url [string range $url 0 end-1]
+            } else {
+                break
+            }
         }
         set d [dict create type link label [list [dict create type text value $url]] url $url]
         return [list [expr {$idx + [string length $url]}] $d]

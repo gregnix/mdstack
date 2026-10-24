@@ -1699,8 +1699,12 @@ $pager
                 set cmd [list $exe $script $nf $mt $size [my _pdfCacheFile $nf] \
                     [tcl::tm::path list]]
                 try {
-                    ::tclutils::tutask::await \
-                        [::tclutils::tutask::pipe $cmd -encoding utf-8] -timeout 600000
+                    set res [::tclutils::tutask::await \
+                        [::tclutils::tutask::pipe $cmd -encoding utf-8] -timeout 600000]
+                    # cached as empty because the reader failed: say so
+                    if {[regexp {\(error: (.*)\)} $res -> why]} {
+                        my _log "pdf worker: $nf has no text, reader failed: $why"
+                    }
                     dict unset _pdfFails $nf
                 } trap {TCLUTILS TUTASK CANCELLED} {} {
                     return
