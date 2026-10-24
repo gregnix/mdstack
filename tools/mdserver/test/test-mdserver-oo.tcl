@@ -591,25 +591,35 @@ proc freierPort {} {
     return $p
 }
 proc lanAdresse {} {
-    # irgendeine Adresse dieses Rechners, die nicht loopback ist
-    if {[catch {exec hostname -I} out]} { return {} }
-    foreach a $out { if {![string match "127.*" $a] && [string match "*.*" $a]} { return $a } }
+    # irgendeine IPv4-Adresse dieses Rechners, die nicht loopback ist.
+    # "hostname -I" kennt nicht jedes System (und lieferte im Review-Lauf
+    # unter Tcl 9.0 nichts); dann "ip -4 -o addr".
+    set kandidaten {}
+    if {![catch {exec hostname -I 2>/dev/null} out]} { lappend kandidaten {*}$out }
+    if {![catch {exec ip -4 -o addr show scope global 2>/dev/null} out]} {
+        foreach {- a} [regexp -all -inline {inet ([0-9.]+)/} $out] { lappend kandidaten $a }
+    }
+    foreach a $kandidaten {
+        if {[regexp {^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$} $a] && ![string match "127.*" $a]} { return $a }
+    }
     return {}
 }
+# Ohne LAN-Adresse laesst sich "alle Schnittstellen" nicht pruefen: bind-1
+# wird dann uebersprungen statt rot (Review 2026-10-24: der Lauf unter 9.0
+# war nur deshalb rot).
+testConstraint hatLan [expr {[lanAdresse] ne ""}]
 proc erreichbar {adresse port} {
     if {[catch {socket $adresse $port} s]} { return 0 }
     close $s
     return 1
 }
 
-test bind-1 "ohne --bind horcht der Port auf allen Schnittstellen" -setup {
+test bind-1 "ohne --bind horcht der Port auf allen Schnittstellen" -constraints hatLan -setup {
     set p [freierPort]
     set srv [mdserver::Server new -root $testDir -port $p -log 0]
     $srv start
 } -body {
-    set lan [lanAdresse]
-    if {$lan eq ""} { set ergebnis {kein LAN} } else { set ergebnis [erreichbar $lan $p] }
-    list [erreichbar 127.0.0.1 $p] $ergebnis
+    list [erreichbar 127.0.0.1 $p] [erreichbar [lanAdresse] $p]
 } -cleanup {
     $srv destroy
 } -result {1 1}

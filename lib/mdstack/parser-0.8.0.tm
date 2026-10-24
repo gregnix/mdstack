@@ -326,11 +326,15 @@ proc mdstack::parser::isPandocDiv {line} {
 # isPandocDivOpen --
 #   Returns class name if line opens a fenced div, empty string otherwise.
 #   Formats: ::: {.class}   ::: .class   ::: class   :::class
+#   Pandoc also allows attributes and trailing colons; TIP 700 writes both:
+#   ::: {.synopsis} :::     ::: {.info -version="9.0"}
+#   Up to 2026-10-21 neither matched, the fence lines were dropped as stray
+#   markers and the synopsis lines ran together into one paragraph.
 proc mdstack::parser::isPandocDivOpen {line} {
-    if {[regexp {^:{3,}\s+\{\.([A-Za-z][A-Za-z0-9_-]*)\}\s*$} $line -> cls]} {
+    if {[regexp {^:{3,}\s+\{\.([A-Za-z][A-Za-z0-9_-]*)(?:\s[^\}]*)?\}\s*:*\s*$} $line -> cls]} {
         return $cls
     }
-    if {[regexp {^:{3,}\s+\.?([A-Za-z][A-Za-z0-9_-]*)\s*$} $line -> cls]} {
+    if {[regexp {^:{3,}\s+\.?([A-Za-z][A-Za-z0-9_-]*)\s*:*\s*$} $line -> cls]} {
         return $cls
     }
     return ""
@@ -369,6 +373,27 @@ proc mdstack::parser::parsePandocDiv {linesVar iVar} {
     # Recursively parse body as blocks
     set emptyRefDefs [dict create]
     set innerBlocks [mdstack::parser::parseBlocks body emptyRefDefs]
+
+    # TIP 700 synopsis: every source line is one form of the command, so a
+    # line break inside the block is a hard break, not a space.
+    if {$cls eq "synopsis"} {
+        set fixed {}
+        foreach b $innerBlocks {
+            if {[dict get $b type] eq "paragraph"} {
+                set c {}
+                foreach in [dict get $b content] {
+                    if {[dict get $in type] eq "softbreak"} {
+                        lappend c [dict create type linebreak]
+                    } else {
+                        lappend c $in
+                    }
+                }
+                dict set b content $c
+            }
+            lappend fixed $b
+        }
+        set innerBlocks $fixed
+    }
 
     return [dict create type div class $cls blocks $innerBlocks]
 }
@@ -1930,6 +1955,22 @@ proc mdstack::parser::_processEmphasis {nodes} {
     return [mdstack::parser::_delimsToText $nodes]
 }
 
+# Character before position idx for the flanking rules. A soft or hard line
+# break is stored in the joined paragraph as "\x00SB" / "\x00BR"; its last
+# character is a letter, so "**%**" at the start of a continuation line was
+# not left-flanking and stayed literal (Tcl manual, clock.md: "außer\n**%**,").
+# For the rules the break counts as whitespace.
+proc mdstack::parser::_prevCh {s idx} {
+    if {$idx >= 3 && [string range $s [expr {$idx - 3}] [expr {$idx - 1}]] in [list "\x00SB" "\x00BR"]} {
+        return " "
+    }
+    return [string index $s [expr {$idx - 1}]]
+}
+proc mdstack::parser::_nextCh {c} {
+    if {$c eq "\x00"} { return " " }
+    return $c
+}
+
 proc mdstack::parser::_flank {s idx rest inner dl} {
     set prevO [string index $s [expr {$idx - 1}]]
     set nextO [string index $inner 0]
@@ -2060,12 +2101,17 @@ proc mdstack::parser::_tryEmphasisUnderscore {s rest idx} {
 proc mdstack::parser::_tryMath {s rest idx} {
     if {[string index $rest 0] ne "\$"} { return {} }
     # Display math $$...$$ (inline, single-line) -- selten, aber moeglich
-    if {[regexp {^\$\$([^\$\n]+)\$\$} $rest -> inner]} {
+    # \x00 excluded: a line break inside a paragraph is stored as "\x00SB"
+    # (or "\x00BR"), not "\n". Without it the rule "no newlines" did not hold
+    # and Tcl code outside a fence ("$last != 0x0029", a line break, then a
+    # closing brace and another "$x") became math with the sentinel in its
+    # text (2026-10-22).
+    if {[regexp {^\$\$([^\$\n\x00]+)\$\$} $rest -> inner]} {
         return [list [expr {$idx + [string length $inner] + 4}] \
             [dict create type math display 1 text $inner]]
     }
     # Inline-Math $X$ mit strikten Regeln
-    if {![regexp {^\$([^\s\$\d`\n][^\$`\n]*[^\s\$`\n]|[^\s\$\d`\n])\$(.*)$} \
+    if {![regexp {^\$([^\s\$\d`\n\x00][^\$`\n\x00]*[^\s\$`\n\x00]|[^\s\$\d`\n\x00])\$(.*)$} \
             $rest -> inner after]} {
         return {}
     }
@@ -2257,8 +2303,8 @@ proc mdstack::parser::parseInlines {s} {
             set j $idx
             while {$j < $len && [string index $s $j] eq $c} { incr j }
             set n     [expr {$j - $idx}]
-            set prevC [expr {$idx == 0 ? "" : [string index $s [expr {$idx - 1}]]}]
-            set nextC [expr {$j >= $len ? "" : [string index $s $j]}]
+            set prevC [mdstack::parser::_prevCh $s $idx]
+            set nextC [mdstack::parser::_nextCh [string index $s $j]]
             lassign [mdstack::parser::_delimFlags $c $prevC $nextC] canOpen canClose
             lappend out [dict create type _delim char $c n $n \
                 canOpen $canOpen canClose $canClose \

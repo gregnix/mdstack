@@ -232,6 +232,24 @@ assert "K2: shortcut ref url" {[dict get [lindex $links 0] url] eq "encoding.md"
 assert "K3: regular ref url" {[dict get [lindex $links 1] url] eq "binary.md"}
 
 # =========================================================================
+# Fenced divs as TIP 700 writes them (2026-10-22)
+# =========================================================================
+
+set ast [mdstack::parser::parse "::: {.synopsis} :::\n\[after\]{.cmd} \[ms\]{.arg}\n\[after\]{.cmd} \[cancel\]{.sub}\n:::\n"]
+set b [lindex [dict get $ast blocks] 0]
+assert "synopsis: Zaun mit ::: am Ende ist ein div" {[dict get $b type] eq "div" && [dict get $b class] eq "synopsis"}
+set kinds [lmap n [dict get [lindex [dict get $b blocks] 0] content] {dict get $n type}]
+assert "synopsis: Zeilenumbruch wird harter Umbruch" {"linebreak" in $kinds && "softbreak" ni $kinds}
+
+set ast [mdstack::parser::parse "::: {.info -version=\"9.0\"}\nNeu in 9.0.\n:::\n"]
+set b [lindex [dict get $ast blocks] 0]
+assert "info: Zaun mit Attribut ist ein div" {[dict get $b type] eq "div" && [dict get $b class] eq "info"}
+
+set ast [mdstack::parser::parse "::: {.note}\na\nb\n:::\n"]
+set kinds [lmap n [dict get [lindex [dict get [lindex [dict get $ast blocks] 0] blocks] 0] content] {dict get $n type}]
+assert "andere divs: weicher Umbruch bleibt" {"softbreak" in $kinds}
+
+# =========================================================================
 puts ""
 puts "=== parser-tip700.tcl ==="
 puts "$passed/$total passed, $failed failed"

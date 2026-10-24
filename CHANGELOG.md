@@ -1,5 +1,50 @@
 # mdstack — Changelog
 
+## 2026-10-24 — mdserver test bind-1 without a LAN address
+
+- `bind-1` ("without --bind the port listens on all interfaces") needs an
+  address of this machine other than loopback. Without one it failed with
+  `{kein LAN}`, and the whole suite went red although the server was
+  fine (review 2026-10-24, run under Tcl 9.0). It now carries the
+  constraint `hatLan` and is skipped then. `lanAdresse` also asks
+  `ip -4 -o addr` when `hostname -I` gives nothing, and takes only IPv4
+  addresses.
+
+## 2026-10-22 — parser: TIP 700 div fences, synopsis line by line
+
+- `isPandocDivOpen` accepted only `::: {.class}` and `::: .class`. TIP 700
+  (and n2md, man2markdown) write `::: {.synopsis} :::` with trailing colons
+  and `::: {.info -version="9.0"}` with an attribute -- Pandoc allows both.
+  Neither matched; the fence lines were dropped as stray markers, the
+  synopsis became an ordinary paragraph and its lines ran together
+  ("after ms after ms script ... after cancel id ..."). Now both open a
+  div (class only; attributes are not kept).
+- Inside a `synopsis` div every line break is a hard break: each line is
+  one form of the command. Other divs keep soft breaks.
+- Tests in `parser-tip700.tcl` (3 new, 49 in all).
+
+## 2026-10-22 — parser: no inline math across a line break
+
+- `_tryMath` excluded `\n` from the content of `$…$` and `$$…$$`, but a
+  line break inside a paragraph is stored as `\x00SB` / `\x00BR`. Tcl code
+  outside a fence (`if {$last != 0x0029` / `} then {$x}`) became one math
+  span with the sentinel in its text; pdf4tcllib printed it as "?"
+  (U+0000). Found in the merged German Tcl 9.0 manual (manual-build.tcl).
+  `\x00` is now excluded as well. Test `math-inline-7` in extended.tcl.
+
+## 2026-10-22 — parser: emphasis after a line break
+
+- A soft or hard line break inside a paragraph is stored in the joined text
+  as `\x00SB` / `\x00BR`. The flanking rules took the last character of
+  that marker (a letter) as the character before a delimiter run, so
+  `**%**` (or any run followed by punctuation) at the start of a
+  continuation line was not left-flanking and stayed literal. Measured on
+  the German Tcl/Tk manual pages (clock.md: "Zeichen außer\n**%**, …").
+  The break now counts as whitespace on both sides (`_prevCh`, `_nextCh`).
+- Tests `em-after-softbreak-punct`, `em-before-softbreak-punct`,
+  `em-underscore-softbreak-intraword` (tests/parser-emphasis-flanking.tcl).
+  789 tests, Tcl 8.6 and 9.0.
+
 ## 2026-10-21 — mdserver: manual pages with several H1
 
 - Page title and breadcrumbs: the title regex `<h1[^>]*>(.*?)</h1>` was

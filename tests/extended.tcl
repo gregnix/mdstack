@@ -498,6 +498,14 @@ test math-inline-6 "math with digits inside still works" -body {
     list $hasMath $txt
 } -result {1 {x = 5}}
 
+test math-inline-7 "no math across a line break (Tcl code outside a fence)" -body {
+    set ast [mdstack::parser::parse "if {\$last != 0x0029\n} then {\$x}"]
+    set p [lindex [dict get $ast blocks] 0]
+    set kinds {}
+    foreach i [dict get $p content] { lappend kinds [dict get $i type] }
+    list [expr {"math" in $kinds}] [string first "\x00" $ast]
+} -result {0 -1}
+
 test math-block-1 "display math block" -body {
     set md "Before.\n\n\$\$\nx = y\n\$\$\n\nAfter."
     set ast [mdstack::parser::parse $md]

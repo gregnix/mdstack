@@ -118,4 +118,22 @@ test em-underscore-nested-parens {_(_foo_)_ nests} -body {
     dict get [firstInline {_(_foo_)_}] type
 } -result {emphasis}
 
+# A line break counts as whitespace for flanking. The joined paragraph stores
+# it as "\x00SB"; "**%**" at the start of a continuation line stayed literal
+# (Tcl manual, clock.md: "Zeichen außer\n**%**, durchsetzt ...").
+test em-after-softbreak-punct {**%** at the start of a continuation line} -body {
+    set p [lindex [dict get [mdstack::parser::parse "x\n**%** c"] blocks] 0]
+    lmap n [dict get $p content] { dict get $n type }
+} -result {text softbreak strong text}
+
+test em-before-softbreak-punct {**%** at the end of a line} -body {
+    set p [lindex [dict get [mdstack::parser::parse "a **%**\nb"] blocks] 0]
+    lmap n [dict get $p content] { dict get $n type }
+} -result {text strong softbreak text}
+
+test em-underscore-softbreak-intraword {foo_ / bar stays literal across a break} -body {
+    set p [lindex [dict get [mdstack::parser::parse "foo_\nbar"] blocks] 0]
+    lmap n [dict get $p content] { dict get $n type }
+} -result {text softbreak text}
+
 cleanupTests
