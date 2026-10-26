@@ -263,6 +263,54 @@ B
 assert "dl-wrap-unindented-term" {[llength [dict get [getBlock $ast 0] items]] == 2}
 
 # ============================================================
+# Leere Definition und Definition ohne Term (2026-10-25)
+# Aus den umgewandelten Handbuchseiten (h2md, man2markdown): ":" allein
+# und ": text" nach Tabelle, Codeblock oder Absatz wurden als Absatz mit
+# woertlichem ": " gedruckt.
+# ============================================================
+
+# ":" allein, danach Codeblock: Term ohne Definition, Code bleibt Block
+set ast [mdstack::parser::parse "**SYNOPSIS**\n: \n\n```\ncode\n```"]
+set dl [getBlock $ast 0]
+assert "dl-empty-def-is-deflist" {[dict get $dl type] eq "deflist"}
+assert "dl-empty-def-no-defs" {[llength [dict get [getDlItem $dl 0] definitions]] == 0}
+assert "dl-empty-def-code-after" {[dict get [getBlock $ast 1] type] eq "code_block"}
+
+# ":" allein, danach Absatz: der Absatz ist die Definition
+set ast [mdstack::parser::parse "**-a** x\n: \n\n\nText der Option.\n\n**-b** y\n: B."]
+set dl [getBlock $ast 0]
+assert "dl-empty-def-para-one-block" {[llength [dict get $ast blocks]] == 1}
+assert "dl-empty-def-para-two-items" {[llength [dict get $dl items]] == 2}
+assert "dl-empty-def-para-taken" {[dict get [lindex [dict get [getDlItem $dl 0] definitions] 0 0] value] eq "Text der Option."}
+
+# ": text" nach einer Tabelle: Eintrag mit leerem Term, kein ": "
+set ast [mdstack::parser::parse "| a | b |\n|---|---|\n| 1 | 2 |\n\n: `-d z`\n\n: `-e w`"]
+set dl [getBlock $ast 1]
+assert "dl-orphan-is-deflist" {[dict get $dl type] eq "deflist"}
+assert "dl-orphan-empty-term" {[dict get [getDlItem $dl 0] termText] eq ""}
+assert "dl-orphan-two-defs" {[llength [dict get [getDlItem $dl 0] definitions]] == 2}
+
+# ": text" nach "...lauten:" und danach ein normaler Term
+set ast [mdstack::parser::parse "Die Befehle lauten:\n\n: Leerzeile.\n\nab\n: Zeile."]
+assert "dl-orphan-after-para" {[dict get [getBlock $ast 1] type] eq "deflist"}
+assert "dl-orphan-then-term" {[dict get [getDlItem [getBlock $ast 1] 1] termText] eq "ab"}
+
+# Term, Leerzeile, ":" allein, Leerzeile, Absatz mit eingerueckten
+# Folgezeilen (man2markdown, mathfunc "isfinite arg")
+set ast [mdstack::parser::parse "**isfinite** *arg*\n\n:   \n\nGibt 1 zurueck,\n    wenn endlich.\n\n**isinf** *arg*\n\n:   \n\nGibt 1 zurueck."]
+assert "dl-loose-two-lists" {[llength [dict get $ast blocks]] == 2}
+set item [getDlItem [getBlock $ast 0] 0]
+assert "dl-loose-term" {[dict get $item termText] eq "**isfinite** *arg*"}
+assert "dl-loose-def" {[llength [dict get $item definitions]] == 1}
+# Gegenprobe: Absatz, Leerzeile, ": text" -> Absatz bleibt Absatz
+set ast [mdstack::parser::parse "Absatz.\n\n: Text."]
+assert "dl-loose-only-empty" {[dict get [getBlock $ast 0] type] eq "paragraph"}
+# ":" allein ohne Term (nach Codeblock, tklib menubar) wird weggelassen
+set ast [mdstack::parser::parse "```\nx\n```\n\n:  \n\n**C**\n: Eintrag."]
+assert "dl-lone-colon-dropped" {[llength [dict get $ast blocks]] == 2}
+assert "dl-lone-colon-next" {[dict get [getBlock $ast 1] type] eq "deflist"}
+
+# ============================================================
 # Result
 # ============================================================
 

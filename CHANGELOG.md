@@ -1,5 +1,25 @@
 # mdstack — Changelog
 
+## 2026-10-25 — parser: empty definitions and definitions without a term
+
+Found in the PDFs of tcltk-manuals (tablelist, Tk text, mathfunc): about
+3500 definition lines were printed as paragraphs starting with a literal
+": ".
+
+- A lone `:` (empty definition) now opens or continues a definition list
+  (`isDefList`). If a plain paragraph follows after blank lines and is not
+  itself the next term, it becomes the definition (Tk `text`
+  `-insertunfocussed`); code, tables and lists stay blocks of their own.
+- `Term`, blank line, lone `:` (Pandoc's loose form, man2markdown) is a
+  definition list as well (mathfunc `isfinite arg`).
+- `: text` without a term before it -- after a table, a code block or a
+  paragraph ending in ":" -- becomes an item with an empty term
+  (`isOrphanDef`), printed as an indented paragraph. The tablelist option
+  list, cut in two by the `-arrowstyle` table, lost its form after it.
+- A lone `:` with no term at all (after a code block or another empty
+  definition, tklib `menubar`) is dropped.
+- Tests in `parser-deflist.tcl` (17 new, 55 in all).
+
 ## 2026-10-24 — bare URLs end at emphasis and brackets; PDF search worker
 
 From the bookkit review of 2026-10-24 (M01, M02, S01).

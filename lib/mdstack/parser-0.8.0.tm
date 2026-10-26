@@ -274,10 +274,19 @@ proc mdstack::parser::isIndentedCode {line} {
 }
 
 # isDefList needs lookahead: current line is text, next starts with ": "
+# or is a lone ":" (a term whose definition is empty or follows as its own
+# block -- the converted Tcl/Tk manual pages have about a thousand of them).
 proc mdstack::parser::isDefList {line nextLine} {
     expr {[string trim $line] ne "" &&
-          ![regexp {^:[[:space:]]+} $line] &&
-          [regexp {^:[[:space:]]+} $nextLine]}
+          ![regexp {^:([[:space:]]|$)} $line] &&
+          [regexp {^:([[:space:]]|$)} $nextLine]}
+}
+
+# isOrphanDef: a definition line ": text" without a term before it -- after
+# a table, a code block or a paragraph ending in ":". It becomes a definition
+# list item with an empty term (an indented paragraph), not the literal ": ".
+proc mdstack::parser::isOrphanDef {line} {
+    regexp {^:[[:space:]]+[^[:space:]]} $line
 }
 
 # isSetextHeading: aktuelle Zeile + Underline-Zeile (=== oder ---)
@@ -630,10 +639,33 @@ proc mdstack::parser::parseBlocks {linesVar refDefLinesVar} {
             }
         }
 
+        # A lone ":" without a term (after a code block or another empty
+        # definition) carries nothing -- drop it instead of printing ":".
+        if {[string trim $line] eq ":"} {
+            incr i
+            continue
+        }
+
+        if {[mdstack::parser::isOrphanDef $line]} {
+            lappend blocks [mdstack::parser::parseDefList lines i]
+            continue
+        }
+
         # DefList: lookahead to next line
         if {($i + 1) < $n} {
             set nextLine [string trimright [lindex $lines [expr {$i + 1}]]]
             if {[mdstack::parser::isDefList $line $nextLine]} {
+                lappend blocks [mdstack::parser::parseDefList lines i]
+                continue
+            }
+            # Term, blank line, lone ":" (Pandoc's loose form, written by
+            # man2markdown for e.g. mathfunc "isfinite arg"). Only for the
+            # empty ":" -- a paragraph before an orphan ": text" stays a
+            # paragraph.
+            if {$nextLine eq "" && ($i + 2) < $n &&
+                [string trim $line] ne "" &&
+                ![regexp {^:([[:space:]]|$)} $line] &&
+                [string trim [lindex $lines [expr {$i + 2}]]] eq ":"} {
                 lappend blocks [mdstack::parser::parseDefList lines i]
                 continue
             }
@@ -1034,7 +1066,7 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
             # Leerzeile: weiter wenn danach Term oder Definition folgt
             if {($i + 1) < $n} {
                 set peek [string trimright [lindex $lines [expr {$i + 1}]]]
-                if {[regexp {^:[[:space:]]+} $peek]} {
+                if {[regexp {^:([[:space:]]|$)} $peek]} {
                     incr i
                     continue
                 }
@@ -1046,14 +1078,52 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
                     continue
                 }
                 if {[string trim $peek] ne "" &&
-                    ![regexp {^:[[:space:]]+} $peek] &&
+                    ![regexp {^:([[:space:]]|$)} $peek] &&
                     ($i + 2) < $n &&
-                    [regexp {^:[[:space:]]+} [string trimright [lindex $lines [expr {$i + 2}]]]]} {
+                    [regexp {^:([[:space:]]|$)} [string trimright [lindex $lines [expr {$i + 2}]]]]} {
                     incr i
                     continue
                 }
             }
             break
+        }
+        if {$cur eq ":"} {
+            # Empty definition (": " alone). When a plain paragraph follows
+            # after blank lines -- and is not itself the next term -- it is
+            # the definition (seen in the converted manual pages, e.g. Tk
+            # text -insertunfocussed). Any other block (code, table, list,
+            # heading) stays a block of its own after the list.
+            if {[llength $dlItems] == 0} {
+                lappend dlItems [dict create term {} termText "" definitions {}]
+            }
+            set j [expr {$i + 1}]
+            while {$j < $n && [string trim [lindex $lines $j]] eq ""} { incr j }
+            set para {}
+            while {$j < $n} {
+                set pl [string trimright [lindex $lines $j]]
+                if {[string trim $pl] eq ""} break
+                if {[regexp {^(:([[:space:]]|$)|#|```|~~~|\||>|[-*+][[:space:]]|[0-9]+[.)][[:space:]]|<)} $pl]} break
+                # the first line must not be indented (that is code or a
+                # continuation handled elsewhere); later lines may be
+                if {[llength $para] == 0 && [regexp {^(    |\t)} $pl]} break
+                if {($j + 1) < $n &&
+                    [regexp {^:([[:space:]]|$)} [lindex $lines [expr {$j + 1}]]]} break
+                lappend para [string trim $pl]
+                incr j
+            }
+            if {[llength $para] > 0 && $j > $i + 1 &&
+                [string trim [lindex $lines [expr {$i + 1}]]] eq ""} {
+                set lastIdx [expr {[llength $dlItems] - 1}]
+                set lastItem [lindex $dlItems $lastIdx]
+                set defs [dict get $lastItem definitions]
+                lappend defs [mdstack::parser::parseInlines [join $para " "]]
+                dict set lastItem definitions $defs
+                lset dlItems $lastIdx $lastItem
+                set i $j
+            } else {
+                incr i
+            }
+            continue
         }
         if {[regexp {^:[[:space:]]+(.*)$} $cur -> defText]} {
             # Definitions-Zeile -> an letzten Term anhaengen
@@ -1070,6 +1140,10 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
                 if {[regexp {^:[[:space:]]+} [string trimleft $nxt]]} break
                 append defText " " [string trim $rest]
                 incr i
+            }
+            if {[llength $dlItems] == 0} {
+                # definition without a term (isOrphanDef): empty term
+                lappend dlItems [dict create term {} termText "" definitions {}]
             }
             if {[llength $dlItems] > 0} {
                 set lastIdx [expr {[llength $dlItems] - 1}]
