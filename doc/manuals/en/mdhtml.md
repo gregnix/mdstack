@@ -28,7 +28,7 @@ mdstack::parser  -->  AST
 Converts an AST into a complete HTML string.
 
 ```tcl
-package require mdstack::parser 0.8.0
+package require mdstack::parser 0.9.2
 package require mdstack::html   0.2
 
 set ast  [mdstack::parser::parse $markdownText]

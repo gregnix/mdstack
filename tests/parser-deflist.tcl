@@ -311,6 +311,89 @@ assert "dl-lone-colon-dropped" {[llength [dict get $ast blocks]] == 2}
 assert "dl-lone-colon-next" {[dict get [getBlock $ast 1] type] eq "deflist"}
 
 # ============================================================
+# Blocks in definitions (parser 0.9.0): lines indented 4 spaces
+# belong to the definition and are parsed as blocks
+# ============================================================
+
+proc defBlockTypes {item {d 0}} {
+    lmap b [lindex [dict get $item defblocks] $d] {dict get $b type}
+}
+
+# Liste in einer Definition
+set ast [mdstack::parser::parse "**opt**\n: Choices:\n\n    1. first\n    2. second\n\nafter"]
+set item [getDlItem [getBlock $ast 0] 0]
+assert "dlb-list-defblocks" {[dict exists $item defblocks]}
+assert "dlb-list-types" {[defBlockTypes $item] eq {paragraph list}}
+set lst [lindex [dict get $item defblocks] 0 1]
+assert "dlb-list-ordered" {[dict get $lst style] eq "ordered" && [llength [dict get $lst items]] == 2}
+assert "dlb-list-flat-kept" {[defText $item 1] eq "1. first 2. second"}
+assert "dlb-list-after-is-para" {[dict get [getBlock $ast 1] type] eq "paragraph"}
+
+# Aufzaehlung mit -
+set ast [mdstack::parser::parse "T\n: D\n\n    - a\n    - b\n"]
+set item [getDlItem [getBlock $ast 0] 0]
+assert "dlb-bullets" {[dict get [lindex [dict get $item defblocks] 0 1] style] eq "unordered"}
+
+# Codeblock (fenced) in einer Definition, mit Leerzeile im Code
+set ast [mdstack::parser::parse "T\n: Example:\n\n    ```tcl\n    set x 1\n\n    puts \$x\n    ```\n\nNext"]
+set item [getDlItem [getBlock $ast 0] 0]
+assert "dlb-code-types" {[defBlockTypes $item] eq {paragraph code_block}}
+set cb [lindex [dict get $item defblocks] 0 1]
+assert "dlb-code-text" {[dict get $cb text] eq "set x 1\n\nputs \$x"}
+assert "dlb-code-lang" {[dict get $cb language] eq "tcl"}
+assert "dlb-code-next-para" {[dict get [getBlock $ast 1] type] eq "paragraph"}
+
+# Innere Definitionsliste (binary.md: base64 -maxlen ...)
+set md "\[base64\]{.cmd}\n: The encoding.\n\n    During encoding:\n\n    \[-maxlen\]{.lit} \[length\]{.arg}\n    : Split lines.\n\n    \[-wrapchar\]{.lit} \[character\]{.arg}\n    : Line separator.\n\n\n    During decoding:\n\n    \[-strict\]{.lit}\n    : Strict.\n\n\n**hex**\n: Hex."
+set ast [mdstack::parser::parse $md]
+set dl [getBlock $ast 0]
+# two blank lines before a TERM end the list (as before 0.9.0); before an
+# indented line they do not
+assert "dlb-inner-two-lists" {[lmap b [dict get $ast blocks] {dict get $b type}] eq {deflist deflist}}
+assert "dlb-inner-one-item" {[llength [dict get $dl items]] == 1}
+set item [getDlItem $dl 0]
+assert "dlb-inner-types" {[defBlockTypes $item] eq {paragraph paragraph deflist paragraph deflist}}
+set inner [lindex [dict get $item defblocks] 0 2]
+assert "dlb-inner-items" {[llength [dict get $inner items]] == 2}
+assert "dlb-inner-term" {[dict get [lindex [dict get $inner items] 0] termText] eq "\[-maxlen\]{.lit} \[length\]{.arg}"}
+assert "dlb-inner-def" {[defText [lindex [dict get $inner items] 1] 0] eq "Line separator."}
+assert "dlb-two-blank-lines-stay" {[dict get [lindex [dict get $item defblocks] 0 3] type] eq "paragraph"}
+assert "dlb-hex-plain" {![dict exists [getDlItem [getBlock $ast 1] 0] defblocks]}
+
+# Mehrere Absaetze: nur Absaetze -> keine defblocks, Form wie bisher
+set ast [mdstack::parser::parse "T\n: First.\n\n    Second.\n\n    Third."]
+set item [getDlItem [getBlock $ast 0] 0]
+assert "dlb-paras-no-defblocks" {![dict exists $item defblocks]}
+assert "dlb-paras-three-defs" {[llength [dict get $item definitions]] == 3}
+assert "dlb-paras-third" {[defText $item 2] eq "Third."}
+# ... auch ueber zwei Leerzeilen hinweg
+set ast [mdstack::parser::parse "T\n: First.\n\n\n    Second."]
+assert "dlb-paras-two-blanks" {[llength [dict get $ast blocks]] == 1 &&
+    [llength [dict get [getDlItem [getBlock $ast 0] 0] definitions]] == 2}
+
+# Ausserhalb einer Definition bleibt Einrueckung eingerueckter Code
+set ast [mdstack::parser::parse "Text.\n\n    code here\n"]
+assert "dlb-outside-indented-code" {[dict get [getBlock $ast 1] type] eq "code_block"}
+set ast [mdstack::parser::parse "T\n: D\n\nAbsatz.\n\n    code here\n"]
+assert "dlb-after-para-code" {[dict get [getBlock $ast 2] type] eq "code_block"}
+
+# Tabelle in einer Definition
+set ast [mdstack::parser::parse "T\n: D\n\n    | a | b |\n    |---|---|\n    | 1 | 2 |\n"]
+assert "dlb-table" {[defBlockTypes [getDlItem [getBlock $ast 0] 0]] eq {paragraph table}}
+
+# Zwei Definitionen desselben Begriffs, die zweite mit Liste
+set ast [mdstack::parser::parse "T\n: One.\n\n: Two:\n\n    - x\n"]
+set item [getDlItem [getBlock $ast 0] 0]
+assert "dlb-two-defs" {[llength [dict get $item defblocks]] == 2}
+assert "dlb-two-defs-second" {[defBlockTypes $item 1] eq {paragraph list}}
+
+# Validator kennt defblocks
+if {![catch {package require mdstack::validator 0.2}]} {
+    set ast [mdstack::parser::parse $md]
+    assert "dlb-validator-ok" {[llength [mdstack::validator::validate $ast]] == 0}
+}
+
+# ============================================================
 # Result
 # ============================================================
 

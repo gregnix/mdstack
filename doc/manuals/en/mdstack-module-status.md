@@ -4,7 +4,7 @@ Inventory of the `lib/mdstack/*.tm` submodules, their dependency tier, and their
 test/doc coverage. This is the engineering-parity baseline (the level
 tclutils/tkutils already hold): it makes the gaps explicit.
 
-**Stand:** 2026-09-26 (measured `package provide` in `mdstack/lib/`).
+**Stand:** 2026-10-26 (measured `package provide` in `mdstack/lib/`).
 
 `mdstack-0.1.tm` itself is the **orchestrator** (context stack, callback-based);
 by design it knows no concrete modules and is intentionally *not* a loader.
@@ -13,10 +13,10 @@ by design it knows no concrete modules and is intentionally *not* a loader.
 
 | module | ver | tier | declared requires | dedicated test | doc |
 |--------|-----|------|-------------------|----------------|-----|
-| parser | 0.8.0 | core | Tcl 8.6- | parser suites | parser.md |
+| parser | 0.9.2 | core | Tcl 8.6- | parser suites | parser.md |
 | model | 0.1 | core | Tcl 8.6- | indirect | model.md |
 | theme | 0.1 | core | Tcl 8.6- | — | theme.md |
-| validator | 0.1 | core | Tcl 8.6- | **validator.tcl** | validator.md |
+| validator | 0.2 | core | Tcl 8.6- | **validator.tcl** | validator.md |
 | indexgen | 0.1 | core | Tcl 8.6 9 | — | mdindexgen.md |
 | text | 0.1 | Tk | Tcl 8.6-, Tk 8.6- | indirect | — |
 | viewer | 0.4 | Tk | Tcl 8.6-, Tk 8.6-; *opt:* tkutils::tkuwheel, Img, tksvg | **viewer.tcl** | viewer.md |
@@ -34,7 +34,15 @@ Tiers: **core** = pure Tcl, no Tk; **Tk** = needs Tk; **export** = needs docir
 
 `mdserver` 0.3 lives under `tools/mdserver/` — not a `mdstack::*` submodule.
 
-## Parser 0.8.0 (measured)
+## Parser 0.9.2 (measured)
+
+- 0.9.2: spans before links (a span may hold a reference link); switches
+  `inlineMath` and `listContinuation`.
+- 0.9.1: three stars switch emphasis like Pandoc (`*a***b**`).
+
+- 0.9.0: span attribute lists (`attrs`), blocks in definitions (`defblocks`),
+  section references `[Heading]`; tokens `inline:span_attrs`,
+  `inline:section_ref`, `blocks:deflist_blocks`.
 
 - CommonMark HTML blocks (all 7 start conditions) as `html_block` — previously dropped.
 - Display math `$$...$$` → `math_block`; inline `$...$` → `math`.
@@ -63,13 +71,9 @@ Tiers: **core** = pure Tcl, no Tk; **Tk** = needs Tk; **export** = needs docir
    `mdstack::core` (parser, model, theme), `mdstack::ui` (the Tk widgets), and
    `mdstack::export` (html, pdf → docir). This keeps the orchestrator untouched.
    **Decision needed** before scaffolding.
-6. **Vendor copy.** `mdhelpapp/libs/common/` was synced from the live trees
-   on 2026-09-26: tclutils 0.63.0, tkutils 0.44.0, pdf4tcl 0.9.4.67,
-   pdf4tcllib 0.6.5, mdstack parser 0.8.0, docir pdf 0.5 / rendererTk 0.5.
-   Nested `.git` remotes were left alone. Glyphs-1.5.2 has no live sibling.
 
 ## Suggested order
 
 Tests for the untested modules (3) first. Per-module docs (2) can follow the
 tkutils single-source-`md` + `md2man` pattern. The tiered loader (5) is small
-once the structure is decided. Do not silently overwrite mdhelpapp copies.
+once the structure is decided.

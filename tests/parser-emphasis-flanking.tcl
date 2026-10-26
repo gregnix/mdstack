@@ -136,4 +136,42 @@ test em-underscore-softbreak-intraword {foo_ / bar stays literal across a break}
     lmap n [dict get $p content] { dict get $n type }
 } -result {text softbreak text}
 
+# --- three stars switch emphasis like Pandoc (0.9.1) ------------------------
+#
+# n2md --tip700 and man2markdown.tcl write nroff \fIa\fBb\fR as *a***b**.
+# Pandoc reads <em>a</em><strong>b</strong>; plain CommonMark left "**b**"
+# literal (letter before, punctuation after: the run may not open).
+
+proc shape {md} {
+    set out {}
+    foreach n [mdstack::parser::parseInlines $md] {
+        set t [dict get $n type]
+        if {$t eq "text"} { lappend out [list text [dict get $n value]]; continue }
+        set txt ""
+        foreach c [dict get $n content] {
+            if {[dict exists $c value]} { append txt [dict get $c value] }
+        }
+        lappend out [list $t $txt]
+    }
+    return $out
+}
+test switch-1.1 {italic then bold, punctuation after} -body {
+    shape {under *ZIPFS\_VOLUME***/app** as}
+} -result {{text {under }} {emphasis ZIPFS_VOLUME} {strong /app} {text { as}}}
+test switch-1.2 {alternating bold and italic} -body {
+    shape {**libtcl\_***major***\_***minor***.zip**}
+} -result {{strong libtcl_} {emphasis major} {strong _} {emphasis minor} {strong .zip}}
+test switch-1.3 {bold then italic} -body {
+    shape {**a***b* end}
+} -result {{strong a} {emphasis b} {text { end}}}
+test switch-1.4 {after a parenthesis} -body {
+    shape {*TK\_OPTION\_VAR(***type**)}
+} -result {{emphasis TK_OPTION_VAR(} {strong type} {text )}}
+test switch-1.5 {intraword bold italic stays nested (no open run before)} -body {
+    lmap n [mdstack::parser::parseInlines {foo***bar***baz}] { dict get $n type }
+} -result {text emphasis text}
+test switch-1.6 {stars between digits stay literal} -body {
+    shape {2***3 and 4 * 5}
+} -result {{text {2***3 and 4 * 5}}}
+
 cleanupTests

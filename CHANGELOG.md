@@ -1,24 +1,46 @@
 # mdstack — Changelog
 
+## 2026-10-26 — parser 0.9.2
+
+- `***` between text closes the open `*`/`**` and opens the other, as in
+  Pandoc (`*a***b**`, `**a***b*`). `foo***bar***baz` stays bold italic.
+- A span may hold a reference link (`[a [b][c].]{version="x"}`).
+- `::mdstack::parser::inlineMath` (default 1): 0 turns `$...$` math off.
+- `::mdstack::parser::listContinuation` (default 0): 1 keeps indented
+  blocks after a blank line in the list item, as CommonMark does.
+- Tests: `parser-emphasis-flanking.tcl` +6, `parser-tip700.tcl` +7.
+- Delete: `parser-0.9.0.tm`, `parser-0.9.1.tm` if present.
+
+## 2026-10-26 — parser 0.9.0, validator 0.2
+
+For the TIP 700 format (`man2markdown.tcl`, `n2md --tip700`).
+
+- Span attributes as in Pandoc: classes, `#id`, `key="value"`
+  (`[\*interp]{.carg .in type="Tcl_Interp"}`). Span node: `class` (all
+  classes), `id`, `attrs` (dict). `[a]{a b c}` stays text.
+- Blocks in definitions: lines indented 4 spaces after a definition belong
+  to it and are parsed as blocks (lists, code, inner definition lists,
+  tables). New item field `defblocks`; `definitions` unchanged.
+- Section references: `[Heading text]` without a link definition links to
+  that heading of the document; in a merged manual it stays in its page.
+  Duplicate anchors get an alias (`alias` of the heading).
+- Block quotes are parsed as documents (`parseDepth`).
+- `supports`: `inline:span_attrs`, `inline:section_ref`,
+  `blocks:deflist_blocks`.
+- validator 0.2: empty span class allowed with attributes or id; `attrs`
+  must be a dict; `defblocks` are checked as blocks.
+- Tests: `parser-tip700.tcl` 90, `parser-deflist.tcl` 83, `validator.tcl` 46.
+- Delete: `parser-0.8.0.tm`, `validator-0.1.tm`.
+
 ## 2026-10-25 — parser: empty definitions and definitions without a term
 
-Found in the PDFs of tcltk-manuals (tablelist, Tk text, mathfunc): about
-3500 definition lines were printed as paragraphs starting with a literal
-": ".
-
-- A lone `:` (empty definition) now opens or continues a definition list
-  (`isDefList`). If a plain paragraph follows after blank lines and is not
-  itself the next term, it becomes the definition (Tk `text`
-  `-insertunfocussed`); code, tables and lists stay blocks of their own.
-- `Term`, blank line, lone `:` (Pandoc's loose form, man2markdown) is a
-  definition list as well (mathfunc `isfinite arg`).
-- `: text` without a term before it -- after a table, a code block or a
-  paragraph ending in ":" -- becomes an item with an empty term
-  (`isOrphanDef`), printed as an indented paragraph. The tablelist option
-  list, cut in two by the `-arrowstyle` table, lost its form after it.
-- A lone `:` with no term at all (after a code block or another empty
-  definition, tklib `menubar`) is dropped.
-- Tests in `parser-deflist.tcl` (17 new, 55 in all).
+- A lone `:` opens or continues a definition list; a following paragraph
+  becomes its definition.
+- Term, blank line, lone `:` (Pandoc's loose form) is a definition list.
+- `: text` without a term becomes an item with an empty term
+  (`isOrphanDef`).
+- A lone `:` with no term at all is dropped.
+- Tests: `parser-deflist.tcl` +17.
 
 ## 2026-10-24 — bare URLs end at emphasis and brackets; PDF search worker
 

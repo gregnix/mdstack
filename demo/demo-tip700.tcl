@@ -16,7 +16,7 @@ if {![info exists ::_setup_done]} {
 
 
 package require mdstack::parser 0.2
-package require mdstack::validator 0.1
+package require mdstack::validator 0.2
 
 # ====================================================================
 # Helper

@@ -1,4 +1,32 @@
-# mdstack::parser 0.8.0
+# mdstack::parser 0.9.2
+#
+# 0.9.2 (2026-10-26): spans are tried before links, so a span may hold a
+#   reference link ([a [b][c] d]{version="x"}); variable inlineMath (1)
+#   switches $...$ math off; variable listContinuation (0): 1 keeps a
+#   4-space paragraph after a blank line in the list item above.
+# 0.9.1 (2026-10-26): a run of three stars between two emphases that
+#   touch without a space switches like Pandoc: *a***b** is italic a then
+#   bold b, **a***b* bold a then italic b (n2md --tip700 writes this for
+#   nroff \fIa\fBb\fR, also man2markdown.tcl). CommonMark left the stars
+#   literal ("a**b**") or made everything bold.
+#
+# 0.9.0 (2026-10-26): constructs of the TIP 700 format (n2md --tip700,
+#   man2markdown.tcl):
+#   - span attribute lists after Pandoc: several classes, #id, key="value"
+#     ([*interp]{.carg .in type="Tcl_Interp"}, [x]{version="TIP500"}).
+#     Span node: class = the classes, space separated (a Tcl list, as
+#     DocIR reads it), id, attrs = dict of the other attributes. Braces
+#     that are no valid attribute list ([a]{a b c}) stay text.
+#   - definitions hold blocks: lines indented 4 spaces (or a tab) after a
+#     definition belong to it, also across several blank lines. A
+#     definition with a list, code, an inner definition list, a table ...
+#     carries `defblocks` (one block list per definition, parsed
+#     recursively); `definitions` keeps its flat form for old readers.
+#   - section references: [Name resolution] without a link definition
+#     becomes a link to the heading with exactly that text ("#anchor").
+#     Several headings with that text: the one in the nearest enclosing
+#     section; if its anchor is taken it gets an `alias` anchor. In a
+#     merged manual (createpdf) a reference stays inside its page.
 #
 # 0.6.0 (2026-06-20): reflink comment-defs ([//NNN]: # (text)) consumed;
 #   indented deflist bodies kept in the list item; underscore emphasis/strong
@@ -53,14 +81,21 @@
 #         the rule of 3, or intraword '_'.
 # v0.8.0  HTML blocks (CommonMark, all 7 start conditions) -- raw block HTML was
 #         previously DROPPED: <div>, <table> and friends vanished from the AST.
+# v0.9.0  span attribute lists, blocks in definitions, section references
+# v0.9.1  *a***b** / **a***b*: three stars switch emphasis (Pandoc)
+# v0.9.2  span before links; inlineMath and listContinuation switches
 #
 package require Tcl 8.6-
 
-package provide mdstack::parser 0.8.0
+package provide mdstack::parser 0.9.2
 
 namespace eval mdstack::parser {
     namespace export parse validate supports anchorize
     variable reflinks [dict create]
+    # heading texts of the document being parsed (section references)
+    variable headingTexts [dict create]
+    # nesting of parse (a block quote parses its content as a document)
+    variable parseDepth 0
 }
 
 # ============================================================
@@ -161,8 +196,29 @@ proc mdstack::parser::parse {markdown} {
         }
     }
 
+    # --- Pass 1b: heading texts, for section references [Heading] ---
+    # A nested parse (block quote content) keeps the texts of the outer
+    # document and leaves the resolution to the outermost parse, which sees
+    # all headings.
+    variable headingTexts
+    variable parseDepth
+    set savedHeadingTexts $headingTexts
+    set headingTexts [dict merge $savedHeadingTexts \
+        [mdstack::parser::_scanHeadingTexts $lines]]
+
     # --- Pass 2: Parse blocks ---
-    set blocks [mdstack::parser::parseBlocks lines refDefLines]
+    incr parseDepth
+    try {
+        set blocks [mdstack::parser::parseBlocks lines refDefLines]
+    } finally {
+        incr parseDepth -1
+    }
+
+    # --- Pass 3: section references point to "their" heading ---
+    if {$parseDepth == 0 && [dict size $headingTexts] > 0} {
+        set blocks [mdstack::parser::_resolveSectionRefs $blocks]
+    }
+    set headingTexts $savedHeadingTexts
 
     # --- Footnote-Bloecke anhaengen (wenn vorhanden) ---
     if {[llength $footnoteOrder] > 0} {
@@ -201,7 +257,8 @@ proc mdstack::parser::validate {ast} {
 
 proc mdstack::parser::supports {ast} {
     # Capability-Liste: was der Parser an Markdown-Konstrukten versteht.
-    # Stand: 2026-09-26 (0.8.0: html_block; math seit 0.2.10).
+    # Stand: 2026-10-26 (0.9.0: span_attrs, section_ref, deflist_blocks;
+    # 0.8.0: html_block; math seit 0.2.10).
     #
     # Hinweis zur Lesart: Die Tokens beschreiben Eingabe-Konstrukte,
     # nicht zwangsweise eindeutige AST-Output-Types. So liefert sowohl
@@ -222,6 +279,7 @@ proc mdstack::parser::supports {ast} {
         inline:reflink inline:refimage
         inline:span inline:footnote_ref inline:html
         inline:math
+        inline:span_attrs inline:section_ref blocks:deflist_blocks
     }
 }
 
@@ -980,7 +1038,9 @@ proc mdstack::parser::parseListBlock {linesVar iVar} {
                                && [string length $nextCont] >= $contentIndent)
                               || ($baseIndent == 0
                                   && (![regexp {^(    |\t)} $next]
-                                      || [mdstack::parser::_isSubBlockLine $next $contentIndent])))} {
+                                      || [mdstack::parser::_isSubBlockLine $next $contentIndent]
+                                      || ($::mdstack::parser::listContinuation
+                                          && [string length $nextCont] >= $contentIndent))))} {
                     # blank line followed by a continuation. For an indented
                     # list (doctools "  - ", content column >= 4) we keep the
                     # item open when the line reaches the content column. For a
@@ -1055,11 +1115,27 @@ proc mdstack::parser::parseIndentedCode {linesVar iVar} {
         text [join $body "\n"]]]
 }
 
+# parseDefList --
+#   Term / ": definition" items. Every item keeps the flat form of its
+#   definitions (field definitions: one inline list per definition and per
+#   indented paragraph run -- what readers of the AST have always got).
+#
+#   Since 0.9.0 the lines of a definition are also kept as a small document
+#   of their own (Pandoc): the text after ": " is its first paragraph, the
+#   lines indented 4 spaces (or a tab) that follow -- after blank lines,
+#   even several -- belong to it, without those 4 spaces. They are parsed
+#   recursively, so a list, a code block, an inner definition list or a
+#   table inside a definition stays one. If any definition of an item holds
+#   such a block (anything but paragraphs), the item gets the field
+#   defblocks: one block list per definition. Items of paragraphs only stay
+#   as they were.
 proc mdstack::parser::parseDefList {linesVar iVar} {
     upvar $linesVar lines $iVar i
     set n [llength $lines]
 
     set dlItems {}
+    # per item: list of definition bodies {firstInlines restLines}
+    set bodies {}
     while {$i < $n} {
         set cur [string trimright [lindex $lines $i]]
         if {[string trim $cur] eq ""} {
@@ -1070,12 +1146,18 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
                     incr i
                     continue
                 }
-                # Indented continuation paragraph (Pandoc multi-paragraph
-                # definition) belongs to the current list -> keep the list open.
-                if {[llength $dlItems] > 0 &&
-                    [regexp {^(    |\t)} [lindex $lines [expr {$i + 1}]]]} {
-                    incr i
-                    continue
+                # Indented continuation (Pandoc: a block of the current
+                # definition) keeps the list open -- also behind several
+                # blank lines, which belong to the definition then.
+                if {[llength $dlItems] > 0} {
+                    set j $i
+                    while {$j < $n && [string trim [lindex $lines $j]] eq ""} { incr j }
+                    if {$j < $n && [regexp {^(    |\t)} [lindex $lines $j]]} {
+                        mdstack::parser::_dlBodyAdd bodies [llength $dlItems] \
+                            [lrepeat [expr {$j - $i}] ""]
+                        set i $j
+                        continue
+                    }
                 }
                 if {[string trim $peek] ne "" &&
                     ![regexp {^:([[:space:]]|$)} $peek] &&
@@ -1095,6 +1177,7 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
             # heading) stays a block of its own after the list.
             if {[llength $dlItems] == 0} {
                 lappend dlItems [dict create term {} termText "" definitions {}]
+                lappend bodies {}
             }
             set j [expr {$i + 1}]
             while {$j < $n && [string trim [lindex $lines $j]] eq ""} { incr j }
@@ -1116,9 +1199,11 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
                 set lastIdx [expr {[llength $dlItems] - 1}]
                 set lastItem [lindex $dlItems $lastIdx]
                 set defs [dict get $lastItem definitions]
-                lappend defs [mdstack::parser::parseInlines [join $para " "]]
+                set inl [mdstack::parser::parseInlines [join $para " "]]
+                lappend defs $inl
                 dict set lastItem definitions $defs
                 lset dlItems $lastIdx $lastItem
+                mdstack::parser::_dlBodyNew bodies $inl
                 set i $j
             } else {
                 incr i
@@ -1144,14 +1229,17 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
             if {[llength $dlItems] == 0} {
                 # definition without a term (isOrphanDef): empty term
                 lappend dlItems [dict create term {} termText "" definitions {}]
+                lappend bodies {}
             }
             if {[llength $dlItems] > 0} {
                 set lastIdx [expr {[llength $dlItems] - 1}]
                 set lastItem [lindex $dlItems $lastIdx]
                 set defs [dict get $lastItem definitions]
-                lappend defs [mdstack::parser::parseInlines [string trim $defText " \t"]]
+                set inl [mdstack::parser::parseInlines [string trim $defText " \t"]]
+                lappend defs $inl
                 dict set lastItem definitions $defs
                 lset dlItems $lastIdx $lastItem
+                mdstack::parser::_dlBodyNew bodies $inl
             }
             incr i
         } elseif {[llength $dlItems] > 0 &&
@@ -1163,9 +1251,12 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
             # Without this the block would be misparsed as an indented code
             # block and rendered as non-wrapping monospace.
             set para {}
+            set raw {}
             while {$i < $n &&
                    [regexp {^(    |\t)(.*)$} [lindex $lines $i] -> _ rest]} {
                 lappend para [string trimright $rest]
+                lappend raw [mdstack::parser::_deindent \
+                    [string trimright [lindex $lines $i]] 4]
                 incr i
             }
             set lastIdx [expr {[llength $dlItems] - 1}]
@@ -1175,6 +1266,7 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
                 [string trim [join $para " "]]]
             dict set lastItem definitions $defs
             lset dlItems $lastIdx $lastItem
+            mdstack::parser::_dlBodyAdd bodies [llength $dlItems] $raw
         } else {
             # Term-Zeile
             set termText [string trim $cur " \t"]
@@ -1182,11 +1274,69 @@ proc mdstack::parser::parseDefList {linesVar iVar} {
                 term [mdstack::parser::parseInlines $termText] \
                 termText $termText \
                 definitions {}]
+            lappend bodies {}
             incr i
         }
     }
 
+    # Definitions holding blocks: parse their bodies as documents.
+    set k 0
+    foreach itemBodies $bodies {
+        set defBlocks {}
+        set structured 0
+        foreach body $itemBodies {
+            lassign $body first rest
+            set bl {}
+            if {[llength $first] > 0} {
+                lappend bl [dict create type paragraph content $first]
+            }
+            if {[llength $rest] > 0} {
+                set subRef [dict create]
+                foreach sb [mdstack::parser::parseBlocks rest subRef] {
+                    lappend bl $sb
+                    if {[dict get $sb type] ne "paragraph"} { set structured 1 }
+                }
+            }
+            lappend defBlocks $bl
+        }
+        if {$structured} {
+            set item [lindex $dlItems $k]
+            dict set item defblocks $defBlocks
+            lset dlItems $k $item
+        }
+        incr k
+    }
+
     return [dict create type deflist items $dlItems]
+}
+
+# Start a new definition body {firstInlines restLines} for the last item.
+proc mdstack::parser::_dlBodyNew {bodiesVar first} {
+    upvar 1 $bodiesVar bodies
+    set last [expr {[llength $bodies] - 1}]
+    set b [lindex $bodies $last]
+    lappend b [list $first {}]
+    lset bodies $last $b
+}
+
+# Append lines to the current definition body of the last item (a new body
+# without a first paragraph if the item has none yet). Blank lines only
+# count inside a body.
+proc mdstack::parser::_dlBodyAdd {bodiesVar nItems addLines} {
+    upvar 1 $bodiesVar bodies
+    set last [expr {[llength $bodies] - 1}]
+    if {$last < 0 || $last != $nItems - 1} return
+    set b [lindex $bodies $last]
+    if {[llength $b] == 0} {
+        if {[string trim [join $addLines ""]] eq ""} return
+        lappend b [list {} {}]
+    }
+    set body [lindex $b end]
+    set rest [lindex $body 1]
+    lappend rest {*}$addLines
+    lset body 1 $rest
+    lset b end $body
+    lset bodies $last $b
 }
 
 # parseParagraph returns a list (0 or 1 elements) to handle the
@@ -1294,8 +1444,22 @@ proc mdstack::parser::_mkListItem {paras subLines checked {contentIndent 0}} {
         if {[regexp {^[[:space:]]*(\*|-|\+|[0-9]+[.)])[[:space:]]+} $_fnb]} {
             lappend itemBlocks [mdstack::parser::parseListLines $subLines]
         } else {
+            # listContinuation: take off the indent the block really has
+            # ("1. " has content column 3, TIP-700 pages indent 4; with 3
+            # off, a fence kept one space and was no fence any more)
+            set _di $contentIndent
+            if {$::mdstack::parser::listContinuation} {
+                set _min ""
+                foreach _l $subLines {
+                    if {[string trim $_l] eq ""} continue
+                    regexp {^( *)} $_l -> _sp
+                    set _w [string length $_sp]
+                    if {$_min eq "" || $_w < $_min} { set _min $_w }
+                }
+                if {$_min ne "" && $_min > $_di} { set _di $_min }
+            }
             set _body {}
-            foreach _l $subLines { lappend _body [mdstack::parser::_deindent $_l $contentIndent] }
+            foreach _l $subLines { lappend _body [mdstack::parser::_deindent $_l $_di] }
             set _subRef {}
             foreach _b [mdstack::parser::parseBlocks _body _subRef] {
                 if {[dict exists $_b type]} { lappend itemBlocks $_b }
@@ -1364,6 +1528,14 @@ proc mdstack::parser::parseListLines {lines} {
             # ends the current paragraph (a following continuation starts a new one).
             if {$hasItem} { set blankPending 1; set listLoose 1 }
             if {$seenSubItem} { lappend subLines "" }
+        } elseif {!$seenSubItem && !$hasMarker && $blankPending
+                  && $::mdstack::parser::listContinuation
+                  && $lineIndent >= $curContentIndent} {
+            # listContinuation: after a blank line the indented rest of the
+            # item is a document of its own (paragraphs, code fences, lists)
+            set seenSubItem 1
+            set blankPending 0
+            lappend subLines $line
         } elseif {!$seenSubItem && !$hasMarker
                   && ![mdstack::parser::_isSubBlockLine $line $curContentIndent]} {
             if {$blankPending} {
@@ -1805,19 +1977,87 @@ proc mdstack::parser::_trySpan {s rest idx} {
     if {[string index $s $idx] ne "\["} { return {} }
     set closePos [mdstack::parser::findMatchingBracket $rest]
     if {$closePos < 0} { return {} }
-    set afterClose [string range $rest [expr {$closePos + 1}] end]
-    if {[regexp {^\{\.([A-Za-z][A-Za-z0-9_-]*)\}} $afterClose -> cls]} {
-        set inner [string range $rest 1 [expr {$closePos - 1}]]
-        set spanLen [expr {$closePos + 1 + [string length $cls] + 3}]
-        set d [dict create type span class $cls \
-            content [mdstack::parser::parseInlines $inner]]
-        return [list [expr {$idx + $spanLen}] $d]
+    if {[string index $rest [expr {$closePos + 1}]] ne "\{"} { return {} }
+    set close [mdstack::parser::_attrListEnd $rest [expr {$closePos + 1}]]
+    if {$close < 0} { return {} }
+    set attr [mdstack::parser::_parseAttrList \
+        [string range $rest [expr {$closePos + 2}] [expr {$close - 1}]]]
+    if {$attr eq ""} { return {} }
+    set inner [string range $rest 1 [expr {$closePos - 1}]]
+    set d [dict create type span class [join [dict get $attr classes] " "] \
+        content [mdstack::parser::parseInlines $inner]]
+    if {[dict get $attr id] ne ""} { dict set d id [dict get $attr id] }
+    if {[dict size [dict get $attr attrs]] > 0} {
+        dict set d attrs [dict get $attr attrs]
     }
-    return {}
+    return [list [expr {$idx + $close + 1}] $d]
+}
+
+# _attrListEnd --
+#   Index of the "}" that closes the attribute list opening at position
+#   open of s, -1 if there is none. Quoted values may hold "}"; another "{"
+#   outside quotes makes it no attribute list.
+proc mdstack::parser::_attrListEnd {s open} {
+    set len [string length $s]
+    set q ""
+    for {set i [expr {$open + 1}]} {$i < $len} {incr i} {
+        set c [string index $s $i]
+        if {$q ne ""} {
+            if {$c eq "\\" && $q eq "\""} { incr i; continue }
+            if {$c eq $q} { set q "" }
+            continue
+        }
+        switch -- $c {
+            "\"" - "'" { set q $c }
+            "\{" { return -1 }
+            "\}" { return $i }
+        }
+    }
+    return -1
+}
+
+# _parseAttrList --
+#   Pandoc attribute list (the text between the braces): ".class" (several),
+#   "#id", key="value", key='value' or key=value, separated by blanks.
+#   Returns a dict {classes {...} id ... attrs {key value ...}}, or "" when
+#   the text is no attribute list -- "{a b c}" in running text (24 of them
+#   in the Tcl/Tk pages), "{}", "{2}" -- so that the brackets stay text.
+#
+#   Class names are taken as written: the TIP 700 pages have ".in/out",
+#   ".(in)" and ".*uPtr" for C argument directions. They hold no blanks,
+#   quotes, braces, brackets or backslashes, so the class list is a proper
+#   Tcl list.
+proc mdstack::parser::_parseAttrList {s} {
+    set classes {}
+    set id ""
+    set attrs [dict create]
+    set n 0
+    set s [string trim $s]
+    while {$s ne ""} {
+        if {[regexp {^\.([^\s{}"'=#\[\]\\]+)(.*)$} $s -> cls rest]} {
+            lappend classes $cls
+        } elseif {[regexp {^#([^\s{}"'=#.\[\]\\]+)(.*)$} $s -> v rest]} {
+            set id $v
+        } elseif {[regexp {^([A-Za-z_-][A-Za-z0-9_:.-]*)=(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([^\s"'{}]+))(.*)$} \
+                $s -> key v1 v2 v3 rest]} {
+            set val [regsub -all {\\(.)} $v1 {\1}]$v2$v3
+            dict set attrs $key $val
+        } else {
+            return ""
+        }
+        # attributes are separated by blanks: {.a.b} is one class "a.b",
+        # but {.a"x"} is nothing
+        if {$rest ne "" && ![regexp {^\s} $rest]} { return "" }
+        set s [string trimleft $rest]
+        incr n
+    }
+    if {$n == 0} { return "" }
+    return [dict create classes $classes id $id attrs $attrs]
 }
 
 proc mdstack::parser::_tryShortcutRef {s rest idx} {
     variable reflinks
+    variable headingTexts
     if {[regexp -indices {^\[([^\]\[]+)\]} $rest matchRange]} {
         set afterMatch [string index $s [expr {$idx + [lindex $matchRange 1] + 1}]]
         if {$afterMatch ni {( \[ \{}} {
@@ -1830,9 +2070,291 @@ proc mdstack::parser::_tryShortcutRef {s rest idx} {
                 if {[dict get $def title] ne ""} { dict set d title [dict get $def title] }
                 return [list [expr {$idx + [lindex $matchRange 1] + 1}] $d]
             }
+            # Section reference (TIP 700): [Name resolution] means the
+            # heading "Name resolution" of the same page. The target is
+            # settled after the blocks are parsed (_resolveSectionRefs); a
+            # reference without such a heading goes back to text there.
+            if {[info exists headingTexts] && [dict exists $headingTexts $label]} {
+                set lab [mdstack::parser::parseInlines $label]
+                set d [dict create type link label $lab \
+                    url "#[mdstack::parser::anchorize $label]" \
+                    sectionRef [mdstack::parser::_plainText $lab]]
+                return [list [expr {$idx + [lindex $matchRange 1] + 1}] $d]
+            }
         }
     }
     return {}
+}
+
+# ============================================================
+# Section references (since 0.9.0)
+# ============================================================
+
+# _scanHeadingTexts --
+#   Texts of the ATX and setext headings of a document (outside code
+#   fences), as a dict text -> 1. Only a pre-filter for _tryShortcutRef:
+#   whether a heading really exists decides _resolveSectionRefs.
+proc mdstack::parser::_scanHeadingTexts {lines} {
+    set out [dict create]
+    set fence ""
+    set prev ""
+    foreach raw $lines {
+        set line [string trimright $raw]
+        if {$fence ne ""} {
+            if {[regexp {^ {0,3}(`{3,}|~{3,})\s*$} $line -> f]
+                    && [string index $f 0] eq [string index $fence 0]
+                    && [string length $f] >= [string length $fence]} {
+                set fence ""
+            }
+            set prev ""
+            continue
+        }
+        if {[regexp {^ {0,3}(`{3,}|~{3,})} $line -> f]} {
+            set fence $f
+            set prev ""
+            continue
+        }
+        if {[regexp {^ {0,3}#{1,6}[ \t]+(.*)$} $line -> t]} {
+            set t [string trim [regsub {\s+#+\s*$} [string trim $t] ""]]
+            if {$t ne ""} { dict set out $t 1 }
+        } elseif {$prev ne "" && [regexp {^ {0,3}(=+|-{2,})[ \t]*$} $line]} {
+            dict set out [string trim $prev] 1
+        }
+        set prev [expr {[string trim $line] eq "" ? "" : $line}]
+    }
+    return $out
+}
+
+# _resolveSectionRefs --
+#   Gives every section reference (link with field sectionRef) its target.
+#   Candidates are the top-level headings whose plain text equals the
+#   reference. In a single page there is one; a merged manual (createpdf:
+#   one chapter per page) has many "Examples". The reference takes the
+#   heading in the nearest section that encloses it: first the section the
+#   reference stands in, then its parent, and so on, up to the whole
+#   document. A target whose anchor another heading has before it gets an
+#   alias anchor ("examples-3"), stored on the heading (field alias); the
+#   first heading keeps the plain anchor, as in HTML and the PDF, where
+#   the first of equal ids wins. A reference without a heading goes back
+#   to the text it was: "[" label "]".
+proc mdstack::parser::_resolveSectionRefs {blocks} {
+    variable _sr
+    set heads {}
+    set k 0
+    foreach b $blocks {
+        if {[dict get $b type] eq "heading"} {
+            lappend heads [list $k [dict get $b level] \
+                [mdstack::parser::_plainText [dict get $b content]] \
+                [expr {[dict exists $b anchor] ? [dict get $b anchor] : ""}]]
+        }
+        incr k
+    }
+    set _sr [dict create heads $heads aliases [dict create] used [dict create] \
+        pageLevel [mdstack::parser::_srPageLevel $heads]]
+    foreach h $heads { dict set _sr used [lindex $h 3] 1 }
+
+    set out {}
+    set cur -1
+    set hk 0
+    set k 0
+    foreach b $blocks {
+        if {$hk < [llength $heads] && [lindex $heads $hk 0] == $k} {
+            set cur $hk
+            incr hk
+        }
+        dict set _sr cur $cur
+        lappend out [mdstack::parser::_srBlock $b]
+        incr k
+    }
+    # aliases onto the headings
+    dict for {h alias} [dict get $_sr aliases] {
+        set bi [lindex $heads $h 0]
+        set b [lindex $out $bi]
+        dict lappend b alias $alias
+        lset out $bi $b
+    }
+    unset _sr
+    return $out
+}
+
+# Page level of a merged document, "" for a single page.
+#
+# createpdf joins all pages of a manual into one document: every page is a
+# heading ("# glob", or "## glob" under a part heading) with the sections of
+# the page below it. A reference [pwd] in the page glob must not jump to the
+# page pwd, and [Examples] not to the Examples of another page. A page is
+# recognised by its sections: two headings of the same level with a child
+# heading of the same text ("Name", "Description", "Examples") are pages,
+# and a reference stays inside its page. In a single page the sections
+# differ, and a reference may reach every heading of the document.
+proc mdstack::parser::_srPageLevel {heads} {
+    set n [llength $heads]
+    set seen [dict create]
+    set best ""
+    for {set k 0} {$k < $n} {incr k} {
+        set lv [lindex $heads $k 1]
+        # direct children: following headings one level deeper, up to the
+        # next heading of this level or higher
+        for {set j [expr {$k + 1}]} {$j < $n} {incr j} {
+            set cl [lindex $heads $j 1]
+            if {$cl <= $lv} break
+            if {$cl != $lv + 1} continue
+            set key [list $lv [lindex $heads $j 2]]
+            if {[dict exists $seen $key] && [dict get $seen $key] != $k} {
+                if {$best eq "" || $lv < $best} { set best $lv }
+            } else {
+                dict set seen $key $k
+            }
+        }
+    }
+    return $best
+}
+
+# Target of a section reference: url ("#anchor"), or "" if there is none.
+proc mdstack::parser::_srTarget {label} {
+    variable _sr
+    set heads [dict get $_sr heads]
+    set cand {}
+    set k 0
+    foreach h $heads {
+        if {[lindex $h 2] eq $label} { lappend cand $k }
+        incr k
+    }
+    if {![llength $cand]} { return "" }
+    set n [llength $heads]
+    set pageLevel [dict get $_sr pageLevel]
+    set hit [lindex $cand 0]
+    set a [dict get $_sr cur]
+    # merged document: a reference inside a page stays in that page
+    if {$pageLevel ne ""} {
+        set inPage 0
+        for {set p $a} {$p >= 0} {incr p -1} {
+            if {[lindex $heads $p 1] == $pageLevel} { set inPage 1; break }
+            if {[lindex $heads $p 1] < $pageLevel} break
+        }
+        if {$inPage} { set hit -1 }
+    }
+    while {$a >= 0} {
+        set lv [lindex $heads $a 1]
+        set end $a
+        while {$end + 1 < $n && [lindex $heads [expr {$end + 1}] 1] > $lv} { incr end }
+        set found -1
+        foreach c $cand {
+            if {$c >= $a && $c <= $end} { set found $c; break }
+        }
+        if {$found >= 0} { set hit $found; break }
+        # a page is as far as a reference reaches
+        if {$pageLevel ne "" && $lv <= $pageLevel} break
+        # parent: the last heading before with a lower level
+        set p [expr {$a - 1}]
+        while {$p >= 0 && [lindex $heads $p 1] >= $lv} { incr p -1 }
+        set a $p
+    }
+    if {$hit < 0} { return "" }
+    set anchor [lindex $heads $hit 3]
+    if {$anchor eq ""} { return "" }
+    # first heading with this anchor: the plain anchor reaches it
+    set first -1
+    set k 0
+    foreach h $heads {
+        if {[lindex $h 3] eq $anchor} { set first $k; break }
+        incr k
+    }
+    if {$first == $hit} { return "#$anchor" }
+    if {[dict exists $_sr aliases $hit]} {
+        return "#[dict get $_sr aliases $hit]"
+    }
+    set i 1
+    while {[dict exists $_sr used "$anchor-$i"]} { incr i }
+    set alias "$anchor-$i"
+    dict set _sr used $alias 1
+    dict set _sr aliases $hit $alias
+    return "#$alias"
+}
+
+proc mdstack::parser::_srInlines {inlines} {
+    set out {}
+    foreach n $inlines {
+        if {![dict exists $n type]} { lappend out $n; continue }
+        if {[dict get $n type] eq "link" && [dict exists $n sectionRef]} {
+            set url [mdstack::parser::_srTarget [dict get $n sectionRef]]
+            if {$url eq ""} {
+                lappend out [dict create type text value "\["] \
+                    {*}[dict get $n label] [dict create type text value "\]"]
+            } else {
+                dict set n url $url
+                lappend out $n
+            }
+            continue
+        }
+        if {[dict exists $n content] && [dict get $n type] in {strong emphasis strike span}} {
+            dict set n content [mdstack::parser::_srInlines [dict get $n content]]
+        }
+        lappend out $n
+    }
+    return $out
+}
+
+proc mdstack::parser::_srBlocks {blocks} {
+    set out {}
+    foreach b $blocks { lappend out [mdstack::parser::_srBlock $b] }
+    return $out
+}
+
+proc mdstack::parser::_srBlock {b} {
+    if {![dict exists $b type]} { return $b }
+    switch -- [dict get $b type] {
+        paragraph - heading {
+            dict set b content [mdstack::parser::_srInlines [dict get $b content]]
+        }
+        list {
+            set items {}
+            foreach it [dict get $b items] {
+                if {[dict exists $it blocks]} {
+                    dict set it blocks [mdstack::parser::_srBlocks [dict get $it blocks]]
+                }
+                lappend items $it
+            }
+            dict set b items $items
+        }
+        deflist {
+            set items {}
+            foreach it [dict get $b items] {
+                dict set it term [mdstack::parser::_srInlines [dict get $it term]]
+                set defs {}
+                foreach d [dict get $it definitions] {
+                    lappend defs [mdstack::parser::_srInlines $d]
+                }
+                dict set it definitions $defs
+                if {[dict exists $it defblocks]} {
+                    set dbs {}
+                    foreach db [dict get $it defblocks] {
+                        lappend dbs [mdstack::parser::_srBlocks $db]
+                    }
+                    dict set it defblocks $dbs
+                }
+                lappend items $it
+            }
+            dict set b items $items
+        }
+        table {
+            set rows {}
+            foreach row [dict get $b content] {
+                set cells {}
+                foreach cell [dict get $row content] {
+                    dict set cell content [mdstack::parser::_srInlines [dict get $cell content]]
+                    lappend cells $cell
+                }
+                dict set row content $cells
+                lappend rows $row
+            }
+            dict set b content $rows
+        }
+        blockquote - div {
+            dict set b blocks [mdstack::parser::_srBlocks [dict get $b blocks]]
+        }
+    }
+    return $b
 }
 
 proc mdstack::parser::_tryCode {s rest idx} {
@@ -1955,7 +2477,53 @@ proc mdstack::parser::_delimsToText {nodes} {
 # otherwise one (emphasis). The runs shrink, so a run of 3 yields <em><strong>
 # in two passes, and the loop always terminates: every pass either consumes
 # delimiters or advances past the closer.
+# Pandoc switch: a '*' run of exactly three that touches text on both sides
+# (no whitespace before or after) and follows an open '*' or '**' closes
+# that one and opens the other: *a***b** = <em>a</em><strong>b</strong>,
+# **a***b* = <strong>a</strong><em>b</em>. CommonMark has no such rule:
+# with a letter before and punctuation after ("E***/app") the run may not
+# open, and the closing '**' stays literal. Only the flags and lengths of
+# the delimiter nodes change here; _processEmphasis does the pairing.
+# Each _delim node carries the characters around it (prevC/nextC).
+proc mdstack::parser::_pandocSwitch {nodes} {
+    set stack {}   ;# open '*' runs: indices into out
+    set out {}
+    foreach nd $nodes {
+        if {[dict get $nd type] ne "_delim" || [dict get $nd char] ne "*"} {
+            lappend out $nd
+            continue
+        }
+        set n [dict get $nd n]
+        set touching [expr {[dict exists $nd prevC]
+            && ![mdstack::parser::_isWs [dict get $nd prevC]]
+            && ![mdstack::parser::_isWs [dict get $nd nextC]]}]
+        if {$n == 3 && $touching && [llength $stack]} {
+            set top [lindex $out [lindex $stack end]]
+            set tn [dict get $top n]
+            if {$tn == 1 || $tn == 2} {
+                set stack [lrange $stack 0 end-1]
+                lappend out [dict create type _delim char * n $tn \
+                    canOpen 0 canClose 1 value [string repeat * $tn]]
+                set on [expr {3 - $tn}]
+                lappend out [dict create type _delim char * n $on \
+                    canOpen 1 canClose 0 value [string repeat * $on]]
+                lappend stack [expr {[llength $out] - 1}]
+                continue
+            }
+        }
+        if {[dict get $nd canClose] && [llength $stack]
+                && [dict get [lindex $out [lindex $stack end]] n] == $n} {
+            set stack [lrange $stack 0 end-1]
+        } elseif {[dict get $nd canOpen]} {
+            lappend stack [llength $out]
+        }
+        lappend out $nd
+    }
+    return $out
+}
+
 proc mdstack::parser::_processEmphasis {nodes} {
+    set nodes [mdstack::parser::_pandocSwitch $nodes]
     set i 0
     while {1} {
         # next closer at or after $i
@@ -2172,8 +2740,19 @@ proc mdstack::parser::_tryEmphasisUnderscore {s rest idx} {
 #   - letztes Zeichen vor schliessendem $ darf nicht space/backtick sein
 #   - schliessendes $ darf nicht von digit gefolgt sein
 #   - max 200 Zeichen Content (false-positive-Limit)
+# Inline math can be switched off: Tcl manual pages are full of "$var",
+# and "**$b** and **expr** then **$a**" became math (expr.n). createpdf
+# sets this to 0. Display math ($$ block) is not affected.
+namespace eval mdstack::parser { variable inlineMath 1 }
+# A paragraph or code fence indented 4 spaces after a blank line continues
+# the list item above it (CommonMark/Pandoc: it reaches the content column).
+# 0 (default) keeps the old rule for top-level lists: such a line starts an
+# indented code block. TIP-700 pages (n2md, man2markdown) indent the further
+# paragraphs of "1." items this way; createpdf sets 1.
+namespace eval mdstack::parser { variable listContinuation 0 }
 proc mdstack::parser::_tryMath {s rest idx} {
     if {[string index $rest 0] ne "\$"} { return {} }
+    if {!$::mdstack::parser::inlineMath} { return {} }
     # Display math $$...$$ (inline, single-line) -- selten, aber moeglich
     # \x00 excluded: a line break inside a paragraph is stored as "\x00SB"
     # (or "\x00BR"), not "\n". Without it the rule "no newlines" did not hold
@@ -2372,9 +2951,13 @@ proc mdstack::parser::parseInlines {s} {
         }
         if {$match eq {} && $c eq "\["} {
             set match [mdstack::parser::_tryFootnoteRef $rest $idx]
+            # Span before links (0.9.1): a span may hold a reference link
+            # ("[a [b][c] d]" plus attribute list); _tryRefLink took
+            # "[a [b][c]" and left the rest literal. A span needs an
+            # attribute list right after the matching bracket, no link has.
+            if {$match eq {}} { set match [mdstack::parser::_trySpan $s $rest $idx] }
             if {$match eq {}} { set match [mdstack::parser::_tryLink $rest $idx] }
             if {$match eq {}} { set match [mdstack::parser::_tryRefLink $rest $idx] }
-            if {$match eq {}} { set match [mdstack::parser::_trySpan $s $rest $idx] }
             if {$match eq {}} { set match [mdstack::parser::_tryShortcutRef $s $rest $idx] }
         }
         if {$match eq {} && $c eq "`"} {
@@ -2395,7 +2978,7 @@ proc mdstack::parser::parseInlines {s} {
             lassign [mdstack::parser::_delimFlags $c $prevC $nextC] canOpen canClose
             lappend out [dict create type _delim char $c n $n \
                 canOpen $canOpen canClose $canClose \
-                value [string repeat $c $n]]
+                value [string repeat $c $n] prevC $prevC nextC $nextC]
             set idx $j
             continue
         }

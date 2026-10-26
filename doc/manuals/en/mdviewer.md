@@ -36,7 +36,7 @@ The module:
 ## Dependencies
 
 - Tcl/Tk ≥ 8.6
-- `mdstack::parser 0.8.0`
+- `mdstack::parser 0.9.2`
 - `mdstack::model 0.1`
 - Optional: `Img` package (for JPG support)
 

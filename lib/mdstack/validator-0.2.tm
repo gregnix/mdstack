@@ -1,10 +1,14 @@
-# mdvalidator-0.1.tm -- AST Validator for mdstack AST-Spec v0.3
+# mdvalidator-0.2.tm -- AST Validator for mdstack AST-Spec v0.3
+#
+# 0.2 (2026-10-26): mdstack::parser 0.9.0 -- a span may have an empty class
+#   when it carries attributes or an id ([x]{version="TIP500"}); span.attrs
+#   must be a dict; deflist items may carry defblocks (block lists).
 #
 # Validates each node in the AST against the specification.
 # Returns a list of errors (empty = valid).
 #
 # Usage:
-#   package require mdstack::validator 0.1
+#   package require mdstack::validator 0.2
 #   set errors [mdstack::validator::validate $ast]
 #   set errors [mdstack::validator::validate $ast -strict]
 #
@@ -12,7 +16,7 @@
 # (e.g. unknown node types, empty text.value).
 
 package require Tcl 8.6-
-package provide mdstack::validator 0.1
+package provide mdstack::validator 0.2
 
 namespace eval mdstack::validator {
     variable errors
@@ -343,6 +347,18 @@ proc mdstack::validator::validateDeflist {node} {
                     incr di
                 }
             }
+            # defblocks (parser 0.9.0): one block list per definition
+            if {[dict exists $item defblocks]} {
+                set di 0
+                foreach db [dict get $item defblocks] {
+                    set bp "${saved}/deflist/items\[$idx\]/defblocks\[$di\]"
+                    foreach block $db {
+                        set path $bp
+                        validateBlock $block
+                    }
+                    incr di
+                }
+            }
             incr idx
         }
     }
@@ -479,8 +495,15 @@ proc mdstack::validator::validateSpan {node} {
     append path "/span"
 
     requireString $node class
-    if {[dict exists $node class] && [dict get $node class] eq ""} {
+    # An empty class is fine when the span carries attributes or an id
+    # ([text]{version="TIP500"}, parser 0.9.0); a span with nothing is not.
+    if {[dict exists $node class] && [dict get $node class] eq ""
+            && ![dict exists $node attrs] && ![dict exists $node id]} {
         addError "span.class must not be empty"
+    }
+    if {[dict exists $node attrs]
+            && [catch {dict size [dict get $node attrs]}]} {
+        addError "span.attrs must be a dict"
     }
 
     if {[requireList $node content]} {

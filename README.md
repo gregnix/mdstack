@@ -2,7 +2,7 @@
 
 A complete Markdown processing stack for Tcl/Tk applications.
 
-**Parser:** 0.8.0 · **Orchestrator:** 0.1 · **html:** 0.2 · **pdf:** 0.3 · **viewer:** 0.4  
+**Parser:** 0.9.2 · **Orchestrator:** 0.1 · **html:** 0.2 · **pdf:** 0.3 · **viewer:** 0.4  
 **Status:** Stable (older README tag 0.6.0 was the stack line, not a single package)
 
 ---
@@ -13,10 +13,10 @@ A complete Markdown processing stack for Tcl/Tk applications.
 
 | Module | Version | Description |
 |--------|---------|-------------|
-| `mdstack::parser` | 0.8.0 | Markdown → AST parser (CommonMark subset + TIP-700; `html_block`, math) |
+| `mdstack::parser` | 0.9.0 | Markdown → AST parser (CommonMark subset + TIP-700; `html_block`, math, span attributes, blocks in definitions, section references) |
 | `mdstack` | 0.1 | Orchestrator / stack manager |
 | `mdstack::model` | 0.1 | Document model |
-| `mdstack::validator` | 0.1 | AST validator (node walk; not `parser::validate`) |
+| `mdstack::validator` | 0.2 | AST validator (node walk; not `parser::validate`) |
 | `mdstack::indexgen` | 0.1 | Directory `index.md` in managed HTML-comment blocks |
 
 ### Renderers
@@ -162,7 +162,7 @@ is located during development.
 
 ```tcl
 tcl::tm::path add /path/to/mdstack/lib
-package require mdstack::parser 0.8.0
+package require mdstack::parser 0.9.2
 package require mdstack::viewer 0.4
 
 set ast [mdstack::parser::parse "# Hello\n\nWorld."]
@@ -174,7 +174,7 @@ pack .v
 ### HTML Export
 
 ```tcl
-package require mdstack::parser 0.8.0
+package require mdstack::parser 0.9.2
 package require mdstack::html   0.2
 package require mdstack::theme  0.1
 

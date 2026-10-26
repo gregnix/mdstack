@@ -130,7 +130,7 @@ When `indent` is enabled:
 
 ```tcl
 package require mdstack::text   0.1
-package require mdstack::parser 0.8.0
+package require mdstack::parser 0.9.2
 package require mdstack::model  0.1
 package require mdstack::viewer 0.4
 

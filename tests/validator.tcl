@@ -5,7 +5,7 @@ set dir [file dirname [file normalize [info script]]]
 tcl::tm::path add [file join $dir .. lib]
 
 package require mdstack::parser 0.2
-package require mdstack::validator 0.1
+package require mdstack::validator 0.2
 
 set total 0; set passed 0; set failed 0
 
@@ -317,6 +317,23 @@ set ast [dict create type document version 1 meta {} reflinks {} blocks [list \
     [dict create type paragraph content [list [dict create type text text "x"]]]]]
 set errs [mdstack::validator::validate $ast]
 assert "F6: text.text statt text.value" {[llength $errs] > 0}
+
+# Spans with attribute lists (parser 0.9.0)
+set errs [mdstack::validator::validate [mdstack::parser::parse {[x]{version="TIP500"} [y]{.carg .in type="int"}}]]
+assert "S1: span without class but with attrs is valid" {[llength $errs] == 0}
+set ast [dict create type document version 1 meta {} reflinks {} blocks [list \
+    [dict create type paragraph content [list \
+        [dict create type span class "" content [list [dict create type text value "x"]]]]]]]
+assert "S2: span with empty class and nothing else" {[llength [mdstack::validator::validate $ast]] > 0}
+set ast [dict create type document version 1 meta {} reflinks {} blocks [list \
+    [dict create type paragraph content [list \
+        [dict create type span class a attrs {x} content [list [dict create type text value "x"]]]]]]]
+assert "S3: span.attrs not a dict" {[llength [mdstack::validator::validate $ast]] > 0}
+# defblocks are validated as blocks
+set ast [dict create type document version 1 meta {} reflinks {} blocks [list \
+    [dict create type deflist items [list [dict create term {} termText "" \
+        definitions {} defblocks [list [list [dict create type heading level 9 content {} anchor x]]]]]]]]
+assert "S4: bad block in defblocks found" {[llength [mdstack::validator::validate $ast]] > 0}
 
 # =========================================================================
 # Aktualisierte Zusammenfassung

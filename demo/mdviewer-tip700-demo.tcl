@@ -25,7 +25,7 @@ package require Tk
 package require mdstack::parser 0.2
 package require mdstack::model 0.1
 package require mdstack::viewer 0.3
-package require mdstack::validator 0.1
+package require mdstack::validator 0.2
 
 # ============================================================
 # Global Variables

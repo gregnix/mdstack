@@ -1,6 +1,6 @@
 # mdstack::parser
 
-> Version 0.8.0
+> Version 0.9.2
 
 ## Purpose
 
@@ -54,7 +54,8 @@ The module:
 | Inline images | `![alt](url)` |
 | Hard line break | two trailing spaces |
 | Backslash escape | `\*` `\_` `\`` etc. |
-| Bracketed spans (TIP-700) | `[text]{.class}` |
+| Bracketed spans (TIP-700) | `[text]{.class}`, `[text]{.a .b #id key="v"}` (0.9.0) |
+| Section references (0.9.0) | `[Heading text]` -> link to that heading |
 | Inline math | `$…$` |
 | Footnote refs | `[^id]` |
 
@@ -107,6 +108,71 @@ The [command]{.cmd} takes an [argument]{.arg}.
 
 Classes: `.cmd` `.sub` `.lit` `.optlit` `.arg` `.optarg` `.ins`
 `.ccmd` `.cargs` `.ret`
+
+Since 0.9.0 the braces take a Pandoc attribute list: several classes,
+`#id`, `key="value"` / `key='value'` / `key=value`:
+
+```markdown
+[*interp]{.carg .in type="Tcl_Interp"}   [lfilter]{.cmd version="TIP735"}
+```
+
+The span node gets `class` (all classes, space separated), `id` and `attrs`
+(dict of the other attributes). Braces that are no attribute list
+(`[a]{a b c}`, `[x]{}`) stay text.
+
+### Switches (0.9.2)
+
+Two namespace variables change the parser for whole documents:
+
+- `::mdstack::parser::inlineMath` (1): 0 turns `$...$` math off. Tcl manual
+  pages are full of `$var`.
+- `::mdstack::parser::listContinuation` (0): 1 keeps what follows a list
+  item after a blank line, indented to its content column, in the item and
+  parses it as blocks (CommonMark, Pandoc). With 0 a 4-space line after a
+  top-level item starts indented code (the old rule).
+
+createpdf (tcltk-manuals) sets `inlineMath 0` and `listContinuation 1`.
+Since 0.9.2 a span may hold a reference link:
+`[made by [interp alias][interp].]{version="TIP426"}`.
+
+### Three stars between two emphases (0.9.1)
+
+`*a***b**` is italic *a* followed by bold **b**, `**a***b*` the other way
+round, as Pandoc reads it. TIP-700 pages write nroff `\fIa\fBb\fR` like
+this. Plain CommonMark left the stars literal when punctuation follows
+(`*ZIPFS_VOLUME***/app**`). Only a run of exactly three stars that
+touches text on both sides and follows an open `*` or `**` switches;
+`foo***bar***baz` is still nested bold italic.
+
+### Section references (0.9.0)
+
+`[Name resolution]` without a link definition links to the heading with
+exactly that text (`url "#name-resolution"`, field `sectionRef`). With
+several such headings the one in the nearest enclosing section wins; in a
+merged manual a reference stays in its page. A target whose anchor an
+earlier heading has gets an alias anchor (heading field `alias`). Without
+such a heading the brackets stay text.
+
+### Blocks in definitions (0.9.0)
+
+Lines indented 4 spaces (or a tab) after a definition belong to it, also
+behind blank lines, and are parsed as blocks (Pandoc):
+
+```markdown
+**base64**
+: The encoding.
+
+    1. a list
+    2. in the definition
+
+    [-maxlen]{.lit}
+    : an inner definition list
+```
+
+The item keeps `definitions` (flat inline lists, as before) and gets
+`defblocks` -- one block list per definition -- when a definition holds
+more than paragraphs. Outside definitions an indented block is still
+indented code.
 
 ### Fenced divs
 
@@ -263,7 +329,9 @@ Note: `style` is `"ordered"` or `"unordered"` (not a boolean).
 | `url` | URL (type=link, image) |
 | `title` | title attribute (type=link, image) |
 | `label` | inline list for link label |
-| `class` | CSS class (type=span) |
+| `class` | CSS classes, space separated (type=span) |
+| `attrs` | dict of further attributes (type=span, 0.9.0) |
+| `sectionRef` | heading text of a section reference (type=link, 0.9.0) |
 | `content` | inline list (type=span) |
 
 ---

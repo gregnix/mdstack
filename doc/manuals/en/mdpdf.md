@@ -40,7 +40,7 @@ The module:
 - Tcl ≥ 8.6
 - pdf4tcl 0.9.4+
 - pdf4tcllib (live 0.6.5; `docir::pdf` requires ≥ 0.3)
-- mdstack::parser 0.8.0 (optional, for AST input)
+- mdstack::parser 0.9.2 (optional, for AST input)
 - mdstack::model 0.1 (optional, for model input)
 - `docir::mdSource`, `docir::pdf` 0.3 (pulls 0.5)
 
