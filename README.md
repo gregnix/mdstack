@@ -257,6 +257,8 @@ mdstack/
 
 ---
 
+Developed with the help of AI tools; the code is reviewed and tested by the author.
+
 ## License
 
 MIT -- see [LICENSE](LICENSE)

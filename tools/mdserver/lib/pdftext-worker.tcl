@@ -25,9 +25,24 @@ if {[catch {::tclutils::tupdftext::pages $pdf} pages]} {
     set pages {}
 }
 file mkdir [file dirname $cf]
-set fh [open $cf.tmp w]
-fconfigure $fh -encoding utf-8
-puts -nonewline $fh [list $pdf $mt $size $pages]
-close $fh
-file rename -force $cf.tmp $cf
+# through a temporary file: a failed write leaves the old entry and no open
+# channel (tclutils::common::replaceFile from tclutils 0.69.0; else the same
+# by hand). Up to 2026-10-30 an error in puts left cf.tmp behind.
+set data [list $pdf $mt $size $pages]
+if {![catch {package require tclutils::common 0.3}]} {
+    ::tclutils::common::replaceFile $cf $data -encoding utf-8 -translation lf
+} else {
+    set tmp $cf.tmp[pid]
+    set fh [open $tmp w]
+    try {
+        fconfigure $fh -encoding utf-8 -translation lf
+        puts -nonewline $fh $data
+        close $fh
+    } on error {msg opts} {
+        catch {close $fh}
+        catch {file delete -- $tmp}
+        return -options $opts $msg
+    }
+    file rename -force -- $tmp $cf
+}
 puts "ok [llength $pages][expr {$why ne "" ? " (error: $why)" : ""}]"

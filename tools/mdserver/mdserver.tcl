@@ -60,6 +60,8 @@ proc parseArgs {argv} {
             --pdf-search { lappend args --pdfsearch [lindex $argv [incr i]] }
             --pdf-cache  { lappend args --pdfcache [lindex $argv [incr i]] }
             --pdf-worker { lappend args --pdfworker [lindex $argv [incr i]] }
+            --office-search { lappend args --officesearch [lindex $argv [incr i]] }
+            --csv-view   { lappend args --csvview [lindex $argv [incr i]] }
             --trusted-proxy {
                 # Der Konstruktor macht aus "--x" den Schluessel "x"; sein
                 # Schluessel heisst trustedproxy, in einem Wort wie alle
@@ -84,6 +86,12 @@ proc parseArgs {argv} {
                 puts "  --pdf-cache DIR   Cache for PDF text (default: ~/.cache/mdserver-pdf)"
                 puts "  --pdf-worker 0|1  Read PDFs in a second tclsh, so a search"
                 puts "                    does not hold up other requests (default: 1)"
+                puts "  --office-search auto|0|1  .odt/.ods/.odp, .docx and .xlsx in the"
+                puts "                    full-text search (tclutils::tuodf, tudocx, tuxlsx;"
+                puts "                    auto: each when it loads)"
+                puts "  --csv-view auto|0|1  .csv as a table page (style site) and in"
+                puts "                    the search; ?raw=1 sends the file (needs"
+                puts "                    tclutils::tucsv 0.2; auto: when it loads)"
                 puts "  --theme   NAME    hell|dunkel|solarized (default: hell)"
                 puts "  --title   TEXT    Site title (default: mdserver)"
                 puts "  --toc     0|1     Table of contents (default: 1)"

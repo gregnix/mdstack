@@ -72,7 +72,19 @@ a:hover { text-decoration: underline; }
 }
 .mds-search input::placeholder { color: var(--top-fg); opacity: .6; }
 .mds-search input:focus { outline: none; background: var(--bg); color: var(--fg); border-color: var(--accent); }
-.mds-search-big { display: flex; gap: .5rem; margin: 0 0 1.5rem; }
+.mds-search-big { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 .4rem; }
+.mds-search-filter { display: flex; flex-wrap: wrap; gap: 1rem; flex-basis: 100%; font-size: .88rem; color: var(--fg-soft); }
+.mds-search-filter select {
+    margin-left: .35rem; padding: .2rem .4rem; font: inherit; border: 1px solid var(--line);
+    border-radius: 4px; background: var(--bg); color: var(--fg); max-width: 22rem;
+}
+.mds-search-help { margin: 0 0 1.5rem; font-size: .8rem; color: var(--fg-soft); }
+
+/* ---- CSV as a table ------------------------------------------------------- */
+.mds-csv { overflow-x: auto; margin: 1rem 0; }
+.mds-csv table { border-collapse: collapse; font-size: .9rem; }
+.mds-csv th, .mds-csv td { border: 1px solid var(--line); padding: .3rem .6rem; text-align: left; vertical-align: top; }
+.mds-csv thead th { background: var(--bg-soft, rgba(127,127,127,.08)); position: sticky; top: 0; }
 .mds-search-big input {
     flex: 1; padding: .55rem .8rem; font: inherit; border: 1px solid var(--line);
     border-radius: 6px; background: var(--bg); color: var(--fg);

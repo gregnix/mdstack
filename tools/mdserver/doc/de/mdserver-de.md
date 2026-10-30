@@ -39,6 +39,14 @@ Er liefert Markdown-Dateien on-the-fly als HTML aus.
 | `docir`, `docir::mdSource`, `docir::html`, `docir::diag`, `docir::diagram` | 0.1 | ja (braucht `mdstack::html` 0.2) |
 | `mdstack::theme` | 0.1 | empfohlen |
 | `tls` | -- | nur fuer HTTPS |
+| tclutils: `tupdftext`, `tutask` | 0.1, 0.2 | nein; PDFs in der Suche |
+| tclutils: `tuodf`, `tudocx`, `tuxlsx` | 0.1 (Ueberschriften in ODF ab `tuodf` 0.2) | nein; Office-Dateien in der Suche |
+| tclutils: `tucsv` | 0.2 | nein; CSV als Tabellenseite |
+| tclutils: `tujson` | 0.1 | nein; Suche als JSON (`format=json`) |
+| tclutils: `common` | 0.3 | nein; PDF-Cache ueber `replaceFile` (sonst dasselbe von Hand) |
+
+tclutils bleibt freiwillig: mdserver sucht es auf dem Modulpfad oder in
+`TCLUTILS_TM` und laesst ohne es nur die genannten Teile weg.
 
 ```bash
 # tls installieren (Debian/Ubuntu)
@@ -63,6 +71,8 @@ tclsh mdserver.tcl [Optionen]
 | `--pdf-search` | `auto` | PDFs in die Volltextsuche aufnehmen, ein Treffer je Seite. Braucht `tclutils::tupdftext` (tclutils 0.67.0) auf dem Modulpfad oder in `TCLUTILS_TM`. `auto`: wenn es ladbar ist; `1`: sonst eine Warnung; `0`: aus. |
 | `--pdf-cache` | `~/.cache/mdserver-pdf` | Ordner für den gelesenen PDF-Text, eine Datei je PDF, gültig solange mtime und Größe stimmen. Nie in der Wurzel. |
 | `--pdf-worker` | `1` | PDFs in einem zweiten `tclsh` lesen, damit eine Suche andere Anfragen nicht aufhält. `0`: im Serverprozess. |
+| `--office-search` | `auto` | `.odt`, `.ods`, `.odp`, `.docx` und `.xlsx` in die Volltextsuche aufnehmen, ein Treffer je Datei. Braucht `tclutils::tuodf`, `tudocx` bzw. `tuxlsx`; jedes Format, dessen Modul ladbar ist. `auto`, `1`, `0` wie bei `--pdf-search`. |
+| `--csv-view` | `auto` | `.csv` im Stil `site` als Tabellenseite zeigen und in die Suche aufnehmen; `?raw=1` liefert die Datei selbst. Braucht `tclutils::tucsv` 0.2. `auto`, `1`, `0` wie oben. |
 | `--trusted-proxy` | (leer) | Gegenstellen, deren `X-Forwarded-For` im Protokoll geglaubt wird. Genaue Uebereinstimmung, keine Netzmasken. Leer heisst: der Kopf wird ignoriert. Mehrere als Liste: `--trusted-proxy "127.0.0.1 10.0.0.5"`. |
 | `--maxline` | `8190` | Bytes je Anfrage-/Kopfzeile; darueber **414**. `0` = ohne Grenze. |
 | `--maxheader` | `16384` | Bytes aller Koepfe zusammen; darueber **431**. `0` = ohne Grenze. |
@@ -259,6 +269,24 @@ gelesen und mit ihrer mtime behalten; eine Suche liest nur Geaendertes neu.
 Punkt-Ordner und Symlinks bleiben aussen vor, wie beim Ausliefern. Die anderen
 Stile beantworten `?q=` mit einer schlichten Liste.
 
+**Suchsyntax.** Neben einfachen Woertern versteht `?q=`:
+
+| Eingabe | Wirkung |
+|---|---|
+| `"die Freigabe"` | Wortfolge: die Woerter in dieser Reihenfolge |
+| `-proxy` / `-"im Archiv"` | Dokumente mit diesem Wort oder dieser Folge fallen weg |
+| `a OR b`, `a ODER b`, `a \| b` | eins von beiden; bindet nur die beiden Nachbarn. Nur grossgeschrieben, `or` ist ein normales Wort |
+| `in:ordner/unter` | nur unterhalb dieses Ordners (relativ zur Wurzel) |
+| `typ:md`, `typ:pdf`, `typ:office`, `typ:csv` | nur Markdown-Dateien, PDF-Seiten, Office- oder CSV-Dateien (`typ:office` auch als `odf`, `docx`, `xlsx`) |
+
+`in` und `typ` gehen auch als URL-Parameter (`?q=...&in=buch&typ=pdf`); was
+in der Anfrage steht, gilt vor dem Parameter. `..`, `.` und Punkt-Ordner in
+`in` zaehlen als "ueberall". Die Ergebnisseite bietet unter dem Suchfeld
+*Bereich* und *Typ* zur Auswahl an. Das Suchfeld in der Kopfleiste schickt
+den Ordner der aktuellen Seite als `von=` mit; *Bereich* bietet dann diesen
+Ordner und alle darueber an, mit ihren Titeln. Gesucht wird trotzdem erst
+einmal ueberall, eingegrenzt erst durch die Auswahl.
+
 **PDFs in der Suche.** Ist `tclutils::tupdftext` ladbar (`--pdf-search auto`,
 die Vorgabe), durchsucht `?q=` auch jede `.pdf` unter der Wurzel, Seite fuer
 Seite. Ein Treffer heisst `handbuch, S. 17` und verlinkt auf
@@ -280,6 +308,43 @@ Worker an einer PDF (Absturz, Exit-Code, mehr als 10 Minuten), versucht die
 naechste Suche es noch einmal; scheitert er ein zweites Mal, bleibt die PDF
 draussen, bis sie sich aendert. Eine PDF ohne Text (Scan,
 verschluesselt) liefert keinen Treffer.
+
+Den PDF-Cache schreiben Server und Worker ueber eine temporaere Datei
+(`tclutils::common::replaceFile`, sonst dasselbe von Hand): scheitert das
+Schreiben, bleibt der alte Eintrag, und kein Kanal bleibt offen. Bis
+2026-10-29 blieb nach einem Fehler in `puts` der Kanal offen.
+
+**Office-Dateien in der Suche.** Mit `--office-search auto` durchsucht `?q=`
+auch Office-Dateien, jedes Format, dessen Modul aus tclutils ladbar ist:
+`.odt`, `.ods`, `.odp` mit `tuodf`, `.docx` mit `tudocx`, `.xlsx` mit `tuxlsx`
+(die beiden ab tclutils 0.69.0). Ein Treffer je Datei, verlinkt auf die Datei
+selbst. Gelesen wird der Text der Absaetze, auch in Tabellen, Listen und auf
+Folien, bei Tabellen der Inhalt aller Zellen aller Blaetter; Ueberschriften
+in ODF erst mit `tuodf` 0.2. Das Lesen geht schnell (ein Zip und wenige
+XML-Teile) und laeuft im Serverprozess; der Text bleibt mit der mtime im
+Suchindex. `typ:office` grenzt auf diese Dateien ein. Die Startmeldung nennt
+in der Zeile `Office:` die Formate, die gesucht werden.
+
+**CSV als Tabellenseite.** Ist `tclutils::tucsv` 0.2 ladbar
+(`--csv-view auto`), zeigt der Stil `site` eine `.csv` als Tabelle: erste
+Zeile als Kopf, hoechstens 2000 Zeilen, darueber ein Link "als CSV
+herunterladen" auf `datei.csv?raw=1`. Trennzeichen ist `;`, wenn die erste
+Zeile mehr davon hat als `,`, sonst `,`. Die Datei wird als UTF-8 gelesen,
+wenn die Bytes gueltiges UTF-8 sind, sonst als cp1252 (Excel unter Windows).
+Der Inhalt steht auch in der Suche (`typ:csv`). Die anderen Stile liefern die
+Datei unveraendert.
+
+**Suche als JSON.** `?q=...&format=json` (in jedem Stil) liefert die Treffer
+als JSON, mit `in` und `typ` wie oben:
+
+```json
+{"query":"proxy_pass","pending":0,"hits":[{"url":"/a/eins.md",
+ "title":"Netzwerk","path":"A","snippet":"... der proxy_pass Wert.","score":1}]}
+```
+
+`snippet` ist reiner Text ohne `<mark>`; `pending` zaehlt die PDFs, die der
+Worker noch liest. Braucht `tclutils::tujson`; ohne es antwortet mdserver mit
+**501**.
 
 **Startseite eines Buchs.** Ein Buchordner (mit `book.tcl`) ohne `index.md`
 bekommt in jedem Stil eine erzeugte: Titel, Untertitel, erster Absatz der
@@ -599,6 +664,13 @@ systemd, stand die letzte Anfrage sonst erst Kilobytes spaeter darin.
 
 ## Troubleshooting
 
+### Dateinamen mit Umlauten: 404
+
+Die Startmeldung zeigt `Achtung: Systemkodierung iso8859-1`. Ohne `LANG`
+(unter systemd die Regel) liest Tcl Dateinamen nicht als UTF-8. Abhilfe:
+`LANG=C.UTF-8` setzen, unter systemd `Environment=LANG=C.UTF-8` (steht in
+`mdserver.service.beispiel`).
+
 ### Port bereits belegt
 
 ```
@@ -741,6 +813,12 @@ tools/mdserver/server.key
 
 ## Sicherheitshinweise
 
+- **URL-Pfad und Query werden nie ausgewertet**: `%XX` wird byteweise
+  dekodiert, `+` nur in der Query zu Leerzeichen. Ein `%` ohne zwei
+  Hexziffern, `%00` oder NUL im Pfad ergibt **400**; in der Query bleibt
+  ein solches `%` Text (`?q=50%`). Bis zum Stand vom
+  2026-10-30 lief der Pfad durch `subst`; `/[exec ...]` fuehrte damit Befehle
+  als Server-Benutzer aus. Jede aeltere Installation aktualisieren.
 - **Directory Traversal** ist blockiert (safePath-Pruefung)
 - **Symlinks** fuehren nicht aus der Wurzel heraus. `file normalize` loest den
   letzten Bestandteil eines Pfades **nicht** auf; bis 0.3 wurde ein Verweis
@@ -791,6 +869,25 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+### unveroeffentlicht (2026-10-30)
+
+- **Sicherheit**: der URL-Pfad lief durch `subst` (Befehlsausfuehrung ueber
+  `/[exec ...]`); jetzt reine `%XX`-Dekodierung, ungueltiges UTF-8 bleibt
+  als Bytes stehen; kaputtes `%`, `%00` oder NUL im Pfad: 400
+- Unter Tcl 9 liefert eine Datei mit ungueltigem UTF-8 keinen 500 mehr
+  (`-profile replace`); `.xml` als `application/xml`; CSV mit Tabulator
+- Startmeldung warnt, wenn die Systemkodierung nicht UTF-8 ist
+- **Suchsyntax**: `"Wortfolge"`, `-wort`, `a OR b` / `ODER` / `|`,
+  `in:ordner`, `typ:md|pdf`; `in` und `typ` auch als URL-Parameter
+- **Eingrenzen auf der Ergebnisseite**: Auswahl *Bereich* (Ordner der Seite,
+  von der die Suche kam, und die darueber) und *Typ*
+- **Office-Dateien in der Suche** (`--office-search`; `.odt`/`.ods`/`.odp`,
+  `.docx`, `.xlsx` ueber `tclutils::tuodf`, `tudocx`, `tuxlsx`)
+- **CSV als Tabellenseite** (`--csv-view`, `tclutils::tucsv`), `?raw=1`
+- **Suche als JSON** (`?format=json`, `tclutils::tujson`)
+- **PDF-Cache** ueber eine temporaere Datei geschrieben (kein offener Kanal
+  nach einem Schreibfehler)
 
 ### unveroeffentlicht (2026-10-21)
 

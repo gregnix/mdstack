@@ -28,6 +28,10 @@ Group=mdserver
 
 WorkingDirectory=/opt/mdstack/tools/mdserver
 
+# systemd setzt kein LANG; Tcl nimmt dann iso8859-1 als Systemkodierung und
+# findet Dateinamen mit Umlauten nicht (404). Die Startmeldung warnt dann.
+Environment=LANG=C.UTF-8
+
 # --bind 127.0.0.1 gehoert dazu, sobald ein Proxy davorsteht: ohne die Option
 # horcht HTTP auf allen Schnittstellen und umgeht dessen Anmeldung.
 # --trusted-proxy 127.0.0.1 erst, wenn dieser Proxy X-Forwarded-For setzt.

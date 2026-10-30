@@ -1472,6 +1472,93 @@ test search-4 "the older styles answer with a plain list" -setup {
 } -result {200 1}
 
 
+# query syntax and narrowing (2026-10-30)
+proc suchWurzel2 {} {
+    set d [suchWurzel]
+    file mkdir [file join $d b]
+    set fh [open [file join $d b drei.md] w]; fconfigure $fh -encoding utf-8
+    puts $fh "# Archiv\n\nAlte Freigabe im Archiv."
+    close $fh
+    return $d
+}
+proc treffer {a} {
+    lsort [regexp -all -inline {/[ab]/[a-z]+\.md} [regexp -inline {<ol class="mds-hits">.*</ol>} $a]]
+}
+
+test search-6 "a phrase in quotes finds the words in this order only" -setup {
+    set w [suchWurzel2]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    list [treffer [holen $p /?q=die+freigabe]] [treffer [holen $p /?q=%22die+freigabe%22]] \
+         [string match {*<mark>die Freigabe</mark>*} [holen $p /?q=%22die+freigabe%22]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {{/a/eins.md /a/zwei.md} /a/zwei.md 1}
+
+test search-7 "-word leaves out, OR and | take either" -setup {
+    set w [suchWurzel2]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    list [treffer [holen $p /?q=Freigabe+-proxy_pass+-%22im+Archiv%22]] \
+         [treffer [holen $p /?q=proxy_pass+OR+Drucker]] \
+         [treffer [holen $p /?q=proxy_pass+%7C+Archiv]] \
+         [treffer [holen $p /?q=Freigabe+or+Drucker]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {/a/zwei.md {/a/eins.md /a/zwei.md} {/a/eins.md /b/drei.md} {}}
+
+test search-8 "in: and ?in= narrow to a folder; .. and dot folders are ignored" -setup {
+    set w [suchWurzel2]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    list [treffer [holen $p /?q=Freigabe+in:a]] \
+         [treffer [holen $p /?q=Freigabe&in=b]] \
+         [treffer [holen $p /?q=Freigabe+in:../a]] \
+         [string match {*geheim*} [holen $p /?q=Freigabe&in=.intern]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {{/a/eins.md /a/zwei.md} /b/drei.md {/a/eins.md /a/zwei.md /b/drei.md} 0}
+
+test search-9 "typ:md and typ:pdf; the plain style takes ?in= too" -setup {
+    set w [suchWurzel2]
+    set h1 [serverStart $w --no-log --style site --pdf-search 0]
+    set h2 [serverStart $w --no-log --pdf-search 0 --style plain]
+} -body {
+    set a [holen [serverPort $h1] /?q=Freigabe+typ:md]
+    set b [holen [serverPort $h1] /?q=Freigabe&typ=pdf]
+    set c [holen [serverPort $h2] /?q=Freigabe&in=b]
+    list [treffer $a] [string match {*Nichts gefunden*} $b] \
+         [string match {*/b/drei.md*} $c] [string match {*/a/eins.md*} $c]
+} -cleanup {
+    serverStop $h1 ; serverStop $h2
+    file delete -force $w
+} -result {{/a/eins.md /a/zwei.md /b/drei.md} 1 1 0}
+
+test search-10 "a page sends its folder along; the result page offers it" -setup {
+    set w [suchWurzel2]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /a/eins.md]
+    set b [holen $p /?q=Freigabe&von=a]
+    set c [holen $p /?q=Freigabe&von=a&in=a]
+    set d [holen $p /?q=Freigabe&von=../etc]
+    list [string match {*name="von" value="a"*} $a] \
+         [string match {*<option value="a">*} $b] \
+         [string match {*<option value="a" selected>*} $c] \
+         [string match {*name="in"*} $d]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 1 0}
+
+
 test site-6 "without --style the server uses site; --style plain keeps the old page" -setup {
     set w [siteWurzel]
     set h1 [serverStart $w --no-log]
@@ -1743,5 +1830,241 @@ test man-2 "no YAML: title from the NAME line, also in the sidebar" -setup {
     serverStop $h
     file delete -force $w
 } -result {{grab &ndash; mdserver} 1 1 0}
+
+
+# ============================================================
+# tclutils in mdserver (2026-10-30): PDF cache written atomically,
+# search as JSON, ODF files in the search, CSV as a table page
+# ============================================================
+proc tuAvailable {pkg ver} {
+    if {[info exists ::env(TCLUTILS_TM)]} { catch {tcl::tm::path add $::env(TCLUTILS_TM)} }
+    expr {![catch {package require $pkg $ver}]}
+}
+testConstraint tujson [tuAvailable tclutils::tujson 0.1]
+testConstraint tuodf  [expr {[tuAvailable tclutils::tuodf 0.1] && [tuAvailable tclutils::tuzip 0.1]}]
+testConstraint tuooxml [expr {[tuAvailable tclutils::tudocx 0.1] && [tuAvailable tclutils::tuxlsx 0.1]}]
+testConstraint tucsv  [tuAvailable tclutils::tucsv 0.2]
+
+test cache-1 "a failed write of the PDF cache keeps the old entry, no channel, no temp file" -setup {
+    set w [suchWurzel]
+    set cache [file join [tcltest::configure -tmpdir] mdcache[pid]]
+    file mkdir $cache
+    set srv [mdserver::Server new -root $w -log 0 -pdfcache $cache]
+    set ns [info object namespace $srv]
+    set f [file join $w a eins.md]
+    set cf [${ns}::my _pdfCacheFile $f]
+    set fh [open $cf w]; puts -nonewline $fh ALT; close $fh
+    set before [llength [chan names file*]]
+    rename ::puts ::_realPuts
+    proc ::puts args {
+        if {[string match file* [lindex $args end-1]]} { error "disk full" }
+        ::_realPuts {*}$args
+    }
+} -body {
+    ${ns}::my _pdfCacheWrite $f 1 {{Seite eins}}
+    rename ::puts {}; rename ::_realPuts ::puts
+    set fh [open $cf]; set d [read $fh]; close $fh
+    list $d [expr {[llength [chan names file*]] - $before}] [llength [glob -nocomplain $cf.tmp*]]
+} -cleanup {
+    if {[llength [info commands ::_realPuts]]} { rename ::puts {}; rename ::_realPuts ::puts }
+    $srv destroy
+    file delete -force $w $cache
+} -result {ALT 0 0}
+
+test json-1 "?format=json gives the hits as JSON, in site and plain" -constraints tujson -setup {
+    set w [suchWurzel]
+    set h1 [serverStart $w --no-log --style site]
+    set h2 [serverStart $w --no-log --style plain]
+} -body {
+    set a [holen [serverPort $h1] /?q=proxy_pass&format=json]
+    set b [holen [serverPort $h2] /?q=Freigabe+-proxy_pass&format=json]
+    set ja [::tclutils::tujson::parse [encoding convertfrom utf-8 [koerper $a]]]
+    set jb [::tclutils::tujson::parse [encoding convertfrom utf-8 [koerper $b]]]
+    set h [lindex [dict get $ja hits] 0]
+    list [string match {*Content-Type: application/json*} $a] \
+         [dict get $ja query] [dict get $h url] [dict get $h title] \
+         [string match {*proxy_pass*} [dict get $h snippet]] \
+         [string match {*<mark>*} [dict get $h snippet]] \
+         [lmap x [dict get $jb hits] {dict get $x url}]
+} -cleanup {
+    serverStop $h1 ; serverStop $h2
+    file delete -force $w
+} -result {1 proxy_pass /a/eins.md Netzwerk 1 0 /a/zwei.md}
+
+proc treffer2 {a} {
+    lsort [regexp -all -inline {/[ab]/[a-z]+\.(?:md|odt|ods|docx|xlsx|csv)} [regexp -inline {<ol class="mds-hits">.*</ol>} $a]]
+}
+
+test office-1 "ODF files are searched: text, spreadsheet cells, typ:office, --office-search 0" -constraints tuodf -setup {
+    set w [suchWurzel]
+    ::tclutils::tuodf::createText [file join $w a bericht.odt] {{Der Router im Keller} {Zweiter Absatz}}
+    set src [file join [tcltest::configure -tmpdir] odsSrc[pid]]
+    file mkdir $src
+    set fh [open [file join $src mimetype] wb]; puts -nonewline $fh application/vnd.oasis.opendocument.spreadsheet; close $fh
+    set fh [open [file join $src content.xml] w]; fconfigure $fh -encoding utf-8
+    puts -nonewline $fh {<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="o" xmlns:text="t" xmlns:table="tb"><office:body><office:spreadsheet><table:table><table:table-row><table:table-cell><text:p>Routerliste</text:p></table:table-cell><table:table-cell><text:p>Keller</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>}
+    close $fh
+    ::tclutils::tuzip::create [file join $w a liste.ods] [list [file join $src mimetype] [file join $src content.xml]] -base $src
+    set h1 [serverStart $w --no-log --style site]
+    set h2 [serverStart $w --no-log --style site --office-search 0]
+} -body {
+    set a [holen [serverPort $h1] /?q=keller]
+    set b [holen [serverPort $h1] /?q=freigabe+OR+keller+typ:office]
+    set c [holen [serverPort $h2] /?q=keller]
+    list [treffer2 $a] [treffer2 $b] [treffer2 $c]
+} -cleanup {
+    serverStop $h1 ; serverStop $h2
+    file delete -force $w $src
+} -result {{/a/bericht.odt /a/liste.ods} {/a/bericht.odt /a/liste.ods} {}}
+
+
+test office-2 "Word and Excel files are searched, typ:office" -constraints tuooxml -setup {
+    set w [suchWurzel]
+    ::tclutils::tudocx::createText [file join $w a memo.docx] {{Der Router im Keller} {Ende}}
+    ::tclutils::tuxlsx::writeRows [file join $w a inventar.xlsx] {{Ger\u00e4t Ort} {Router Keller}}
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    list [treffer2 [holen $p /?q=keller]] [treffer2 [holen $p /?q=router+typ:office]] \
+         [string match {*Content-Type: application/vnd.openxmlformats*} [holen $p /a/memo.docx]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {{/a/inventar.xlsx /a/memo.docx} {/a/inventar.xlsx /a/memo.docx} 1}
+
+test csv-1 "a CSV file is a table page; ?raw=1 sends the file; ; and cp1252 are read" -constraints tucsv -setup {
+    set w [suchWurzel]
+    set fh [open [file join $w a geraete.csv] wb]
+    puts -nonewline $fh [encoding convertto cp1252 "Name;Ort\r\nDrucker;B\u00fcro\r\n\"Router; neu\";<Keller>\r\n"]
+    close $fh
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [encoding convertfrom utf-8 [holen $p /a/geraete.csv]]
+    set b [holen $p /a/geraete.csv?raw=1]
+    set c [holen $p /?q=router+typ:csv]
+    list [status $a] [string match {*<th>Name</th><th>Ort</th>*} $a] \
+         [string match "*<td>Drucker</td><td>B\u00fcro</td>*" $a] \
+         [string match {*<td>Router; neu</td><td>&lt;Keller&gt;</td>*} $a] \
+         [string match {*?raw=1*} $a] \
+         [string match {*Content-Type: text/csv*} $b] [string match {*Name;Ort*} $b] \
+         [treffer2 $c]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {200 1 1 1 1 1 1 /a/geraete.csv}
+
+test csv-2 "--csv-view 0 sends the CSV as it is" -constraints tucsv -setup {
+    set w [suchWurzel]
+    set fh [open [file join $w a x.csv] w]; puts $fh "a,b\n1,2"; close $fh
+    set h [serverStart $w --no-log --style site --csv-view 0]
+} -body {
+    set a [holen [serverPort $h] /a/x.csv]
+    list [string match {*<table>*} $a] [string match {*a,b*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {0 1}
+
+
+# ============================================================
+# Requests from the test data utils-stack v2 (2026-10-30)
+# ============================================================
+test url-1 "brackets and dollars in the URL are text, never Tcl (no subst)" -setup {
+    set w [suchWurzel]
+    set marker [file join [tcltest::configure -tmpdir] mdpwned[pid]]
+    file delete -force $marker
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p "/x\[close+\[open+$marker+w\]\].md"]
+    set b [holen $p "/?q=\[close+\[open+$marker+w\]\]"]
+    set c [holen $p {/$env(HOME).md}]
+    list [status $a] [status $b] [status $c] [file exists $marker]
+} -cleanup {
+    serverStop $h
+    file delete -force $w $marker
+} -result {404 200 404 0}
+
+test url-2 "%XX in the path is UTF-8; + stays + in the path; = inside a query value" -setup {
+    set w [suchWurzel]
+    set fh [open [file join $w a "gr\u00fc\u00dfe.md"] w]; fconfigure $fh -encoding utf-8
+    puts $fh "# Gruss"; close $fh
+    set fh [open [file join $w a "c++.md"] w]; puts $fh "# Plus"; close $fh
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    list [status [holen $p /a/gr%C3%BC%C3%9Fe.md]] [status [holen $p /a/c++.md]] \
+         [string match {*value="a=b"*} [holen $p /?q=a=b]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {200 200 1}
+
+test url-3 "a Markdown file with invalid UTF-8 is served, in the folder too" -setup {
+    set w [suchWurzel]
+    set fh [open [file join $w a kaputt.md] wb]; puts -nonewline $fh "# Kaputt\n\nabc\xff\xfedef\n"; close $fh
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    list [status [holen $p /a/kaputt.md]] [status [holen $p /a/]] [status [holen $p /?q=abc]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {200 200 200}
+
+# The request line as bytes: raw UTF-8 or invalid bytes, as curl sends them.
+proc holenRoh {port bytes} {
+    set s [socket 127.0.0.1 $port]
+    fconfigure $s -translation binary
+    puts -nonewline $s "GET $bytes HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n"
+    flush $s
+    set antwort [read $s]
+    close $s
+    return $antwort
+}
+
+test url-4 "path: a broken %, %00 and NUL are 400; in the query a % stays text" -setup {
+    set w [suchWurzel]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    list [status [holen $p /a/x%GG.md]] [status [holen $p /a/x%]] \
+         [status [holen $p /a/x%00.md]] [status [holenRoh $p "/a/x\x00.md"]] \
+         [status [holen $p /?q=50%]] [status [holen $p /%5Bexpr%20%7B2%2B3%7D%5D]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {400 400 400 400 200 404}
+
+test url-5 "raw UTF-8 in the path, also mixed with %XX; raw invalid bytes" -setup {
+    set w [suchWurzel]
+    set fh [open [file join $w a "gr\u00fc\u00dfe.md"] w]; fconfigure $fh -encoding utf-8
+    puts $fh "# Gruss"; close $fh
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    list [status [holenRoh $p [encoding convertto utf-8 "/a/gr\u00fc\u00dfe.md"]]] \
+         [status [holenRoh $p [encoding convertto utf-8 "/a/gr%C3%BC\u00dfe.md"]]] \
+         [status [holenRoh $p "/a/x\xff\xfe.md"]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {200 200 404}
+
+test csv-3 "a tab-separated CSV and one with a BOM" -constraints tucsv -setup {
+    set w [suchWurzel]
+    set fh [open [file join $w a tab.csv] wb]; puts -nonewline $fh "Name\tOrt\nA, B\tC;D\n"; close $fh
+    set fh [open [file join $w a bom.csv] wb]; puts -nonewline $fh "\xef\xbb\xbfID,Name\n1,x\n"; close $fh
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /a/tab.csv]
+    set b [holen $p /a/bom.csv]
+    list [string match {*<td>A, B</td><td>C;D</td>*} $a] [string match {*<th>ID</th><th>Name</th>*} $b]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1}
 
 tcltest::cleanupTests

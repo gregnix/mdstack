@@ -47,6 +47,11 @@ if {[catch {package require mdstack::theme 0.1} err]} {
 
 namespace eval mdserver {
     variable moduleDir [file dirname [file normalize [info script]]]
+    # Options for every channel that reads a document: under Tcl 9 invalid
+    # UTF-8 becomes U+FFFD, as under 8.6, instead of a read error (a
+    # Markdown file with one bad byte answered 500, a folder holding it
+    # could not be listed). Added 2026-10-30.
+    variable readOpts [expr {[package vsatisfies [package provide Tcl] 9-] ? {-profile replace} : {}}]
     variable mimeTypes {
         .html  "text/html; charset=utf-8"
         .htm   "text/html; charset=utf-8"
@@ -62,6 +67,13 @@ namespace eval mdserver {
         .svg   "image/svg+xml"
         .ico   "image/x-icon"
         .pdf   "application/pdf"
+        .xml   "application/xml"
+        .csv   "text/csv; charset=utf-8"
+        .odt   "application/vnd.oasis.opendocument.text"
+        .ods   "application/vnd.oasis.opendocument.spreadsheet"
+        .odp   "application/vnd.oasis.opendocument.presentation"
+        .docx  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        .xlsx  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     }
 }
 
@@ -181,15 +193,54 @@ oo::class create mdserver::Request {
         } else {
             set _path $rawUrl
         }
-        set _path   [my _urlDecode $_path]
+        try {
+            set _path [my _urlDecode $_path 0 1]
+        } trap {MDDOCS BADURL} {m} {
+            # thrown in the constructor: method and URL go with the error
+            throw [list MDDOCS BADURL $_method $m] $rawUrl
+        }
         set _params [my _parseQuery $_query]
     }
 
-    method _urlDecode {str} {
-        set str [string map {+ " "} $str]
-        regsub -all {%([0-9A-Fa-f]{2})} $str {[binary format H2 \1]} str
-        set str [subst $str]
-        return [encoding convertfrom utf-8 $str]
+    # %XX to bytes, then UTF-8. Without subst: up to 2026-10-30 the %XX
+    # became "[binary format H2 XX]" and the whole string went through
+    # subst -- a request like /x[exec+...] ran Tcl commands in the server.
+    # "+" is a space only in the query (form encoding), not in the path.
+    # strict 1 (path): a % without two hex digits and NUL are an error
+    # {MDDOCS BADURL} (400); strict 0 (query): such a % stays as text,
+    # a typed "?q=50%" still searches. Invalid UTF-8 stays as the bytes
+    # (iso8859-1), as Tcl 8.6 did.
+    method _urlDecode {str {plus 0} {strict 0}} {
+        if {$plus} { set str [string map {+ " "} $str] }
+        # The request line is read as UTF-8: raw characters (curl sends
+        # them unencoded) back to bytes, so they and the %XX bytes are one
+        # byte string.
+        set str [encoding convertto utf-8 $str]
+        set out ""
+        while {[set i [string first % $str]] >= 0} {
+            append out [string range $str 0 [expr {$i - 1}]]
+            set hex [string range $str [expr {$i + 1}] [expr {$i + 2}]]
+            if {[regexp {^[0-9A-Fa-f]{2}$} $hex] && $hex ne "00"} {
+                append out [binary format H2 $hex]
+                set str [string range $str [expr {$i + 3}] end]
+            } elseif {$strict} {
+                throw {MDDOCS BADURL} "invalid percent encoding"
+            } else {
+                append out %
+                set str [string range $str [expr {$i + 1}] end]
+            }
+        }
+        append out $str
+        if {$strict && [string first \0 $out] >= 0} {
+            throw {MDDOCS BADURL} "NUL in path"
+        }
+        if {[package vsatisfies [package provide Tcl] 9-]} {
+            if {[catch {encoding convertfrom -profile strict utf-8 $out} t]} { return $out }
+            return $t
+        }
+        set t [encoding convertfrom utf-8 $out]
+        if {[encoding convertto utf-8 $t] ne $out} { return $out }
+        return $t
     }
 
     method _parseQuery {query} {
@@ -197,8 +248,8 @@ oo::class create mdserver::Request {
         foreach pair [split $query &] {
             if {$pair eq ""} continue
             set kv [split $pair =]
-            set k [my _urlDecode [lindex $kv 0]]
-            set v [my _urlDecode [lindex $kv 1]]
+            set k [my _urlDecode [lindex $kv 0] 1]
+            set v [my _urlDecode [join [lrange $kv 1 end] =] 1]
             dict set result $k $v
         }
         return $result
@@ -353,7 +404,7 @@ oo::class create mdserver::Renderer {
     method _mdTitle {fpath} {
         set title [file tail $fpath]
         if {![catch {open $fpath r} fh]} {
-            fconfigure $fh -encoding utf-8
+            fconfigure $fh -encoding utf-8 {*}$::mdserver::readOpts
             while {[gets $fh line] >= 0} {
                 if {[regexp {^#\s+(.+)$} $line -> t]} {
                     set title [string trim $t]; break
@@ -366,7 +417,7 @@ oo::class create mdserver::Renderer {
 
     method _readFile {path} {
         set fh [open $path r]
-        fconfigure $fh -encoding utf-8
+        fconfigure $fh -encoding utf-8 {*}$::mdserver::readOpts
         try {
             return [read $fh]
         } finally {
@@ -392,6 +443,8 @@ oo::class create mdserver::Server {
             pdfsearch auto
             pdfcache  ""
             pdfworker 1
+            officesearch auto
+            csvview   auto
             trustedproxy ""
             maxline    8190
             maxheader  16384
@@ -601,7 +654,7 @@ oo::class create mdserver::Server {
         set cmdName ""
         set nameLine ""
         if {![catch {open $file r} fh]} {
-            fconfigure $fh -encoding utf-8
+            fconfigure $fh -encoding utf-8 {*}$::mdserver::readOpts
             set n 0
             set inYaml 0
             set afterName 0
@@ -660,7 +713,7 @@ oo::class create mdserver::Server {
             set ip [interp create -safe]
             interp eval $ip {set chapters {}}
             catch {
-                set fh [open $bt r]; fconfigure $fh -encoding utf-8
+                set fh [open $bt r]; fconfigure $fh -encoding utf-8 {*}$::mdserver::readOpts
                 set script [read $fh]; close $fh
                 interp eval $ip $script
                 set chapters [interp eval $ip {set chapters}]
@@ -671,7 +724,7 @@ oo::class create mdserver::Server {
             # bookkit web-index block in index.md: reuse its chapter links.
             set idx [file join $dir index.md]
             if {[file exists $idx]} {
-                set fh [open $idx r]; fconfigure $fh -encoding utf-8
+                set fh [open $idx r]; fconfigure $fh -encoding utf-8 {*}$::mdserver::readOpts
                 set text [read $fh]; close $fh
                 if {[regexp {<!-- bookkit:toc:begin -->(.*?)<!-- bookkit:toc:end -->} $text -> blk]} {
                     foreach {full url} [regexp -all -inline {\]\(([^)]+\.md)\)} $blk] {
@@ -692,7 +745,7 @@ oo::class create mdserver::Server {
         if {[file exists [file join $dir book.tcl]]} { return 1 }
         set idx [file join $dir index.md]
         if {[file exists $idx]} {
-            set fh [open $idx r]; fconfigure $fh -encoding utf-8
+            set fh [open $idx r]; fconfigure $fh -encoding utf-8 {*}$::mdserver::readOpts
             set text [read $fh]; close $fh
             if {[string first "<!-- bookkit:toc:begin -->" $text] >= 0} { return 1 }
         }
@@ -971,8 +1024,10 @@ $bar[string range $html [expr {$e + 1}] end]"
 
     # Serve the connection -- runs as a coroutine
     method serveConn {chan addr port} {
+        # Tcl 9: invalid bytes in the request line would be a read error
+        # (connection closed without an answer); replaced, they give 404.
         chan configure $chan -blocking 0 -buffering full \
-            -translation crlf -encoding utf-8
+            -translation crlf -encoding utf-8 {*}$::mdserver::readOpts
         dict set _conns $chan 1
         # readable event resumes this coroutine; timeout guards against slow-loris
         chan event $chan readable [info coroutine]
@@ -1012,6 +1067,12 @@ $bar[string range $html [expr {$e + 1}] end]"
             my _send $chan "405 Method Not Allowed" "text/html; charset=utf-8" \
                 "<html><body><h1>405 Method Not Allowed</h1><p>mdserver liest nur: GET, HEAD.</p></body></html>" \
                 {Allow {GET, HEAD}}
+        } trap {MDDOCS BADURL} {u opts} {
+            set methode [lindex [dict get $opts -errorcode] 2]
+            set pfad    $u
+            my _notiz $chan [lindex [dict get $opts -errorcode] 3]
+            my _send $chan "400 Bad Request" "text/html; charset=utf-8" \
+                "<html><body><h1>400 Bad Request</h1></body></html>"
         } trap {MDDOCS URITOOLONG} {m} {
             if {$methode eq "-"} { set methode "?" }
             # Eine ueberlange Anfragezeile: der Klient soll es erfahren, nicht
@@ -1116,7 +1177,7 @@ $bar[string range $html [expr {$e + 1}] end]"
         if {![file exists $bt]} { return $meta }
         set ip [interp create -safe]
         catch {
-            set fh [open $bt r]; fconfigure $fh -encoding utf-8
+            set fh [open $bt r]; fconfigure $fh -encoding utf-8 {*}$::mdserver::readOpts
             set script [read $fh]; close $fh
             interp eval $ip $script
             foreach k {title subtitle lang date chapters} {
@@ -1158,7 +1219,7 @@ $bar[string range $html [expr {$e + 1}] end]"
     # lists and tables skipped), shortened to about LEN characters.
     method _firstPara {file {len 180}} {
         if {[catch {open $file r} fh]} { return "" }
-        fconfigure $fh -encoding utf-8
+        fconfigure $fh -encoding utf-8 {*}$::mdserver::readOpts
         set para "" ; set inCode 0
         while {[gets $fh line] >= 0} {
             if {[regexp {^\s*(```|~~~)} $line]} { set inCode [expr {!$inCode}] ; continue }
@@ -1326,7 +1387,8 @@ $bar[string range $html [expr {$e + 1}] end]"
                 <small>PDF</small></li>"
         }
         if {$items eq ""} { return "" }
-        set title [expr {$dir eq [my cfg root] ? [my cfg title] : [my _dirTitle $dir]}]
+        # if, not expr: expr would turn a title like 007 into 7
+        if {$dir eq [my cfg root]} { set title [my cfg title] } else { set title [my _dirTitle $dir] }
         return "<div class=\"mds-side-title\">[my _esc $title]</div><ul>$items</ul>"
     }
 
@@ -1408,12 +1470,58 @@ $bar[string range $html [expr {$e + 1}] end]"
         return $out
     }
 
+    # Rows of a CSV file: UTF-8 or cp1252 (see _decodeText), delimiter the
+    # one of ";" "," and tab that occurs most often in the first line.
+    method _csvRows {f} {
+        set fh [open $f rb]
+        try { set bytes [read $fh] } finally { close $fh }
+        set text [my _decodeText $bytes]
+        # the delimiter that occurs most often in the first line: ; , or tab
+        set first [lindex [split $text \n] 0]
+        set d ,
+        set best [regexp -all {,} $first]
+        foreach c [list ";" "\t"] {
+            set n [regexp -all -- $c $first]
+            if {$n > $best} { set d $c ; set best $n }
+        }
+        return [::tclutils::tucsv::parse $text -delimiter $d -strict 0]
+    }
+
+    # A CSV file as a table: the first row is the header, at most csvMax
+    # rows, a link to the file itself (?raw=1).
+    method _csvBody {f} {
+        set csvMax 2000
+        set n [file tail $f]
+        set raw "[my _esc [string map {" " %20} $n]]?raw=1"
+        set body "<h1>[my _esc [file rootname $n]]</h1>"
+        if {[catch {my _csvRows $f} rows]} {
+            return "$body<p>Die Datei l\u00e4sst sich nicht als CSV lesen: [my _esc $rows]</p>\
+<p><a href=\"$raw\">Datei herunterladen</a></p>"
+        }
+        set total [expr {max(0, [llength $rows] - 1)}]
+        append body "<p class=\"mds-lead\">$total Zeilen &middot; <a href=\"$raw\">als CSV herunterladen</a></p>"
+        if {![llength $rows]} { return $body }
+        append body "<div class=\"mds-csv\"><table><thead><tr>"
+        foreach c [lindex $rows 0] { append body "<th>[my _esc $c]</th>" }
+        append body "</tr></thead><tbody>"
+        foreach r [lrange $rows 1 $csvMax] {
+            append body "<tr>"
+            foreach c $r { append body "<td>[my _esc $c]</td>" }
+            append body "</tr>"
+        }
+        append body "</tbody></table></div>"
+        if {$total > $csvMax} {
+            append body "<p class=\"mds-note\">Gezeigt: die ersten $csvMax von $total Zeilen.</p>"
+        }
+        return $body
+    }
+
     # The whole page around BODY.
     method _sitePage {title body fsPath urlPath theme} {
         set css ""
         set cssFile [my _styleCss site]
         if {$cssFile ne ""} {
-            catch { set fh [open $cssFile r]; fconfigure $fh -encoding utf-8; set css [read $fh]; close $fh }
+            catch { set fh [open $cssFile r]; fconfigure $fh -encoding utf-8 {*}$::mdserver::readOpts; set css [read $fh]; close $fh }
         }
         set dark [expr {$theme in {dunkel dark} ? " class=\"dark\"" : ""}]
         set head ""
@@ -1428,6 +1536,14 @@ $bar[string range $html [expr {$e + 1}] end]"
             }
         }
         set side  [my _sideNav $fsPath $urlPath]
+        # the folder of this page goes with the search, so the result page
+        # can offer "only here" (the search itself still covers everything)
+        set vd [string trim $urlPath /]
+        if {[file isfile $fsPath]} { set vd [string trim [file dirname "/$vd"] /] }
+        set von ""
+        if {[my _searchScope $vd] ne ""} {
+            set von "<input type=\"hidden\" name=\"von\" value=\"[my _esc [my _searchScope $vd]]\">"
+        }
         set toc   [my _pageToc $body]
         set crumbs [my _crumbs $urlPath $title]
         set pager [expr {[file isfile $fsPath] ? [my _pagerCards $fsPath] : ""}]
@@ -1453,7 +1569,7 @@ $css
 <a class=\"mds-brand\" href=\"/\">$brand</a>
 <nav class=\"mds-topnav\">$head</nav>
 <form class=\"mds-search\" action=\"/\" method=\"get\" role=\"search\">\
-<input type=\"search\" name=\"q\" placeholder=\"Suchen\" aria-label=\"Suchen\"></form>
+<input type=\"search\" name=\"q\" placeholder=\"Suchen\" aria-label=\"Suchen\">$von</form>
 </header>
 <div class=\"$cls\">
 <aside class=\"mds-side\">$side<nav class=\"mds-side-top\">$head</nav></aside>
@@ -1493,12 +1609,50 @@ $pager
         return [my _sitePage $title $body $fsPath $urlPath $theme]
     }
 
+    # Invalid UTF-8 becomes U+FFFD under Tcl 9 as under 8.6; up to
+    # 2026-10-30 Tcl 9 answered such a Markdown file with 500.
     method _readUtf8 {path} {
         set fh [open $path r]
-        fconfigure $fh -encoding utf-8
-        set t [read $fh]
-        close $fh
-        return $t
+        try {
+            fconfigure $fh -encoding utf-8 {*}$::mdserver::readOpts
+            return [read $fh]
+        } finally {
+            close $fh
+        }
+    }
+
+    # Write DATA (text) to PATH through a temporary file: a failed write
+    # leaves the old file, no temporary file and no open channel. Uses
+    # tclutils::common::replaceFile when it loads (tclutils 0.69.0).
+    method _writeAtomic {path data} {
+        if {![catch {package require tclutils::common 0.3}]} {
+            ::tclutils::common::replaceFile $path $data -encoding utf-8 -translation lf
+            return
+        }
+        set tmp $path.tmp[pid]
+        set fh [open $tmp w]
+        try {
+            fconfigure $fh -encoding utf-8 -translation lf
+            puts -nonewline $fh $data
+            close $fh
+        } on error {msg opts} {
+            catch {close $fh}
+            catch {file delete -- $tmp}
+            return -options $opts $msg
+        }
+        file rename -force -- $tmp $path
+    }
+
+    # Text of a file whose encoding is not known: UTF-8 if the bytes are
+    # valid UTF-8, else cp1252 (Excel and older Windows tools).
+    method _decodeText {bytes} {
+        if {[package vsatisfies [package provide Tcl] 9-]} {
+            if {![catch {encoding convertfrom -profile strict utf-8 $bytes} t]} { return $t }
+        } else {
+            set t [encoding convertfrom utf-8 $bytes]
+            if {[encoding convertto utf-8 $t] eq $bytes} { return $t }
+        }
+        return [encoding convertfrom cp1252 $bytes]
     }
 
     # ------------------------------------------------------------------
@@ -1508,6 +1662,18 @@ $pager
     # walks the tree (cheap) and rereads only what changed. Words are ANDed,
     # case-insensitive, umlauts match their ae/oe/ue spelling. Dot folders
     # and symlinks are left out, as for serving.
+    #
+    # Query syntax (2026-10-30):
+    #   "two words"    a phrase: the words in this order
+    #   -word -"a b"   leave out entries that contain it
+    #   a OR b, a | b  either of the two (binds the neighbours only;
+    #                  ODER too, upper case only)
+    #   in:dir/sub     only below this folder (relative to the root)
+    #   typ:md|pdf|office|csv  only Markdown files, PDF pages, office
+    #                  documents (ODF, DOCX, XLSX) or CSV files
+    # in and typ also come as URL parameters (?in=...&typ=...); the result
+    # page offers both, the folder choice from ?von= (the page the search
+    # field was on).
     # ------------------------------------------------------------------
 
     method _fold {s} {
@@ -1516,7 +1682,10 @@ $pager
 
     method _searchFiles {dir} {
         set out {}
-        set pdf [my _pdfOn]
+        set exts {.md}
+        if {[my _pdfOn]} { lappend exts .pdf }
+        lappend exts {*}[dict keys [my _officeReaders]]
+        if {[my _csvOn]} { lappend exts .csv }
         foreach e [glob -nocomplain -directory $dir *] {
             set n [file tail $e]
             if {[string index $n 0] eq "." && ![my cfg dotfiles]} continue
@@ -1524,8 +1693,7 @@ $pager
             if {$t eq "directory"} {
                 lappend out {*}[my _searchFiles $e]
             } else {
-                set ext [string tolower [file extension $n]]
-                if {$ext eq ".md" || ($pdf && $ext eq ".pdf")} { lappend out $e }
+                if {[string tolower [file extension $n]] in $exts} { lappend out $e }
             }
         }
         return $out
@@ -1558,9 +1726,7 @@ $pager
         if {[info exists _pdfOn]} { return $_pdfOn }
         set mode [my cfg pdfsearch]
         if {$mode in {0 off no false}} { return [set _pdfOn 0] }
-        if {[info exists ::env(TCLUTILS_TM)] && [file isdirectory $::env(TCLUTILS_TM)]} {
-            catch {tcl::tm::path add $::env(TCLUTILS_TM)}
-        }
+        my _tclutilsPath
         if {[catch {package require tclutils::tupdftext 0.1} err]} {
             if {$mode ni {auto}} {
                 puts stderr "WARNING: --pdf-search: tclutils::tupdftext not found\
@@ -1569,6 +1735,68 @@ $pager
             return [set _pdfOn 0]
         }
         return [set _pdfOn 1]
+    }
+
+    # Office documents in the search (--office-search auto|0|1): ODF
+    # (.odt .ods .odp) with tclutils::tuodf, Word (.docx) with tudocx, Excel
+    # (.xlsx) with tuxlsx -- each when its module loads. One hit per file,
+    # the text of its paragraphs or cells. Read in the server process (a
+    # zip and one or a few XML parts, quick) and kept in the index with the
+    # mtime. Returns a dict extension -> command prefix that gives the text.
+    method _officeReaders {} {
+        my variable _officeR
+        if {[info exists _officeR]} { return $_officeR }
+        set _officeR [dict create]
+        set mode [my cfg officesearch]
+        if {$mode in {0 off no false}} { return $_officeR }
+        my _tclutilsPath
+        set missing {}
+        foreach {pkg exts cmd} {
+            tclutils::tuodf  {.odt .ods .odp} {apply {{f} {join [::tclutils::tuodf::paragraphs $f] " "}}}
+            tclutils::tudocx {.docx}          {apply {{f} {join [::tclutils::tudocx::paragraphs $f] " "}}}
+            tclutils::tuxlsx {.xlsx}          {apply {{f} {::tclutils::tuxlsx::text $f}}}
+        } {
+            if {[catch {package require $pkg 0.1}]} { lappend missing $pkg ; continue }
+            foreach e $exts { dict set _officeR $e $cmd }
+        }
+        if {[llength $missing] && $mode ni {auto}} {
+            puts stderr "WARNING: --office-search: not found: [join $missing {, }]"
+        }
+        return $_officeR
+    }
+
+    method _officeStatus {} {
+        set r [my _officeReaders]
+        if {![dict size $r]} { return "Suche aus" }
+        set mods {}
+        foreach pkg {tclutils::tuodf tclutils::tudocx tclutils::tuxlsx} {
+            if {![catch {package present $pkg} v]} { lappend mods "[namespace tail $pkg] $v" }
+        }
+        return "Suche an ([join [dict keys $r] { }]; [join $mods {, }])"
+    }
+
+    # CSV files as a table page in style site (--csv-view auto|0|1), with
+    # tclutils::tucsv 0.2; ?raw=1 sends the file itself. Their text is in
+    # the search as well.
+    method _csvOn {} {
+        my variable _csvOn
+        if {[info exists _csvOn]} { return $_csvOn }
+        set mode [my cfg csvview]
+        if {$mode in {0 off no false}} { return [set _csvOn 0] }
+        my _tclutilsPath
+        if {[catch {package require tclutils::tucsv 0.2} err]} {
+            if {$mode ni {auto}} {
+                puts stderr "WARNING: --csv-view: tclutils::tucsv 0.2 not found -- CSV files are sent as they are: $err"
+            }
+            return [set _csvOn 0]
+        }
+        return [set _csvOn 1]
+    }
+
+    method _tclutilsPath {} {
+        if {[info exists ::env(TCLUTILS_TM)] && [file isdirectory $::env(TCLUTILS_TM)]} {
+            catch {tcl::tm::path add $::env(TCLUTILS_TM)}
+        }
     }
 
     # One line for the start banner: is the PDF search on, and if not, why.
@@ -1619,15 +1847,14 @@ $pager
         return $pages
     }
 
+    # A cache that cannot be written is not an error (the next search reads
+    # the PDF again); a failed write leaves the old entry and no open channel
+    # (up to 2026-10-30 an error in puts left the channel open).
     method _pdfCacheWrite {f mt pages} {
         set cf [my _pdfCacheFile $f]
         catch {
             file mkdir [file dirname $cf]
-            set fh [open $cf.tmp w]
-            fconfigure $fh -encoding utf-8
-            puts -nonewline $fh [list [file normalize $f] $mt [file size $f] $pages]
-            close $fh
-            file rename -force $cf.tmp $cf
+            my _writeAtomic $cf [list [file normalize $f] $mt [file size $f] $pages]
         }
     }
 
@@ -1792,6 +2019,24 @@ $pager
                 dict set fresh $f [dict create mtime $mt kind pdf pages $pages]
                 continue
             }
+            set ext [string tolower [file extension $f]]
+            if {$ext in {.odt .ods .odp .docx .xlsx .csv}} {
+                set kind [expr {$ext eq ".csv" ? "csv" : "office"}]
+                if {$kind eq "office"} {
+                    set rd [my _officeReaders]
+                    if {![dict exists $rd $ext] || [catch {{*}[dict get $rd $ext] $f} text]} {
+                        set text ""
+                    }
+                } else {
+                    if {[catch {my _csvRows $f} rows]} { set rows {} }
+                    set text [join [lmap r $rows {join $r " "}] " "]
+                }
+                set text [string trim [regsub -all {\s+} $text " "]]
+                set title [file rootname [file tail $f]]
+                dict set fresh $f [dict create mtime $mt kind $kind title $title text $text \
+                    ftitle [my _fold $title] ftext [my _fold $text]]
+                continue
+            }
             if {[catch {my _readUtf8 $f} md]} continue
             set title [my _h1Title $f]
             if {$title eq ""} { set title [file rootname [file tail $f]] }
@@ -1804,35 +2049,102 @@ $pager
         return $fresh
     }
 
-    # Hits for QUERY: list of dicts {url title path snippet score}, best first.
-    method _search {query {max 50}} {
-        set words {}
-        foreach w [split [my _fold $query] " \t"] {
-            if {[string length $w] >= 2} { lappend words $w }
+    # A query as a dict: groups (list of OR-lists of folded terms, all
+    # groups must match), excl (folded terms that must not match), in
+    # (folder relative to the root, "" = everywhere), typ (md, pdf or "").
+    method _parseQuery {query {in ""} {typ ""}} {
+        set groups {} ; set excl {} ; set orNext 0
+        foreach {all neg phr word} [regexp -all -inline {(-?)(?:"([^"]*)"?|(\S+))} $query] {
+            set isPhrase [expr {[string index $all [string length $neg]] eq "\""}]
+            if {!$isPhrase && $neg eq ""} {
+                if {$word in {OR ODER |}} { set orNext 1 ; continue }
+                if {[regexp -nocase {^(in|typ|type):(.*)$} $word -> k v]} {
+                    if {[string tolower $k] eq "in"} { set in $v } else { set typ $v }
+                    continue
+                }
+            }
+            set t [my _fold [expr {$isPhrase ? $phr : $word}]]
+            set t [string trim [regsub -all {\s+} $t " "]]
+            if {[string length $t] < 2} continue
+            if {$neg ne ""} {
+                lappend excl $t
+            } elseif {$orNext && [llength $groups]} {
+                lset groups end [linsert [lindex $groups end] end $t]
+            } else {
+                lappend groups [list $t]
+            }
+            set orNext 0
         }
-        if {![llength $words]} { return {} }
+        return [dict create groups $groups excl $excl \
+            in [my _searchScope $in] typ [my _searchTyp $typ]]
+    }
+
+    # A folder for in: relative, "/"-separated, no "." or "..", no dot
+    # folder unless --dotfiles; anything else counts as "everywhere".
+    method _searchScope {in} {
+        set parts [lsearch -all -inline -not [split [string map {\\ /} $in] /] ""]
+        foreach p $parts {
+            if {$p in {. ..}} { return "" }
+            if {[string index $p 0] eq "." && ![my cfg dotfiles]} { return "" }
+        }
+        return [join $parts /]
+    }
+
+    method _searchTyp {typ} {
+        switch -- [string tolower $typ] {
+            md - markdown        { return md }
+            pdf                  { return pdf }
+            office - odf - odt - ods - odp - docx - xlsx - word - excel { return office }
+            csv                  { return csv }
+            default              { return "" }
+        }
+    }
+
+    # Score of TERM in a title/text pair: 20 for the title, plus the hits
+    # in the text (at most 10); 0 if it is in neither.
+    method _termScore {term fh ft} {
+        set inTitle [expr {[string first $term $fh] >= 0}]
+        set n [regexp -all -- [my _reQuote $term] $ft]
+        return [expr {$inTitle * 20 + min($n, 10)}]
+    }
+
+    # Hits for QUERY: list of dicts {url title path snippet score}, best first.
+    # IN and TYP narrow the search as in:/typ: in the query (those win).
+    method _search {query {max 50} {in ""} {typ ""}} {
+        set q [my _parseQuery $query $in $typ]
+        set groups [dict get $q groups]
+        if {![llength $groups]} { return {} }
+        set excl  [dict get $q excl]
+        set scope [dict get $q in]
+        set typ   [dict get $q typ]
+        # the words to mark: every positive term
+        set words [concat {*}$groups]
         set root [my cfg root]
         set hits {}
         dict for {f e0} [my _searchIndex] {
+          set kind [expr {[dict exists $e0 kind] ? [dict get $e0 kind] : "md"}]
+          set isPdf [expr {$kind eq "pdf"}]
+          if {$typ ne "" && $typ ne $kind} continue
+          set rel [string range $f [string length $root] end]
+          set url [join [lmap p [file split $rel] {
+              if {$p eq "/" || $p eq "\\"} continue ; set p }] /]
+          if {$scope ne "" && $url ne $scope && ![string match "$scope/*" $url]} continue
           # a Markdown file is one entry, a PDF one entry per page
-          if {[dict exists $e0 kind] && [dict get $e0 kind] eq "pdf"} {
-              set entries [dict get $e0 pages]
-          } else {
-              set entries [list $e0]
-          }
+          set entries [expr {$isPdf ? [dict get $e0 pages] : [list $e0]}]
           foreach e $entries {
             set ft [dict get $e ftext] ; set fh [dict get $e ftitle]
-            set score 0 ; set all 1
-            foreach w $words {
-                set inTitle [expr {[string first $w $fh] >= 0}]
-                set n [regexp -all -- [my _reQuote $w] $ft]
-                if {!$inTitle && $n == 0} { set all 0 ; break }
-                incr score [expr {$inTitle * 20 + min($n, 10)}]
+            set score 0 ; set ok 1
+            foreach g $groups {
+                set best 0
+                foreach t $g { set best [expr {max($best, [my _termScore $t $fh $ft])}] }
+                if {$best == 0} { set ok 0 ; break }
+                incr score $best
             }
-            if {!$all} continue
-            set rel [string range $f [string length $root] end]
-            set url [join [lmap p [file split $rel] {
-                if {$p eq "/" || $p eq "\\"} continue ; set p }] /]
+            if {!$ok} continue
+            foreach t $excl {
+                if {[my _termScore $t $fh $ft] > 0} { set ok 0 ; break }
+            }
+            if {!$ok} continue
             set dirTitles {}
             set fs $root
             foreach p [lrange [split [string trim $url /] /] 0 end-1] {
@@ -1841,8 +2153,9 @@ $pager
                 # bookkit wrapper and edition share the title: once
                 if {[lindex $dirTitles end] ne $dt} { lappend dirTitles $dt }
             }
-            if {[dict exists $e page]} { append url "#page=[dict get $e page]" }
-            lappend hits [dict create url "/$url" title [dict get $e title] \
+            set u $url
+            if {[dict exists $e page]} { append u "#page=[dict get $e page]" }
+            lappend hits [dict create url "/$u" title [dict get $e title] \
                 path [join $dirTitles " \u203a "] score $score \
                 snippet [my _snippet [dict get $e text] $words]]
           }
@@ -1872,7 +2185,9 @@ $pager
                 ue { append re "(?:ue|\u00fc)" ; incr i ; continue }
                 ss { append re "(?:ss|\u00df)" ; incr i ; continue }
             }
-            append re [my _reQuote [string index $w $i]]
+            set c [string index $w $i]
+            if {$c eq " "} { append re {\s+} ; continue }
+            append re [my _reQuote $c]
         }
         return $re
     }
@@ -1912,12 +2227,16 @@ $pager
     }
 
     # The results as HTML (site style) ...
-    method _searchBody {query} {
-        set hits [my _search $query]
+    method _searchBody {query {in ""} {typ ""} {von ""}} {
+        set hits [my _search $query 50 $in $typ]
+        set pq [my _parseQuery $query $in $typ]
         set q [my _esc $query]
         set body "<h1>Suche</h1>
 <form class=\"mds-search-big\" action=\"/\" method=\"get\">\
-<input type=\"search\" name=\"q\" value=\"$q\" autofocus><button>Suchen</button></form>"
+<input type=\"search\" name=\"q\" value=\"$q\" autofocus><button>Suchen</button>\
+[my _searchFilters [dict get $pq in] [dict get $pq typ] $von]</form>
+<p class=\"mds-search-help\">\"Wortfolge\" &middot; -ohne &middot; a ODER b &middot;\
+in:ordner &middot; typ:md|pdf|office|csv</p>"
         if {[string trim $query] eq ""} { return $body }
         set offen [my _pdfPending]
         if {$offen} {
@@ -1938,16 +2257,100 @@ $pager
         return $body
     }
 
+    # The two choices under the search field: folder (everywhere, or one of
+    # the folders above the page the search came from, or the current in)
+    # and type. Folders are offered only if they exist under the root.
+    method _searchFilters {in typ von} {
+        set root [my cfg root]
+        set dirs {}
+        set acc {}
+        foreach p [split [my _searchScope $von] /] {
+            if {$p eq ""} continue
+            lappend acc $p
+            set d [join $acc /]
+            if {[file isdirectory [file join $root {*}$acc]]} { lappend dirs $d }
+        }
+        if {$in ne "" && $in ni $dirs && [file isdirectory [file join $root {*}[split $in /]]]} {
+            lappend dirs $in
+        }
+        set out ""
+        if {[llength $dirs]} {
+            append out "<label>Bereich <select name=\"in\">"
+            append out "<option value=\"\"[expr {$in eq "" ? " selected" : ""}]>\u00fcberall</option>"
+            foreach d $dirs {
+                set titles {}
+                set fs $root
+                foreach p [split $d /] {
+                    set fs [file join $fs $p]
+                    set dt [my _dirTitle $fs]
+                    if {[lindex $titles end] ne $dt} { lappend titles $dt }
+                }
+                set sel [expr {$d eq $in ? " selected" : ""}]
+                append out "<option value=\"[my _esc $d]\"$sel>[my _esc [join $titles " \u203a "]]</option>"
+            }
+            append out "</select></label>"
+            # keep the origin for the next search from this page
+            append out "<input type=\"hidden\" name=\"von\" value=\"[my _esc [my _searchScope $von]]\">"
+        }
+        append out "<label>Typ <select name=\"typ\">"
+        set opts [list "" alle md Markdown]
+        if {[my _pdfOn]} { lappend opts pdf PDF }
+        if {[dict size [my _officeReaders]]} { lappend opts office Office }
+        if {[my _csvOn]} { lappend opts csv CSV }
+        foreach {v l} $opts {
+            set sel [expr {$v eq $typ ? " selected" : ""}]
+            append out "<option value=\"$v\"$sel>$l</option>"
+        }
+        append out "</select></label>"
+        return "<div class=\"mds-search-filter\">$out</div>"
+    }
+
     method _pdfPendingText {n} {
         set was [expr {$n == 1 ? "1 PDF wird" : "$n PDFs werden"}]
         return "$was noch gelesen; ihre Seiten fehlen in dieser Liste.\
             Sp\u00e4ter noch einmal suchen."
     }
 
+    # ... as JSON (?format=json, any style), with tclutils::tujson:
+    #   {"query":..., "pending":N, "hits":[{"url","title","path","snippet","score"}]}
+    # The snippet is plain text, without <mark>. Without tujson: 501.
+    method _searchJson {query in typ} {
+        my _tclutilsPath
+        if {[catch {package require tclutils::tujson 0.1}]} { return "" }
+        set J ::tclutils::tujson
+        set hits {}
+        foreach h [my _search $query 50 $in $typ] {
+            set sn [regsub -all {<[^>]*>} [dict get $h snippet] ""]
+            set sn [string map {&hellip; \u2026 &lt; < &gt; > &quot; \" &amp; &} $sn]
+            lappend hits [${J}::obj [list \
+                url     [${J}::str [dict get $h url]] \
+                title   [${J}::str [dict get $h title]] \
+                path    [${J}::str [dict get $h path]] \
+                snippet [${J}::str $sn] \
+                score   [${J}::num [dict get $h score]]]]
+        }
+        return [${J}::toJson [${J}::obj [list \
+            query   [${J}::str $query] \
+            pending [${J}::num [my _pdfPending]] \
+            hits    [${J}::arr $hits]]]]
+    }
+
+    method _sendSearchJson {chan req} {
+        set j [my _searchJson [$req param q ""] [$req param in ""] [$req param typ ""]]
+        if {$j eq ""} {
+            my _notiz $chan "search json: no tujson"
+            my _send $chan "501 Not Implemented" "text/plain; charset=utf-8" \
+                "format=json needs tclutils::tujson\n"
+            return
+        }
+        my _notiz $chan "search json"
+        my _send $chan "200 OK" "application/json; charset=utf-8" $j
+    }
+
     # ... and as Markdown for the other styles.
-    method _searchMd {query} {
+    method _searchMd {query {in ""} {typ ""}} {
         set md "# Suche: [string map {\[ \\\[ \] \\\] * \\* _ \\_ < &lt;} $query]\n\n"
-        set hits [my _search $query]
+        set hits [my _search $query 50 $in $typ]
         set offen [my _pdfPending]
         if {$offen} { append md "*[my _pdfPendingText $offen]*\n\n" }
         if {![llength $hits]} { return "$md*Nichts gefunden.*\n" }
@@ -1961,11 +2364,16 @@ $pager
 
     # Requests in style "site".
     method _siteDispatch {chan req urlPath theme} {
+        if {[dict exists [$req params] q] && [$req param format ""] eq "json"} {
+            my _sendSearchJson $chan $req
+            return
+        }
         if {[dict exists [$req params] q]} {
             set q [$req param q ""]
             my _notiz $chan "search"
             my _send $chan "200 OK" "text/html; charset=utf-8" \
-                [my _sitePage "Suche" [my _searchBody $q] [my cfg root] / $theme]
+                [my _sitePage "Suche" [my _searchBody $q [$req param in ""] \
+                    [$req param typ ""] [$req param von ""]] [my cfg root] / $theme]
             return
         }
         if {[$req param nav ""] eq "index"} {
@@ -1992,7 +2400,11 @@ $pager
                 set html [my _siteMarkdown [my _bookLandingMd $fsPath] $indexFile $urlPath $theme]
                 my _notiz $chan "book landing"
             } else {
-                set title [expr {$fsPath eq [my cfg root] ? [my cfg title] : [my _dirTitle $fsPath]}]
+                if {$fsPath eq [my cfg root]} {
+                    set title [my cfg title]
+                } else {
+                    set title [my _dirTitle $fsPath]
+                }
                 set body "<h1>[my _esc $title]</h1>"
                 if {[file exists [file join $fsPath README.md]]} {
                     set p [my _firstPara [file join $fsPath README.md] 400]
@@ -2023,6 +2435,14 @@ $pager
             my _notiz $chan markdown
             my _send $chan "200 OK" "text/html; charset=utf-8" \
                 [my _siteMarkdown [my _readUtf8 $fsPath] $fsPath $urlPath $theme]
+            return
+        }
+        if {[string tolower [file extension $fsPath]] eq ".csv" && [$req param raw ""] eq ""
+                && [my _csvOn]} {
+            my _notiz $chan csv
+            set title [file rootname [file tail $fsPath]]
+            my _send $chan "200 OK" "text/html; charset=utf-8" \
+                [my _sitePage $title [my _csvBody $fsPath] $fsPath $urlPath $theme]
             return
         }
         my _serveFile $chan $req $fsPath [my _mime [string tolower [file extension $fsPath]]]
@@ -2057,8 +2477,13 @@ $pager
             }
 
             # Full-text search, plain result list for the older styles
+            if {[dict exists [$req params] q] && [$req param format ""] eq "json"} {
+                my _sendSearchJson $chan $req
+                return
+            }
             if {[dict exists [$req params] q]} {
-                set html [$_renderer markdownText [my _searchMd [$req param q ""]] $theme 0 [my _styleCss $style]]
+                set html [$_renderer markdownText [my _searchMd [$req param q ""] \
+                    [$req param in ""] [$req param typ ""]] $theme 0 [my _styleCss $style]]
                 my _notiz $chan "search"
                 my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
                 return
@@ -2497,6 +2922,11 @@ $pager
         puts "  Root:  [my cfg root]"
         puts "  Theme: [my cfg theme]"
         puts "  PDF:   [my _pdfStatus]"
+        puts "  Office: [my _officeStatus]"
+        puts "  CSV:   [expr {[my _csvOn] ? "Tabellenseite und Suche an (tclutils::tucsv [package present tclutils::tucsv])" : "aus"}]"
+        if {[encoding system] ni {utf-8 utf8}} {
+            puts "  Achtung: Systemkodierung [encoding system] -- Dateinamen mit Umlauten werden nicht gefunden (LANG=C.UTF-8 setzen)"
+        }
         puts ""
         puts "  HTTP:  [my _horchtAuf [my cfg port]]"
         puts "         http://$url:[my cfg port]/"

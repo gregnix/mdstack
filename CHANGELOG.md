@@ -1,5 +1,53 @@
 # mdstack — Changelog
 
+## 2026-10-30 — mdserver: security fix
+
+- `_urlDecode` ran `subst` on the URL path: `/[exec ...]` executed commands
+  as the server user. Now plain `%XX` decoding; `+` is a space only in the
+  query, `=` stays in values; invalid UTF-8 stays as bytes. Raw UTF-8 in
+  the request line (curl) works, also mixed with `%XX`.
+- Path: a `%` without two hex digits, `%00` or NUL is 400 Bad Request
+  (logged). In the query such a `%` stays text (`?q=50%`).
+- Tcl 9: document channels and the request line read with
+  `-profile replace`; a file with invalid UTF-8 gave 500, invalid bytes in
+  the request line closed the connection without an answer.
+- `.xml` served as `application/xml`; CSV detects tab as separator.
+- Start banner warns when the system encoding is not UTF-8 (file names
+  with umlauts give 404); `mdserver.service.beispiel` sets `LANG=C.UTF-8`.
+- Tests: `url-1` to `url-5`, `csv-3` (133 in all).
+
+## 2026-10-30 — mdserver: search syntax and scope
+
+- `?q=` understands `"phrase"`, `-word` / `-"phrase"` (leave out),
+  `a OR b` (also `ODER`, `|`), `in:folder` and `typ:md|pdf`. Plain words
+  are ANDed as before.
+- `?in=` and `?typ=` as URL parameters; the query wins. `..`, `.` and dot
+  folders in `in` count as everywhere.
+- Result page (`site`): choices *Bereich* and *Typ* under the field. The
+  header field sends the folder of the current page as `von=`; *Bereich*
+  offers it and the folders above it.
+- Snippets mark a phrase across line breaks.
+- Tests: `test-mdserver-oo.tcl` `search-6` to `search-10` (121 in all).
+
+## 2026-10-30 — mdserver: more from tclutils (all optional)
+
+- PDF cache written through a temporary file (`tclutils::common::replaceFile`
+  when it loads), in the server and in `pdftext-worker.tcl`; an error in
+  `puts` left the channel open. `_readUtf8` closes its channel on a read
+  error.
+- `?q=...&format=json` returns the hits as JSON (`tclutils::tujson`; 501
+  without it).
+- `--office-search auto|0|1`: `.odt`, `.ods`, `.odp` (`tclutils::tuodf`;
+  headings with tuodf 0.2), `.docx` (`tudocx`) and `.xlsx` (`tuxlsx`) in
+  the search, each format when its module loads. `typ:office`.
+- `--csv-view auto|0|1`: `.csv` as a table page in style `site`, `?raw=1`
+  for the file; UTF-8 or cp1252, `;` or `,`. In the search, `typ:csv`
+  (`tclutils::tucsv` 0.2).
+- MIME types for `.csv`, `.odt`, `.ods`, `.odp`, `.docx`, `.xlsx`. Start
+  banner lines `Office:` and `CSV:`.
+- Tests: `cache-1`, `json-1`, `office-1`, `office-2`, `csv-1`, `csv-2`
+  (127 in all).
+
 ## 2026-10-26 — parser 0.9.2
 
 - `***` between text closes the open `*`/`**` and opens the other, as in
