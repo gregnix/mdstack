@@ -62,6 +62,7 @@ proc parseArgs {argv} {
             --pdf-worker { lappend args --pdfworker [lindex $argv [incr i]] }
             --office-search { lappend args --officesearch [lindex $argv [incr i]] }
             --csv-view   { lappend args --csvview [lindex $argv [incr i]] }
+            --office-view { lappend args --officeview [lindex $argv [incr i]] }
             --trusted-proxy {
                 # Der Konstruktor macht aus "--x" den Schluessel "x"; sein
                 # Schluessel heisst trustedproxy, in einem Wort wie alle
@@ -89,7 +90,11 @@ proc parseArgs {argv} {
                 puts "  --office-search auto|0|1  .odt/.ods/.odp, .docx and .xlsx in the"
                 puts "                    full-text search (tclutils::tuodf, tudocx, tuxlsx;"
                 puts "                    auto: each when it loads)"
-                puts "  --csv-view auto|0|1  .csv as a table page (style site) and in"
+                puts "  --office-view auto|0|1  .docx/.odt/.odp as text, .xlsx/.ods as"
+                puts "                    tables on a page; ?raw=1 sends the file"
+                puts "                    (tclutils::tudocx, tuodf 0.2, tuxlsx; auto: each"
+                puts "                    when it loads)"
+                puts "  --csv-view auto|0|1  .csv as a table page and in"
                 puts "                    the search; ?raw=1 sends the file (needs"
                 puts "                    tclutils::tucsv 0.2; auto: when it loads)"
                 puts "  --theme   NAME    hell|dunkel|solarized (default: hell)"

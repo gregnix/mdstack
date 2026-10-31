@@ -67,7 +67,8 @@ tclsh mdserver.tcl [options]
 | `--pdf-cache` | `~/.cache/mdserver-pdf` | Folder for the PDF text read, one file per PDF, valid while mtime and size match. Never inside the root. |
 | `--pdf-worker` | `1` | Read PDFs in a second `tclsh`, so a search does not hold up other requests. `0`: in the server process. |
 | `--office-search` | `auto` | `.odt`, `.ods`, `.odp`, `.docx` and `.xlsx` in the full-text search, one hit per file. Needs `tclutils::tuodf`, `tudocx` or `tuxlsx`; each format whose module loads. `auto`, `1`, `0` as for `--pdf-search`. |
-| `--csv-view` | `auto` | `.csv` as a table page in style `site` and in the search; `?raw=1` sends the file itself. Needs `tclutils::tucsv` 0.2. `auto`, `1`, `0` as above. |
+| `--office-view` | `auto` | Show office files as a page instead of a download: `.docx`, `.odt`, `.odp` as paragraphs, `.xlsx`, `.ods` as tables per sheet; `?raw=1` sends the file. Needs `tudocx`, `tuodf` 0.2 or `tuxlsx`. `auto`, `1`, `0` as above. |
+| `--csv-view` | `auto` | `.csv` as a table page (in every style) and in the search; `?raw=1` sends the file itself. Needs `tclutils::tucsv` 0.2. `auto`, `1`, `0` as above. |
 | `--trusted-proxy` | (empty) | Peer addresses whose `X-Forwarded-For` is believed in the log. Exact match, no netmasks. Empty means the header is ignored. Several as a list: `--trusted-proxy "127.0.0.1 10.0.0.5"`. |
 | `--maxline` | `8190` | Bytes per request/header line; over that **414**. `0` = no limit. |
 | `--maxheader` | `16384` | Bytes of all headers; over that **431**. `0` = no limit. |
@@ -256,13 +257,23 @@ parts) and runs in the server process; the text stays in the search index
 with its mtime. `typ:office` narrows to these files. The start banner names
 the searched formats in the line `Office:`.
 
+**Office files as a page.** With `--office-view auto` a click on an office
+file shows a page instead of a download: `.docx`, `.odt` and `.odp` as
+paragraphs, `.xlsx` and `.ods` as a table per sheet (at most 2000 rows). Above
+them the kind, the number of paragraphs or sheets and the link
+"herunterladen" to `file.docx?raw=1`. A file that cannot be read shows the
+message and the link. Folders holding only office or CSV files appear like
+PDF folders in the navigation, the sidebar and the cards; the card names the
+kind ("Word, 36 KB"). The start banner names the formats in the line
+`Ansicht:`.
+
 **CSV as a table page.** When `tclutils::tucsv` 0.2 loads (`--csv-view
 auto`), style `site` shows a `.csv` as a table: first row as the header, at
 most 2000 rows, above it a link "als CSV herunterladen" to `file.csv?raw=1`.
 The delimiter is `;` when the first line has more of them than `,`, else `,`.
 The file is read as UTF-8 when the bytes are valid UTF-8, else as cp1252
-(Excel on Windows). The content is in the search as well (`typ:csv`). The
-other styles send the file unchanged.
+(Excel on Windows). The content is in the search as well (`typ:csv`). Since
+30.10. the other styles show the table page too.
 
 **Search as JSON.** `?q=...&format=json` (in every style) returns the hits as
 JSON, with `in` and `typ` as above:
@@ -465,6 +476,11 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+**Unreleased (2026-10-30)** -- office files as a page (`--office-view`):
+paragraphs or a table per sheet; folders holding only office or CSV files
+appear in the navigation; the CSV and office pages in every style. A
+connection the client closed is no longer logged as 500.
 
 **Unreleased (2026-10-30), security** -- the URL path went through `subst`
 (command execution via `/[exec ...]`); now plain `%XX` decoding, invalid

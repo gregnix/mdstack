@@ -72,7 +72,8 @@ tclsh mdserver.tcl [Optionen]
 | `--pdf-cache` | `~/.cache/mdserver-pdf` | Ordner für den gelesenen PDF-Text, eine Datei je PDF, gültig solange mtime und Größe stimmen. Nie in der Wurzel. |
 | `--pdf-worker` | `1` | PDFs in einem zweiten `tclsh` lesen, damit eine Suche andere Anfragen nicht aufhält. `0`: im Serverprozess. |
 | `--office-search` | `auto` | `.odt`, `.ods`, `.odp`, `.docx` und `.xlsx` in die Volltextsuche aufnehmen, ein Treffer je Datei. Braucht `tclutils::tuodf`, `tudocx` bzw. `tuxlsx`; jedes Format, dessen Modul ladbar ist. `auto`, `1`, `0` wie bei `--pdf-search`. |
-| `--csv-view` | `auto` | `.csv` im Stil `site` als Tabellenseite zeigen und in die Suche aufnehmen; `?raw=1` liefert die Datei selbst. Braucht `tclutils::tucsv` 0.2. `auto`, `1`, `0` wie oben. |
+| `--office-view` | `auto` | Office-Dateien als Seite zeigen statt herunterzuladen: `.docx`, `.odt`, `.odp` als Absaetze, `.xlsx`, `.ods` als Tabellen je Blatt; `?raw=1` liefert die Datei. Braucht `tudocx`, `tuodf` 0.2 bzw. `tuxlsx`. `auto`, `1`, `0` wie oben. |
+| `--csv-view` | `auto` | `.csv` als Tabellenseite zeigen (in jedem Stil) und in die Suche aufnehmen; `?raw=1` liefert die Datei selbst. Braucht `tclutils::tucsv` 0.2. `auto`, `1`, `0` wie oben. |
 | `--trusted-proxy` | (leer) | Gegenstellen, deren `X-Forwarded-For` im Protokoll geglaubt wird. Genaue Uebereinstimmung, keine Netzmasken. Leer heisst: der Kopf wird ignoriert. Mehrere als Liste: `--trusted-proxy "127.0.0.1 10.0.0.5"`. |
 | `--maxline` | `8190` | Bytes je Anfrage-/Kopfzeile; darueber **414**. `0` = ohne Grenze. |
 | `--maxheader` | `16384` | Bytes aller Koepfe zusammen; darueber **431**. `0` = ohne Grenze. |
@@ -325,14 +326,24 @@ XML-Teile) und laeuft im Serverprozess; der Text bleibt mit der mtime im
 Suchindex. `typ:office` grenzt auf diese Dateien ein. Die Startmeldung nennt
 in der Zeile `Office:` die Formate, die gesucht werden.
 
+**Office-Dateien als Seite.** Mit `--office-view auto` zeigt ein Klick auf
+eine Office-Datei eine Seite statt eines Downloads: `.docx`, `.odt` und
+`.odp` als Absaetze, `.xlsx` und `.ods` als Tabelle je Blatt (hoechstens 2000
+Zeilen). Oben stehen Art, Zahl der Absaetze bzw. Blaetter und der Link
+"herunterladen" auf `datei.docx?raw=1`. Eine Datei, die sich nicht lesen
+laesst, zeigt die Meldung und den Link. Ordner, die nur Office- oder
+CSV-Dateien enthalten, erscheinen wie PDF-Ordner in Navigation, Seitenleiste
+und Kacheln; die Kachel nennt die Art ("Word, 36 KB"). Die Startmeldung nennt
+die Formate in der Zeile `Ansicht:`.
+
 **CSV als Tabellenseite.** Ist `tclutils::tucsv` 0.2 ladbar
 (`--csv-view auto`), zeigt der Stil `site` eine `.csv` als Tabelle: erste
 Zeile als Kopf, hoechstens 2000 Zeilen, darueber ein Link "als CSV
 herunterladen" auf `datei.csv?raw=1`. Trennzeichen ist `;`, wenn die erste
 Zeile mehr davon hat als `,`, sonst `,`. Die Datei wird als UTF-8 gelesen,
 wenn die Bytes gueltiges UTF-8 sind, sonst als cp1252 (Excel unter Windows).
-Der Inhalt steht auch in der Suche (`typ:csv`). Die anderen Stile liefern die
-Datei unveraendert.
+Der Inhalt steht auch in der Suche (`typ:csv`). Seit dem 30.10. zeigen auch
+die anderen Stile die Tabellenseite.
 
 **Suche als JSON.** `?q=...&format=json` (in jedem Stil) liefert die Treffer
 als JSON, mit `in` und `typ` wie oben:
@@ -885,6 +896,11 @@ tools/mdserver/
 - **Office-Dateien in der Suche** (`--office-search`; `.odt`/`.ods`/`.odp`,
   `.docx`, `.xlsx` ueber `tclutils::tuodf`, `tudocx`, `tuxlsx`)
 - **CSV als Tabellenseite** (`--csv-view`, `tclutils::tucsv`), `?raw=1`
+- **Office-Dateien als Seite** (`--office-view`): Absaetze bzw. Tabellen je
+  Blatt; Ordner nur mit Office-/CSV-Dateien in der Navigation; CSV- und
+  Office-Seite in jedem Stil
+- Eine vom Klienten abgebrochene Verbindung steht nicht mehr als 500 im
+  Protokoll
 - **Suche als JSON** (`?format=json`, `tclutils::tujson`)
 - **PDF-Cache** ueber eine temporaere Datei geschrieben (kein offener Kanal
   nach einem Schreibfehler)

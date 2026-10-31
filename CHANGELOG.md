@@ -1,5 +1,19 @@
 # mdstack — Changelog
 
+## 2026-10-30 — mdserver: office files as a page
+
+- `--office-view auto|0|1`: `.docx`, `.odt`, `.odp` as paragraphs, `.xlsx`,
+  `.ods` as a table per sheet (at most 2000 rows); `?raw=1` sends the file.
+  `.ods` tables need `tclutils::tuodf` 0.2 with `rows`. Banner line
+  `Ansicht:`.
+- Folders holding only office or CSV files were hidden from the navigation,
+  the sidebar and the cards; now they appear like PDF folders. Cards and
+  the site index name the kind (Word, Excel, Text, Tabelle, Folien, CSV).
+- CSV and office pages in every style (CSV was `site` only).
+- A connection the client closed while the answer was written (`broken
+  pipe`) was logged as 500; now the line keeps its status and notes it.
+- Tests: `office-3` to `office-5` (136 in all).
+
 ## 2026-10-30 — mdserver: security fix
 
 - `_urlDecode` ran `subst` on the URL path: `/[exec ...]` executed commands

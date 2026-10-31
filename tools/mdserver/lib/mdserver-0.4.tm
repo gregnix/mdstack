@@ -263,10 +263,16 @@ oo::class create mdserver::Request {
 oo::class create mdserver::Renderer {
 
     variable _title
+    variable _docKinds
 
     constructor {title} {
         set _title $title
+        set _docKinds [dict create .pdf PDF]
     }
+
+    # Which files besides .md the site index lists: a dict extension ->
+    # label (PDF, Word, ...). The server sets it from what it can show.
+    method setDocKinds {kinds} { set _docKinds $kinds }
 
     method markdown {path theme toc {cssFile ""}} {
         return [my markdownText [my _readFile $path] $theme $toc $cssFile]
@@ -385,11 +391,12 @@ oo::class create mdserver::Renderer {
             set title [my _mdTitle $fpath]
             append out "$pad- \[$title\]\($rel\)\n"
         }
-        # PDFs as well, marked as such
+        # PDFs and the other documents the server shows, marked as such
         foreach fpath [lsort -dictionary [glob -nocomplain -type f -directory $dir *]] {
-            if {[string tolower [file extension $fpath]] ne ".pdf"} continue
+            set ext [string tolower [file extension $fpath]]
+            if {![dict exists $_docKinds $ext]} continue
             set rel [string map {" " %20} [my _relUrl $rootDir $fpath]]
-            append out "$pad- \[[file rootname [file tail $fpath]]\]\($rel\) (PDF)\n"
+            append out "$pad- \[[file rootname [file tail $fpath]]\]\($rel\) ([dict get $_docKinds $ext])\n"
         }
         return $out
     }
@@ -445,6 +452,7 @@ oo::class create mdserver::Server {
             pdfworker 1
             officesearch auto
             csvview   auto
+            officeview auto
             trustedproxy ""
             maxline    8190
             maxheader  16384
@@ -618,9 +626,11 @@ oo::class create mdserver::Server {
         return $out
     }
 
-    # True if $dir contains any .md or .pdf file (transitively). A folder of
-    # PDFs is a folder of documents too (up to 2026-10-20 it was hidden from
-    # the navigation, the sidebar and the folder cards).
+    # True if $dir contains any .md file or another document (PDF, and the
+    # office and CSV files the server shows, see _docKinds) -- transitively.
+    # A folder of PDFs is a folder of documents too (up to 2026-10-20 it was
+    # hidden from the navigation, the sidebar and the folder cards); one of
+    # Word or Excel files was hidden up to 2026-10-30.
     method _dirHasAnyMd {dir} {
         if {[llength [glob -nocomplain -directory $dir *.md]] > 0} { return 1 }
         if {[llength [my _pdfsIn $dir]] > 0} { return 1 }
@@ -631,14 +641,39 @@ oo::class create mdserver::Server {
         return 0
     }
 
-    # PDFs in a folder (any case of the extension), sorted.
+    # The documents of a folder besides .md (any case of the extension),
+    # sorted: PDFs and the kinds of _docKinds.
     method _pdfsIn {dir} {
+        set kinds [my _docKinds]
         set out {}
         foreach f [glob -nocomplain -directory $dir -type f *] {
-            if {[string tolower [file extension $f]] eq ".pdf"
+            if {[dict exists $kinds [string tolower [file extension $f]]]
                 && [string index [file tail $f] 0] ne "."} { lappend out $f }
         }
         return [lsort -dictionary $out]
+    }
+
+    # Extension -> label of the documents shown besides .md: PDF always,
+    # office files with --office-view, CSV with --csv-view.
+    method _docKinds {} {
+        set k [dict create .pdf PDF]
+        foreach {ext kind} [my _officeViewExts] {
+            dict set k $ext [dict get {docx Word odt Text odp Folien xlsx Excel ods Tabelle} $kind]
+        }
+        if {[my _csvOn]} { dict set k .csv CSV }
+        return $k
+    }
+
+    # Label of a document for cards: "PDF, 820 KB", "Word, 36 KB".
+    method _docLabel {f} {
+        set kinds [my _docKinds]
+        set ext [string tolower [file extension $f]]
+        if {[dict exists $kinds $ext]} {
+            set l [dict get $kinds $ext]
+        } else {
+            set l [string toupper [string range $ext 1 end]]
+        }
+        return "$l, [my _sizeLabel $f]"
     }
 
     # Size for a listing: "820 KB", "2,8 MB".
@@ -1383,8 +1418,10 @@ $bar[string range $html [expr {$e + 1}] end]"
         }
         foreach f [my _pdfsIn $dir] {
             set n [file tail $f]
-            append items "<li><a href=\"[my _esc [string map {" " %20} $n]]\">[my _esc [file rootname $n]]</a>\
-                <small>PDF</small></li>"
+            set l [lindex [split [my _docLabel $f] ,] 0]
+            set c [expr {$n eq $cur ? " class=\"cur\"" : ""}]
+            append items "<li$c><a href=\"[my _esc [string map {" " %20} $n]]\">[my _esc [file rootname $n]]</a>\
+                <small>[my _esc $l]</small></li>"
         }
         if {$items eq ""} { return "" }
         # if, not expr: expr would turn a title like 007 into 7
@@ -1453,11 +1490,12 @@ $bar[string range $html [expr {$e + 1}] end]"
         foreach f [my _pdfsIn $dir] {
             set n [file tail $f]
             append docs "<a class=\"mds-card doc\" href=\"[my _esc [string map {" " %20} $n]]\"><strong>[my _esc [file rootname $n]]</strong>\
-<span>PDF, [my _sizeLabel $f]</span></a>"
+<span>[my _esc [my _docLabel $f]]</span></a>"
         }
         foreach f [lsort -dictionary [glob -nocomplain -directory $dir -type f *]] {
             set ext [string tolower [file extension $f]]
-            if {$ext in {.md .tcl .tsv .css .pdf} || [string index [file tail $f] 0] eq "."} continue
+            if {$ext in {.md .tcl .tsv .css} || [dict exists [my _docKinds] $ext]
+                    || [string index [file tail $f] 0] eq "."} continue
             set kb [expr {([file size $f] + 1023) / 1024}]
             append files "<li><a href=\"[my _esc [file tail $f]]\">[my _esc [file tail $f]]</a> <small>[string toupper [string range $ext 1 end]], $kb KB</small></li>"
         }
@@ -1502,11 +1540,11 @@ $bar[string range $html [expr {$e + 1}] end]"
         append body "<p class=\"mds-lead\">$total Zeilen &middot; <a href=\"$raw\">als CSV herunterladen</a></p>"
         if {![llength $rows]} { return $body }
         append body "<div class=\"mds-csv\"><table><thead><tr>"
-        foreach c [lindex $rows 0] { append body "<th>[my _esc $c]</th>" }
+        foreach c [lindex $rows 0] { append body "<th>[my _escBr $c]</th>" }
         append body "</tr></thead><tbody>"
         foreach r [lrange $rows 1 $csvMax] {
             append body "<tr>"
-            foreach c $r { append body "<td>[my _esc $c]</td>" }
+            foreach c $r { append body "<td>[my _escBr $c]</td>" }
             append body "</tr>"
         }
         append body "</tbody></table></div>"
@@ -1773,6 +1811,137 @@ $pager
             if {![catch {package present $pkg} v]} { lappend mods "[namespace tail $pkg] $v" }
         }
         return "Suche an ([join [dict keys $r] { }]; [join $mods {, }])"
+    }
+
+    # Office files as a page (--office-view auto|0|1): Word (.docx, tudocx)
+    # and ODF text/slides (.odt .odp, tuodf) as paragraphs, Excel (.xlsx,
+    # tuxlsx) and ODF spreadsheets (.ods, tuodf 0.2 rows) as tables, one per
+    # sheet; ?raw=1 sends the file. A dict extension -> kind.
+    method _officeViewExts {} {
+        my variable _officeV
+        if {[info exists _officeV]} { return $_officeV }
+        set _officeV [dict create]
+        set mode [my cfg officeview]
+        if {$mode in {0 off no false}} { return $_officeV }
+        my _tclutilsPath
+        set missing {}
+        foreach {pkg ver map} {
+            tclutils::tudocx 0.1 {.docx docx}
+            tclutils::tuodf  0.2 {.odt odt .odp odt .ods ods}
+            tclutils::tuxlsx 0.1 {.xlsx xlsx}
+        } {
+            if {[catch {package require $pkg $ver}]} { lappend missing $pkg ; continue }
+            foreach {e k} $map {
+                if {$k eq "ods" && ![llength [info commands ::tclutils::tuodf::rows]]} continue
+                dict set _officeV $e $k
+            }
+        }
+        if {[llength $missing] && $mode ni {auto}} {
+            puts stderr "WARNING: --office-view: not found: [join $missing {, }]"
+        }
+        return $_officeV
+    }
+
+    # Text for HTML: escaped, a line break as <br>.
+    method _escBr {s} {
+        return [string map [list \n <br>] [my _esc $s]]
+    }
+
+    # A table of rows (lists of cells), at most max rows; "" for none.
+    method _rowsTable {rows max} {
+        if {![llength $rows]} { return "" }
+        set w 0
+        foreach r [lrange $rows 0 [expr {$max - 1}]] { set w [expr {max($w, [llength $r])}] }
+        set out "<div class=\"mds-csv\"><table><tbody>"
+        foreach r [lrange $rows 0 [expr {$max - 1}]] {
+            append out "<tr>"
+            for {set i 0} {$i < $w} {incr i} { append out "<td>[my _escBr [lindex $r $i]]</td>" }
+            append out "</tr>"
+        }
+        append out "</tbody></table></div>"
+        if {[llength $rows] > $max} {
+            append out "<p class=\"mds-note\">Gezeigt: die ersten $max von [llength $rows] Zeilen.</p>"
+        }
+        return $out
+    }
+
+    # An office file as HTML: title, a line with kind and download link,
+    # then paragraphs or one table per sheet. A file that cannot be read
+    # gives the message and the download link.
+    method _officeBody {f} {
+        set rowMax 2000
+        set kind [dict get [my _officeViewExts] [string tolower [file extension $f]]]
+        set n [file tail $f]
+        set raw "[my _esc [string map {" " %20} $n]]?raw=1"
+        set label [dict get {docx Word-Dokument odt Textdokument odp Pr&auml;sentation xlsx Excel-Mappe ods Tabellendokument} $kind]
+        set body "<h1>[my _esc [file rootname $n]]</h1>"
+        set err [catch {
+            switch -- $kind {
+                docx - odt {
+                    # if, not expr: expr would turn a paragraph 007 into 7
+                    if {$kind eq "docx"} {
+                        set ps [::tclutils::tudocx::paragraphs $f]
+                    } else {
+                        set ps [::tclutils::tuodf::paragraphs $f]
+                    }
+                    set ps [lmap p $ps {if {[string trim $p] eq ""} continue ; set p}]
+                    set main "<div class=\"mds-office\">"
+                    foreach p $ps { append main "<p>[my _escBr $p]</p>" }
+                    append main "</div>"
+                    set info "[llength $ps] Abs&auml;tze"
+                }
+                xlsx - ods {
+                    if {$kind eq "xlsx"} {
+                        set names [::tclutils::tuxlsx::sheets $f]
+                    } else {
+                        set names [::tclutils::tuodf::sheets $f]
+                    }
+                    set main ""
+                    set i 0
+                    foreach s $names {
+                        incr i
+                        if {$kind eq "xlsx"} {
+                            set rows [::tclutils::tuxlsx::rows $f -sheet $i]
+                        } else {
+                            set rows [::tclutils::tuodf::rows $f -sheet $i]
+                        }
+                        if {[llength $names] > 1} { append main "<h2>[my _esc $s]</h2>" }
+                        set t [my _rowsTable $rows $rowMax]
+                        if {$t eq ""} { set t "<p><em>leer</em></p>" }
+                        append main $t
+                    }
+                    set info "[llength $names] [expr {[llength $names] == 1 ? "Blatt" : "Bl&auml;tter"}]"
+                }
+            }
+        } msg]
+        if {$err} {
+            return "$body<p>Die Datei l&auml;sst sich nicht lesen: [my _esc $msg]</p>\
+<p><a href=\"$raw\">Datei herunterladen</a></p>"
+        }
+        append body "<p class=\"mds-lead\">$label &middot; $info &middot; <a href=\"$raw\">herunterladen</a></p>$main"
+        return $body
+    }
+
+    # The page body for a file shown as a page (CSV, office), or "" when
+    # the file is sent as it is (?raw=1, view off, other types).
+    method _viewBody {req fsPath} {
+        if {[$req param raw ""] ne ""} { return "" }
+        set ext [string tolower [file extension $fsPath]]
+        if {$ext eq ".csv" && [my _csvOn]} { return [my _csvBody $fsPath] }
+        if {[dict exists [my _officeViewExts] $ext]} { return [my _officeBody $fsPath] }
+        return ""
+    }
+
+    # The same page in the styles other than site: through the Markdown
+    # renderer as one HTML block, so theme, style and navigation apply.
+    method _viewPage {body theme toc style} {
+        set css "<style>.mds-csv{overflow-x:auto}.mds-csv table{border-collapse:collapse}\
+.mds-csv td,.mds-csv th{border:1px solid #9998;padding:.25rem .5rem;vertical-align:top}\
+.mds-lead{opacity:.8}</style>"
+        # an HTML block ends at a blank line: the body has none (_escBr)
+        set html [$_renderer markdownText "<div class=\"mds-view\">$css$body</div>\n" \
+            $theme $toc [my _styleCss $style]]
+        return [my _injectNav $html]
     }
 
     # CSV files as a table page in style site (--csv-view auto|0|1), with
@@ -2377,6 +2546,7 @@ in:ordner &middot; typ:md|pdf|office|csv</p>"
             return
         }
         if {[$req param nav ""] eq "index"} {
+            $_renderer setDocKinds [my _docKinds]
             set html [$_renderer siteIndex [my cfg root] none]
             my _notiz $chan "site index"
             my _send $chan "200 OK" "text/html; charset=utf-8" \
@@ -2437,12 +2607,12 @@ in:ordner &middot; typ:md|pdf|office|csv</p>"
                 [my _siteMarkdown [my _readUtf8 $fsPath] $fsPath $urlPath $theme]
             return
         }
-        if {[string tolower [file extension $fsPath]] eq ".csv" && [$req param raw ""] eq ""
-                && [my _csvOn]} {
-            my _notiz $chan csv
+        set body [my _viewBody $req $fsPath]
+        if {$body ne ""} {
+            my _notiz $chan "view [string range [string tolower [file extension $fsPath]] 1 end]"
             set title [file rootname [file tail $fsPath]]
             my _send $chan "200 OK" "text/html; charset=utf-8" \
-                [my _sitePage $title [my _csvBody $fsPath] $fsPath $urlPath $theme]
+                [my _sitePage $title $body $fsPath $urlPath $theme]
             return
         }
         my _serveFile $chan $req $fsPath [my _mime [string tolower [file extension $fsPath]]]
@@ -2491,6 +2661,7 @@ in:ordner &middot; typ:md|pdf|office|csv</p>"
 
             # Site index of all documents
             if {[$req param nav ""] eq "index"} {
+                $_renderer setDocKinds [my _docKinds]
                 set html [$_renderer siteIndex [my cfg root] $theme [my _styleCss $style]]
                 my _notiz $chan "site index"
                 my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
@@ -2556,6 +2727,10 @@ in:ordner &middot; typ:md|pdf|office|csv</p>"
                     set html [my _injectBookNav $html $fsPath $style]
                     my _notiz $chan markdown
                     my _send $chan "200 OK" "text/html; charset=utf-8" [my _injectNav $html]
+                } elseif {[set body [my _viewBody $req $fsPath]] ne ""} {
+                    my _notiz $chan "view [string range $ext 1 end]"
+                    my _send $chan "200 OK" "text/html; charset=utf-8" \
+                        [my _viewPage $body $theme $toc $style]
                 } else {
                     set mime [my _mime $ext]
                     my _serveFile $chan $req $fsPath $mime
@@ -2581,6 +2756,14 @@ in:ordner &middot; typ:md|pdf|office|csv</p>"
             my _send $chan "404 Not Found" "text/html; charset=utf-8" \
                 "<html><body><h1>404 Not Found</h1></body></html>"
         } on error {msg info} {
+            # The client closed the connection while the answer was written
+            # (a quick click on): nothing to answer. Up to 2026-10-30 this
+            # tried a 500 and logged it.
+            if {[lindex [dict get $info -errorcode] 1] in {EPIPE ECONNRESET}
+                    || [regexp {^error (writing|flushing) "[^"]*": (broken pipe|connection reset)} $msg]} {
+                my _notiz $chan "Verbindung vom Klienten geschlossen"
+                return
+            }
             my _notiz $chan $msg
             my _send $chan "500 Internal Server Error" "text/html; charset=utf-8" \
                 "<html><body><h1>500 Internal Server Error</h1><pre>$msg</pre></body></html>"
@@ -2923,6 +3106,9 @@ in:ordner &middot; typ:md|pdf|office|csv</p>"
         puts "  Theme: [my cfg theme]"
         puts "  PDF:   [my _pdfStatus]"
         puts "  Office: [my _officeStatus]"
+        set v [my _officeViewExts]
+        # ASCII only: a test or a pipe may read the banner as strict UTF-8
+        puts "  Ansicht: [expr {[dict size $v] ? "[join [dict keys $v] { }] als Seite" : "aus"}]"
         puts "  CSV:   [expr {[my _csvOn] ? "Tabellenseite und Suche an (tclutils::tucsv [package present tclutils::tucsv])" : "aus"}]"
         if {[encoding system] ni {utf-8 utf8}} {
             puts "  Achtung: Systemkodierung [encoding system] -- Dateinamen mit Umlauten werden nicht gefunden (LANG=C.UTF-8 setzen)"

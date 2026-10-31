@@ -1926,11 +1926,71 @@ test office-2 "Word and Excel files are searched, typ:office" -constraints tuoox
     set p [serverPort $h]
 } -body {
     list [treffer2 [holen $p /?q=keller]] [treffer2 [holen $p /?q=router+typ:office]] \
-         [string match {*Content-Type: application/vnd.openxmlformats*} [holen $p /a/memo.docx]]
+         [string match {*Content-Type: application/vnd.openxmlformats*} [holen $p /a/memo.docx?raw=1]]
 } -cleanup {
     serverStop $h
     file delete -force $w
 } -result {{/a/inventar.xlsx /a/memo.docx} {/a/inventar.xlsx /a/memo.docx} 1}
+
+test office-3 "Word, Excel and ODF files are pages; ?raw=1 sends the file" -constraints {tuooxml tuodf} -setup {
+    set w [suchWurzel]
+    ::tclutils::tudocx::createText [file join $w a memo.docx] [list "Der Router" "" "007" "<b>&"]
+    ::tclutils::tuxlsx::writeRows [file join $w a inventar.xlsx] {{Ger\u00e4t Ort} {Router Keller}} -sheet Liste
+    ::tclutils::tuodf::createText [file join $w a brief.odt] [list "Sehr geehrte" "Gr\u00fc\u00dfe"]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [encoding convertfrom utf-8 [holen $p /a/memo.docx]]
+    set b [encoding convertfrom utf-8 [holen $p /a/inventar.xlsx]]
+    set c [encoding convertfrom utf-8 [holen $p /a/brief.odt]]
+    set d [holen $p /a/inventar.xlsx?raw=1]
+    list [string match {*Content-Type: text/html*} $a] \
+         [string match {*<p>Der Router</p><p>007</p><p>&lt;b&gt;&amp;</p>*} $a] \
+         [string match {*memo.docx?raw=1*} $a] \
+         [string match "*<td>Ger\u00e4t</td><td>Ort</td>*" $b] \
+         [string match "*<p>Gr\u00fc\u00dfe</p>*" $c] \
+         [string match {*Content-Type: application/vnd.openxmlformats*} $d]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 1 1 1 1}
+
+test office-4 "a folder of office files only is a folder; cards name the kind; other styles; --office-view 0" -constraints tuooxml -setup {
+    set w [suchWurzel]
+    file mkdir [file join $w nurOffice]
+    ::tclutils::tudocx::createText [file join $w nurOffice memo.docx] {Text}
+    ::tclutils::tuxlsx::writeRows [file join $w nurOffice liste.xlsx] {{a b}}
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+    set h2 [serverStart $w --no-log --style site --office-view 0]
+    set p2 [serverPort $h2]
+} -body {
+    set a [holen $p /]
+    set b [holen $p /nurOffice/]
+    set c [holen $p {/nurOffice/memo.docx?style=sidebar}]
+    set d [holen $p2 /nurOffice/memo.docx]
+    list [string match {*href="nurOffice/"*} $a] \
+         [string match {*<span>Word, * KB</span>*} $b] [string match {*<span>Excel, *} $b] \
+         [string match {*<div class="mds-office"><p>Text</p></div>*} $c] \
+         [string match {*Content-Type: application/vnd.openxmlformats*} $d]
+} -cleanup {
+    serverStop $h
+    serverStop $h2
+    file delete -force $w
+} -result {1 1 1 1 1}
+
+test office-5 "a damaged office file gives a page with the message and the download" -constraints tuooxml -setup {
+    set w [suchWurzel]
+    set fh [open [file join $w a kaputt.docx] wb]; puts -nonewline $fh "PK\x03\x04kaputt"; close $fh
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /a/kaputt.docx]
+    list [status $a] [string match {*l&auml;sst sich nicht lesen*} $a] [string match {*kaputt.docx?raw=1*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {200 1 1}
 
 test csv-1 "a CSV file is a table page; ?raw=1 sends the file; ; and cp1252 are read" -constraints tucsv -setup {
     set w [suchWurzel]
