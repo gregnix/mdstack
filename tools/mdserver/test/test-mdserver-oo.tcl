@@ -614,15 +614,27 @@ proc erreichbar {adresse port} {
     return 1
 }
 
-test bind-1 "ohne --bind horcht der Port auf allen Schnittstellen" -constraints hatLan -setup {
+test bind-1 "--bind * horcht auf allen Schnittstellen" -constraints hatLan -setup {
     set p [freierPort]
-    set srv [mdserver::Server new -root $testDir -port $p -log 0]
+    set srv [mdserver::Server new -root $testDir -port $p -bind * -log 0]
     $srv start
 } -body {
     list [erreichbar 127.0.0.1 $p] [erreichbar [lanAdresse] $p]
 } -cleanup {
     $srv destroy
 } -result {1 1}
+
+test bind-1b "ohne --bind bleibt der Port auf diesem Rechner" -setup {
+    set p [freierPort]
+    set srv [mdserver::Server new -root $testDir -port $p -log 0]
+    $srv start
+} -body {
+    set lan [lanAdresse]
+    if {$lan eq ""} { set ergebnis 0 } else { set ergebnis [erreichbar $lan $p] }
+    list [erreichbar 127.0.0.1 $p] $ergebnis
+} -cleanup {
+    $srv destroy
+} -result {1 0}
 
 test bind-2 "--bind 127.0.0.1 haelt den Port auf localhost" -setup {
     set p [freierPort]
@@ -888,7 +900,8 @@ test hilfe-1 "--help laeuft durch und nennt jede Option" -body {
     set fehlt {}
     foreach o {--port --bind --dotfiles --trusted-proxy --root --theme --no-log
                --cert --key --tlsport --control --style --navmax
-               --maxline --maxheader --healthpath} {
+               --maxline --maxheader --healthpath --statuspath --maxconn
+               --maxperaddr --viewcache --office-view} {
         if {![string match "*$o*" $ausgabe]} { lappend fehlt $o }
     }
     list [expr {$rc == 0 ? 0 : "--help brach ab: $ausgabe"}] $fehlt
@@ -898,6 +911,12 @@ test head-1 "HEAD liefert den Kopf von GET, aber keinen Koerper" -setup {
     set h [serverStart $testDir --no-log]
     set p [serverPort $h]
 } -body {
+    # erst wenn der Suchindex steht: dann kommen die Titelvorschlaege in
+    # den Kopf, und vorher und nachher waere die Seite verschieden lang
+    for {set i 0} {$i < 50} {incr i} {
+        if {[string match {*id="mds-titles"*} [holen $p /index.md]]} break
+        after 100
+    }
     set g [holen $p /index.md]
     set k [mitMethode $p HEAD /index.md]
     # gleicher Status, gleiches Content-Length -- nur der Koerper fehlt
@@ -1155,20 +1174,99 @@ test mkcert-4 "--no-san erzeugt bewusst eines ohne, und sagt das" -setup {
 
 test start-1 "die Startmeldung nennt die Adresse, an die gebunden wurde" -setup {
     set h1 [serverStart $testDir]
-    set h2 [serverStartOhneBind $testDir]
+    set h2 [serverStartOhneBind $testDir --bind *]
+    set h3 [serverStartOhneBind $testDir]
 } -body {
     # Bis 0.3.4 stand hier immer "localhost" -- auch bei 0.0.0.0, also genau
     # im gefaehrlichen Fall das Gegenteil.
     after 300
     set mit  [serverLog $h1]
-    set ohne [serverLog $h2]
+    set alle [serverLog $h2]
+    set ohne [serverLog $h3]
     list [expr {[string match "*127.0.0.1:[serverPort $h1]*" $mit] ? 1 : "fehlt in: $mit"}] \
-         [expr {[string match "*0.0.0.0:[serverPort $h2] (alle Schnittstellen)*" $ohne]
-                    ? 1 : "fehlt in: $ohne"}]
+         [expr {[string match "*0.0.0.0:[serverPort $h2] (alle Schnittstellen)*Achtung: von anderen Rechnern*" $alle]
+                    ? 1 : "fehlt in: $alle"}] \
+         [expr {[string match "*127.0.0.1:[serverPort $h3]*" $ohne]
+                && ![string match "*Achtung*" $ohne] ? 1 : "falsch: $ohne"}]
 } -cleanup {
     serverStop $h1
     serverStop $h2
-} -result {1 1}
+    serverStop $h3
+} -result {1 1 1}
+
+# Verbindungsgrenzen. Offene, stumme Verbindungen belegen je eine
+# Coroutine, bis --timeout greift; ab der Grenze kommt sofort 503.
+proc stumm {port n} {
+    set l {}
+    for {set i 0} {$i < $n} {incr i} { lappend l [socket 127.0.0.1 $port] }
+    after 300
+    return $l
+}
+test conn-1 "ueber --maxconn hinaus kommt 503 mit Retry-After" -setup {
+    set h [serverStart $testDir --maxconn 3 --maxperaddr 0]
+    set p [serverPort $h]
+    after 300
+} -body {
+    set offen [stumm $p 3]
+    set a [holen $p /]
+    foreach s $offen { close $s }
+    after 300
+    set b [holen $p /]
+    list [status $a] [kopfwert $a Retry-After] [status $b] \
+        [string match "*503*zu viele Verbindungen (3)*" [serverLog $h]]
+} -cleanup {
+    serverStop $h
+} -result {503 1 200 1}
+
+test conn-2 "--maxperaddr begrenzt je Absender" -setup {
+    set h [serverStart $testDir --maxperaddr 2]
+    set p [serverPort $h]
+    after 300
+} -body {
+    set offen [stumm $p 2]
+    set a [holen $p /]
+    foreach s $offen { close $s }
+    after 300
+    list [status $a] [status [holen $p /]]
+} -cleanup {
+    serverStop $h
+} -result {503 200}
+
+test conn-3 "ein vertrauter Proxy zaehlt nicht je Absender" -setup {
+    set h [serverStart $testDir --maxperaddr 2 --trusted-proxy 127.0.0.1]
+    set p [serverPort $h]
+    after 300
+} -body {
+    set offen [stumm $p 4]
+    set a [holen $p /]
+    foreach s $offen { close $s }
+    status $a
+} -cleanup {
+    serverStop $h
+} -result 200
+
+test parallel-1 "20 gleichzeitige Anfragen bekommen alle 200" -setup {
+    set h [serverStart $testDir --no-log]
+    set p [serverPort $h]
+    after 300
+} -body {
+    # Alle 20 schicken, bevor eine gelesen wird: der Server muss sie
+    # nebeneinander fuehren.
+    set ss {}
+    for {set i 0} {$i < 20} {incr i} {
+        set s [socket 127.0.0.1 $p]
+        fconfigure $s -translation crlf
+        puts $s "GET / HTTP/1.0\nHost: 127.0.0.1\n"
+        flush $s
+        fconfigure $s -translation binary
+        lappend ss $s
+    }
+    set st {}
+    foreach s $ss { lappend st [status [read $s]]; close $s }
+    lsort -unique $st
+} -cleanup {
+    serverStop $h
+} -result 200
 
 test health-1 "der Health-Endpunkt prueft die Wurzel, statt nur 200 zu sagen" -setup {
     set w [file join [tcltest::configure -tmpdir] mdgesund[pid]]
@@ -1281,6 +1379,62 @@ test beenden-1 "stop antwortet und beendet, mdctl gibt 0 zurueck" -setup {
 } -cleanup {
     serverStop $h
 } -result {pong stopping 0}
+
+proc mdctl {ctrl befehl} {
+    set mdctl [file normalize [file join [file dirname [info script]] .. mdctl.tcl]]
+    set rc [catch {exec [info nameofexecutable] $mdctl --port $ctrl $befehl} aus]
+    return [list $rc $aus]
+}
+
+test status-1 "mdctl status: Anfragen, Klassen, langsamste, mehrzeilig bis EOF" -setup {
+    set ctrl [freierPort]
+    set h [serverStart $testDir --no-log --control $ctrl]
+    set p [serverPort $h]
+} -body {
+    holen $p /index.md
+    holen $p /gibt-es-nicht.md
+    holen $p /?q=Freigabe
+    lassign [mdctl $ctrl status] rc aus
+    list $rc \
+        [regexp -line {^requests: 3 \(2xx 2, 3xx 0, 4xx 1, 5xx 0\)$} $aus] \
+        [regexp -line {^http: 127\.0\.0\.1:[0-9]+$} $aus] \
+        [regexp -line {^connections: [0-9]+ open, peak [0-9]+, limits 200 / 32 per address, rejected 0$} $aus] \
+        [regexp -line {^search index: } $aus] \
+        [regexp -line {^ +[0-9]+ ms .* GET / 200 search$} $aus] \
+        [regexp -line {^ +[0-9]+ ms .* GET /gibt-es-nicht.md 404} $aus]
+} -cleanup {
+    serverStop $h
+} -result {0 1 1 1 1 1 1}
+
+test status-2 "--statuspath: aus ohne Option, sonst Text" -setup {
+    set h  [serverStart $testDir --no-log]
+    set h2 [serverStart $testDir --no-log --statuspath /__mdserver/status]
+} -body {
+    set a [holen [serverPort $h]  /__mdserver/status]
+    set b [holen [serverPort $h2] /__mdserver/status]
+    list [status $a] [status $b] [string match "text/plain*" [kopfwert $b Content-Type]] \
+        [string match "*requests: *" [koerper $b]]
+} -cleanup {
+    serverStop $h
+    serverStop $h2
+} -result {404 200 1 1}
+
+test status-3 "503 wegen der Grenze zaehlt als abgewiesen" -setup {
+    set ctrl [freierPort]
+    set h [serverStart $testDir --no-log --control $ctrl --maxconn 2 --maxperaddr 0]
+    set p [serverPort $h]
+    after 300
+} -body {
+    set offen [stumm $p 2]
+    holen $p /
+    foreach s $offen { close $s }
+    after 300
+    lassign [mdctl $ctrl status] rc aus
+    list $rc [regexp -line {rejected 1$} $aus] [regexp -line {peak 2,} $aus]
+} -cleanup {
+    serverStop $h
+} -result {0 1 1}
+
 
 # ============================================================
 # Aufraumen
@@ -2014,6 +2168,35 @@ test csv-1 "a CSV file is a table page; ?raw=1 sends the file; ; and cp1252 are 
     file delete -force $w
 } -result {200 1 1 1 1 1 1 /a/geraete.csv}
 
+test viewcache-1 "eine CSV-Seite bleibt liegen, bis sich die Datei aendert" -constraints tucsv -setup {
+    set w [suchWurzel]
+    set f [file join $w a zwischen.csv]
+    proc schreib {f text zeit} {
+        set fh [open $f wb]; puts -nonewline $fh $text; close $fh
+        file mtime $f $zeit
+    }
+    set t0 [expr {[clock seconds] - 100}]
+    schreib $f "Name,Ort\nAlpha,Eins\n" $t0
+    set h [serverStart $w --no-log --style site]
+    set h0 [serverStart $w --no-log --style site --viewcache 0]
+} -body {
+    set a [holen [serverPort $h] /a/zwischen.csv]
+    holen [serverPort $h0] /a/zwischen.csv
+    # gleiche Groesse, gleiche Zeit: der Inhalt kommt aus der Ablage
+    schreib $f "Name,Ort\nBravo,Eins\n" $t0
+    set b [holen [serverPort $h] /a/zwischen.csv]
+    set b0 [holen [serverPort $h0] /a/zwischen.csv]
+    # neue Zeit: neu gelesen
+    schreib $f "Name,Ort\nBravo,Eins\n" [expr {$t0 + 1}]
+    set c [holen [serverPort $h] /a/zwischen.csv]
+    list [string match *Alpha* $a] [string match *Alpha* $b] \
+         [string match *Bravo* $b0] [string match *Bravo* $c]
+} -cleanup {
+    serverStop $h
+    serverStop $h0
+    rename schreib {}
+} -result {1 1 1 1}
+
 test csv-2 "--csv-view 0 sends the CSV as it is" -constraints tucsv -setup {
     set w [suchWurzel]
     set fh [open [file join $w a x.csv] w]; puts $fh "a,b\n1,2"; close $fh
@@ -2126,5 +2309,469 @@ test csv-3 "a tab-separated CSV and one with a BOM" -constraints tucsv -setup {
     serverStop $h
     file delete -force $w
 } -result {1 1}
+
+# ============================================================
+# Search for people who do not know it (2026-11-05): tips, the query as
+# understood, help when nothing is found, facets, pages, accessibility
+# ============================================================
+proc seite {a} { encoding convertfrom utf-8 [koerper $a] }
+# suchWurzel2 plus words for "Meinten Sie" and a dot folder with its own word
+proc suchWurzel3 {} {
+    set d [suchWurzel2]
+    set fh [open [file join $d b tiere.md] w]; fconfigure $fh -encoding utf-8
+    puts $fh "# Tiere\n\nDer Kater, die Katen, der Kaser und die Kamer."
+    close $fh
+    set fh [open [file join $d .intern wort.md] w]
+    puts $fh "# Intern\n\nSchnurzelwort und Kateq."
+    close $fh
+    return $d
+}
+# N documents with the word Kater in c/d, M in c/e
+proc suchWurzelViele {n m} {
+    set d [suchWurzel]
+    file mkdir [file join $d c d] [file join $d c e] [file join $d .intern]
+    for {set i 1} {$i <= $n} {incr i} {
+        set fh [open [file join $d c d s$i.md] w]; puts $fh "# Seite $i\n\nKater hier."; close $fh
+    }
+    for {set i 1} {$i <= $m} {incr i} {
+        set fh [open [file join $d c e b$i.md] w]; puts $fh "# Blatt $i\n\nKater dort."; close $fh
+    }
+    set fh [open [file join $d .intern k.md] w]; puts $fh "# K\n\nKater intern."; close $fh
+    return $d
+}
+proc privat {srv} { return [info object namespace $srv]::my }
+
+test search-help-1 "tips: open on the empty search, examples from the documents, only the types that are on" -setup {
+    set w [suchWurzel2]
+    set h [serverStart $w --no-log --style site --pdf-search 0 --office-search 0 --csv-view 0]
+    set p [serverPort $h]
+} -body {
+    set a [seite [holen $p /?q=]]
+    set b [seite [holen $p /?q=Freigabe]]
+    list [string match {*<details class="mds-search-tips" open><summary>Suchtipps</summary>*} $a] \
+         [string match {*<details class="mds-search-tips"><summary>*} $b] \
+         [string match {*<a href="/?q=Archiv">Archiv</a>*} $a] \
+         [string match {*<a href="/?q=Archiv%20-Drucker">Archiv -Drucker</a>*} $a] \
+         [string match {*<a href="/?q=Drucker%20in%3Aa">Drucker in:a</a>*} $a] \
+         [string match {*<code>typ:md</code>*} $a] [string match {*typ:pdf*} $a] \
+         [string match {*Geheim*} $a] [string match {*.intern*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 1 1 1 1 0 0 0}
+
+test search-help-2 "header: placeholder escaped, ? to the tips, key /, titles as datalist without dot folders" -setup {
+    set w [suchWurzel2]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    # die Titelliste kommt aus dem Index, der nach dem Start schrittweise
+    # entsteht: die ersten Seiten koennen noch ohne sie sein
+    set a [seite [holenBis $p /a/eins.md {*<datalist id="mds-titles"><option*}]]
+    list [string match {*placeholder="Suchen: &quot;Wortfolge&quot; -ohne"*} $a] \
+         [string match {*<a class="mds-search-tips-link" href="/?q=" title="Suchtipps" aria-label="Suchtipps">?</a>*} $a] \
+         [string match {*list="mds-titles"*} $a] \
+         [string match {*<datalist id="mds-titles"><option value="Archiv"><option value="Drucker"><option value="Netzwerk"></datalist>*} $a] \
+         [string match {*Geheim*} $a] \
+         [string match {*<script>document.addEventListener('keydown'*INPUT*TEXTAREA*mds-top-q*</script>*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 1 1 0 1}
+
+test index-vorab-1 "der Index entsteht nach dem Start in Schritten; Seiten warten nicht" -setup {
+    set w [file join [tcltest::configure -tmpdir] mdvorab[pid]]
+    file delete -force $w
+    file mkdir $w
+    for {set i 1} {$i <= 2000} {incr i} {
+        set fh [open [file join $w s$i.md] w]; puts $fh "# Seite $i\n\nwort$i hier."; close $fh
+    }
+    set srv [mdserver::Server new -root $w -port [freierPort] -bind 127.0.0.1 -log 0 -pdfsearch 0]
+    set my [privat $srv]
+} -body {
+    # 2000 Dateien: der erste Schritt (50 ms) schafft sie nicht alle
+    $my _indexVorab
+    set schritte 0
+    set zwischen 0
+    while {[info exists [info object namespace $srv]::_vorabFiles]} {
+        incr schritte
+        after 5
+        update
+        if {[info exists [info object namespace $srv]::_vorabFiles]} { set zwischen 1 }
+    }
+    set idx [$my _searchIndex]
+    list [expr {$schritte > 1}] $zwischen [dict size $idx] \
+        [expr {[llength [$my _search wort7]] > 0}] [$my _indexPending]
+} -cleanup {
+    $srv destroy
+    file delete -force $w
+} -result {1 1 2000 1 0}
+
+test index-vorab-2 "eine Suche waehrend des ersten Aufbaus sagt, was noch fehlt" -setup {
+    set w [file join [tcltest::configure -tmpdir] mdvorab2[pid]]
+    file delete -force $w
+    file mkdir $w
+    for {set i 1} {$i <= 2000} {incr i} {
+        set fh [open [file join $w s$i.md] w]; puts $fh "# Seite $i\n\nwort$i hier."; close $fh
+    }
+    set srv [mdserver::Server new -root $w -port [freierPort] -bind 127.0.0.1 -log 0 -pdfsearch 0]
+    set my [privat $srv]
+} -body {
+    # angestossen, aber noch kein Schritt gelaufen: alle 2000 fehlen
+    $my _indexVorab
+    set offen [$my _indexPending]
+    set body [$my _searchBody hier]
+    # die Titelliste im Kopf jeder Seite, waehrend der Index waechst
+    set titel [catch {$my _titleDatalist} fehler]
+    list [expr {$offen > 500}] [string match "*Suchindex wird nach dem Start noch aufgebaut*" $body] \
+        [expr {[dict size [$my _searchIndex]] < 2000}] $titel
+} -cleanup {
+    $srv destroy
+    file delete -force $w
+} -result {1 1 1 0}
+
+test search-chips-1 "_unparseQuery: parse -> unparse -> parse gives the same query" -setup {
+    set w [suchWurzel2]
+    set srv [mdserver::Server new -root $w -log 0 -pdfsearch 0]
+    set my [privat $srv]
+} -body {
+    set bad {}
+    foreach q [list proxy_pass {"die Freigabe" -proxy} {a OR b ODER c | d} \
+            "Gr\u00f6\u00dfe Stra\u00dfe" {-"im  Archiv" xy in:a/b typ:pdf} \
+            {"-x" "OR" "in:foo" ab"cd "typ:x y"} {OR ab} {xy in:../a} {ab or cd} \
+            {  "a   b"   } {ab OR -cd ef} {ab OR in:a cd} {--xx -in:y} {x "" -"" -}] {
+        set p1 [$my _parseQuery $q]
+        set p2 [$my _parseQuery [$my _unparseQuery $p1]]
+        foreach k {groups excl in typ gshow xshow} {
+            if {[dict get $p1 $k] ne [dict get $p2 $k]} { lappend bad [list $q $k] }
+        }
+    }
+    list $bad [$my _unparseQuery [$my _parseQuery {"die  Freigabe" -xy OR in:a typ:md}] 0] \
+         [$my _unparseQuery [$my _parseQuery {"die  Freigabe" -xy OR in:a typ:md}]] \
+         [$my _urlEnc "a b&c=d/\u00e4<\"x\">(1)"]
+} -cleanup {
+    $srv destroy
+    file delete -force $w
+} -result {{} {"die Freigabe" -xy} {"die Freigabe" -xy in:a typ:md} a%20b%26c%3Dd%2F%C3%A4%3C%22x%22%3E%281%29}
+
+test search-chips-2 "the query as understood: one part each, a link without it" -setup {
+    set w [suchWurzel2]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [seite [holen $p /?q=Freigabe+-proxy_pass+in:a+%22die+Freigabe%22+Drucker+ODER+Netzwerk]]
+    list [string match {*<span class="mds-query-label" id="mds-query-label">Gesucht:</span>*} $a] \
+         [regexp -all {<li class="mds-chip } $a] \
+         [string match {*<span>Freigabe</span> <a href="/?q=%22die%20Freigabe%22%20Drucker%20OR%20Netzwerk%20-proxy_pass&amp;in=a"*} $a] \
+         [string match "*<span>\u201edie Freigabe\u201c</span>*" $a] \
+         [string match {*<li class="mds-chip mds-chip-or"><span>Drucker oder Netzwerk</span>*} $a] \
+         [string match {*<li class="mds-chip mds-chip-not"><span>ohne proxy_pass</span> <a href="/?q=Freigabe%20%22die%20Freigabe%22%20Drucker%20OR%20Netzwerk&amp;in=a"*} $a] \
+         [string match {*<span>Bereich: a</span> <a href="/?q=Freigabe%20%22die%20Freigabe%22%20Drucker%20OR%20Netzwerk%20-proxy_pass"*} $a] \
+         [string match {*aria-label="ohne proxy_pass entfernen">*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 5 1 1 1 1 1 1}
+
+test search-chips-3 "<script> in the query is escaped in parts, links and help; the plain style too" -setup {
+    set w [suchWurzel2]
+    set h1 [serverStart $w --no-log --style site]
+    set h2 [serverStart $w --no-log --style plain]
+} -body {
+    set q /?q=%3Cscript%3Ealert(1)%3C/script%3E+-%22%3Cb%3E%22&in=%22%3E%3Cx
+    set a [seite [holen [serverPort $h1] $q]]
+    set b [seite [holen [serverPort $h2] $q]]
+    list [string match {*<script>alert*} $a] [string match {*<b>*} $a] \
+         [string match {*<span>&lt;script&gt;alert(1)&lt;/script&gt;</span>*} $a] \
+         [string match {*href="/?q=%3Cscript%3Ealert%281%29%3C%2Fscript%3E&amp;in=%22%3E%3Cx"*} $a] \
+         [string match {*<script>alert*} $b] [string match {*<b>*} $b] \
+         [string match {*Gesucht: &lt;script&gt;alert(1)&lt;/script&gt; <a href="/?q=-%3Cb%3E&amp;in=%22%3E%3Cx">*} $b]
+} -cleanup {
+    serverStop $h1 ; serverStop $h2
+    file delete -force $w
+} -result {0 0 1 1 0 0 1}
+
+test search-chips-4 "search: a scope through a symlink shows its name, not the title of what lies outside" -setup {
+    set w [suchWurzel2]
+    file mkdir $w.draussen
+    set fh [open [file join $w.draussen index.md] w]; puts $fh "# Draussen geheim"; close $fh
+    catch {file link -symbolic [file join $w aus] [file normalize $w.draussen]}
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    # only the search itself: header and sidebar are not part of this test
+    set a [regexp -inline {<article class="mds-content">.*</article>} [seite [holen $p /?q=Freigabe&in=aus]]]
+    list [string match {*Draussen*} $a] [string match {*<span>Bereich: aus</span>*} $a] \
+         [string match {*<option value="aus" selected>aus</option>*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w $w.draussen
+} -result {0 1 1}
+
+test symlink-nav-1 "a symlink out of the root: no title, name or card anywhere" -setup {
+    set w [suchWurzel2]
+    file mkdir $w.draussen/tief
+    set fh [open [file join $w.draussen index.md] w]; puts $fh "# Draussen geheim"; puts $fh "Geheimer Absatz."; close $fh
+    set fh [open [file join $w.draussen tief seite.md] w]; puts $fh "# Tief geheim"; close $fh
+    set fh [open [file join $w.draussen einzeln.md] w]; puts $fh "# Einzeln geheim"; close $fh
+    catch {file link -symbolic [file join $w aus] [file normalize $w.draussen]}
+    catch {file link -symbolic [file join $w zeiger.md] [file normalize [file join $w.draussen einzeln.md]]}
+    set h1 [serverStart $w --no-log --style site]
+    set h2 [serverStart $w --no-log --style plain]
+} -body {
+    set r {}
+    foreach {h u} [list $h1 / $h1 /a/ $h1 /?q=Freigabe $h2 / $h1 /?nav=index $h2 /?nav=index] {
+        set s [seite [holen [serverPort $h] $u]]
+        lappend r [regexp {geheim|Geheimer|>aus<|aus/|zeiger} $s]
+    }
+    set r
+} -cleanup {
+    serverStop $h1 ; serverStop $h2
+    file delete -force $w $w.draussen
+} -result {0 0 0 0 0 0}
+
+test symlink-nav-2 "a folder link to its own parent: pages still come back, no loop" -setup {
+    set w [suchWurzel2]
+    catch {file link -symbolic [file join $w a schleife] [file normalize $w]}
+    set h1 [serverStart $w --no-log --style site]
+    set h2 [serverStart $w --no-log --style plain]
+} -body {
+    set r {}
+    foreach {h u} [list $h1 / $h1 /a/ $h1 /?nav=index $h2 / $h2 /a/ $h2 /?nav=index] {
+        set a [holen [serverPort $h] $u]
+        lappend r [string match "HTTP/1.? 200*" $a] [string match *schleife* [seite $a]]
+    }
+    set r
+} -cleanup {
+    serverStop $h1 ; serverStop $h2
+    file delete -force $w
+} -result {1 0 1 0 1 0 1 0 1 0 1 0}
+
+test symlink-nav-3 "a symlink inside the root still shows" -setup {
+    set w [suchWurzel2]
+    catch {file link -symbolic [file join $w kurz] [file normalize [file join $w a]]}
+    set h [serverStart $w --no-log --style site]
+} -body {
+    string match {*href="kurz/"*} [seite [holen [serverPort $h] /]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result 1
+
+test symlink-nav-4 "--root itself a symlink: pages are served, not 403" -setup {
+    set w [suchWurzel2]
+    set l $w.link
+    catch {file link -symbolic $l [file normalize $w]}
+    set h [serverStart $l --no-log --style site]
+} -body {
+    set a [holen [serverPort $h] /a/]
+    set b [holen [serverPort $h] /]
+    list [string match "HTTP/1.? 200*" $a] [string match "HTTP/1.? 200*" $b] \
+         [string match {*href="a/"*} [seite $b]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w $l
+} -result {1 1 1}
+
+test search-none-1 "nothing found: everywhere, without minus words, phrases as words" -setup {
+    set w [suchWurzel2]
+    set h1 [serverStart $w --no-log --style site]
+    set h2 [serverStart $w --no-log --style plain]
+} -body {
+    set a [seite [holen [serverPort $h1] /?q=Archiv&in=a]]
+    set b [seite [holen [serverPort $h1] /?q=Archiv+-Alte]]
+    set c [seite [holen [serverPort $h1] /?q=%22Alte+Archiv%22]]
+    set d [seite [holen [serverPort $h1] /?q=Archiv+typ:md+in:a]]
+    set e [seite [holen [serverPort $h2] /?q=Archiv+in:a]]
+    list [string match "*<a href=\"/?q=Archiv\">\u00dcberall suchen (1 Treffer)</a>*" $a] \
+         [string match "*<a href=\"/?q=Archiv\">Ohne die Minusw\u00f6rter suchen (1 Treffer)</a>*" $b] \
+         [string match "*<a href=\"/?q=Alte%20Archiv\">Die Wortfolgen als einzelne W\u00f6rter suchen (1 Treffer)</a>*" $c] \
+         [string match "*\u00dcberall suchen (1 Treffer)*" $d] \
+         [string match "*Nichts gefunden.*<a href=\"/?q=Archiv\">\u00dcberall suchen (1 Treffer)</a>*" $e]
+} -cleanup {
+    serverStop $h1 ; serverStop $h2
+    file delete -force $w
+} -result {1 1 1 1 1}
+
+test search-none-2 "Meinten Sie: similar words of the index, folded, at most 3, none from dot folders" -setup {
+    set w [suchWurzel3]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [seite [holen $p /?q=Freigbe]]
+    set b [seite [holen $p /?q=Gr%C3%B6ssee+Netzwerk]]
+    set c [seite [holen $p /?q=Katxr]]
+    set d [seite [holen $p /?q=Schnurzelwor]]
+    set e [seite [holen $p /?q=Kateq]]
+    set m [regexp -inline {Meinten Sie: .*?\?</li>} $c]
+    list [string match {*Meinten Sie: <a href="/?q=freigabe">freigabe</a>?*} $a] \
+         [string match {*Meinten Sie: <a href="/?q=groesse%20Netzwerk">groesse Netzwerk</a>*} $b] \
+         [regexp -all {<a } $m] [string match {*Meinten Sie: <a href="/?q=kater">kater</a>, *} $c] \
+         [string match {*Meinten Sie*} $d] [string match {*kateq*} [string tolower [regexp -inline {Meinten Sie: .*?\?</li>} $e]]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 3 1 0 0}
+
+test search-none-3 "a lower-case or/oder between words: a hint with the query that links them" -setup {
+    set w [suchWurzel2]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [seite [holen $p /?q=Netzwerk+or+Drucker]]
+    set b [seite [holen $p /?q=Netzwerk+oder+Drucker]]
+    set c [seite [holen $p /?q=%22Netzwerk+or+Drucker%22]]
+    list [string match {*verkn*nur mit ODER, OR oder *|*: <a href="/?q=Netzwerk%20OR%20Drucker">Netzwerk OR Drucker</a>*} $a] \
+         [string match {*<a href="/?q=Netzwerk%20ODER%20Drucker">Netzwerk ODER Drucker</a>*} $b] \
+         [string match {*nur mit ODER*} $c] [string match {*Meinten Sie*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 0 0}
+
+test search-none-4 "the word list is built once per state of the index" -setup {
+    set w [suchWurzel3]
+    set srv [mdserver::Server new -root $w -log 0 -pdfsearch 0]
+    set my [privat $srv]
+    set ns [info object namespace $srv]
+} -body {
+    $my _searchIndex
+    set r1 [$my _similarWords katxr]
+    set g1 [lindex [set ${ns}::_perIdx(words)] 0]
+    $my _similarWords freigbe
+    set g2 [lindex [set ${ns}::_perIdx(words)] 0]
+    set fh [open [file join $w a neu.md] w]; puts $fh "# Neu\n\nKatxz"; close $fh
+    $my _searchIndex
+    set r3 [$my _similarWords katxr]
+    set g3 [lindex [set ${ns}::_perIdx(words)] 0]
+    list $r1 [expr {$g1 == $g2}] [expr {$g3 > $g1}] $r3
+} -cleanup {
+    $srv destroy
+    file delete -force $w
+} -result {{kater kamer kaser} 1 1 {kater katxz kamer}}
+
+test search-facets-1 "facets: folders of all hits (not only the page), type; dot folders not counted" -setup {
+    set w [suchWurzelViele 60 5]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [seite [holen $p /?q=Kater&in=c]]
+    set b [seite [holen $p /?q=Kater&typ=md]]
+    set c [seite [holen $p /?q=Freigabe]]
+    list [string match {*<nav class="mds-facets" aria-label="Treffer eingrenzen">*<span id="mds-facet-dir">Ordner:</span> <ul aria-labelledby="mds-facet-dir"><li><a href="/?q=Kater&amp;in=c%2Fd">d (60 Treffer)</a></li><li><a href="/?q=Kater&amp;in=c%2Fe">e (5 Treffer)</a></li></ul>*} $a] \
+         [string match {*<li><a href="/?q=Kater">alle Typen (65 Treffer)</a></li><li><strong aria-current="true">Markdown (65 Treffer)</strong></li>*} $b] \
+         [string match {*<nav class="mds-facets"*} $c] [string match {*.intern*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 0 0}
+
+test search-facets-2 "facets: a count per type present, link with typ=" -constraints tucsv -setup {
+    set w [suchWurzel2]
+    set fh [open [file join $w b liste.csv] w]; puts $fh "Name;Wert\nFreigabe;1"; close $fh
+    set h [serverStart $w --no-log --style site --pdf-search 0]
+    set p [serverPort $h]
+} -body {
+    set a [seite [holen $p /?q=Freigabe]]
+    list [string match {*<li><a href="/?q=Freigabe&amp;typ=md">Markdown (3 Treffer)</a></li><li><a href="/?q=Freigabe&amp;typ=csv">CSV (1 Treffer)</a></li>*} $a] \
+         [string match {*PDF (*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 0}
+
+test search-page-1 "more than 50 hits: 1-50 of N, back/next with seite=, filters kept" -setup {
+    set w [suchWurzelViele 70 50]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [seite [holen $p /?q=Kater]]
+    set b [seite [holen $p /?q=Kater&in=c&seite=3&von=c/d]]
+    set c [seite [holen $p /?q=Kater&seite=99]]
+    list [string match "*1\u201350 von 120 Treffern f&uuml;r <strong>Kater</strong>*" $a] \
+         [regexp -all {<li><a href="/c/} $a] \
+         [string match "*<nav class=\"mds-search-pages\" aria-label=\"Trefferseiten\"><span>Seite 1 von 3</span> <a rel=\"next\" href=\"/?q=Kater&amp;seite=2\">weiter \u00bb</a></nav>*" $a] \
+         [string match "*101\u2013120 von 120 Treffern*" $b] \
+         [string match {*<ol class="mds-hits" start="101">*} $b] \
+         [string match {*<a rel="prev" href="/?q=Kater&amp;in=c&amp;von=c%2Fd&amp;seite=2">*} $b] \
+         [string match {*<nav class="mds-facets"*d (70 Treffer)*} $b] [string match {*rel="next"*} $b] \
+         [string match "*101\u2013120 von 120*" $c]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 50 1 1 1 1 1 0 1}
+
+test search-page-2 "plain style: pages too" -setup {
+    set w [suchWurzelViele 70 0]
+    set h [serverStart $w --no-log --style plain]
+    set p [serverPort $h]
+} -body {
+    set a [seite [holen $p /?q=Kater&seite=2]]
+    list [string match "*51\u201370 von 70 Treffern.*" $a] \
+         [string match "*<a href=\"/?q=Kater\">\u00ab zur\u00fcck</a> * Seite 2 von 2*" $a] \
+         [regexp -all {<li><a href="/c/} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 20}
+
+test search-page-3 "JSON: total, page, pages; the old fields stay" -constraints tujson -setup {
+    set w [suchWurzelViele 70 0]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set j1 [::tclutils::tujson::parse [seite [holen $p /?q=Kater&format=json]]]
+    set j2 [::tclutils::tujson::parse [seite [holen $p /?q=Kater&format=json&seite=2]]]
+    list [dict get $j1 query] [dict get $j1 pending] [dict get $j1 total] [dict get $j1 page] \
+         [dict get $j1 pages] [llength [dict get $j1 hits]] [dict get $j2 page] [llength [dict get $j2 hits]] \
+         [lsort [dict keys [lindex [dict get $j2 hits] 0]]]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {Kater 0 70 1 2 50 2 20 {path score snippet title url}}
+
+test search-a11y-1 "status line, labels with for/id, choices send the form, button stays" -setup {
+    set w [suchWurzel2]
+    set h [serverStart $w --no-log --style site]
+    set p [serverPort $h]
+} -body {
+    set a [seite [holen $p /?q=Freigabe&von=a]]
+    set b [seite [holen $p /?q=nichtda]]
+    list [string match {*<p class="mds-lead" role="status" aria-live="polite">3 Treffer f&uuml;r*} $a] \
+         [string match {*<p class="mds-lead" role="status" aria-live="polite">Nichts gefunden f&uuml;r*} $b] \
+         [string match {*<label for="mds-q" class="mds-sr">Suchbegriffe</label> <input type="search" id="mds-q"*} $a] \
+         [string match {*<label for="mds-in">Bereich</label> <select id="mds-in" name="in" onchange="this.form.submit()">*} $a] \
+         [string match {*<label for="mds-typ">Typ</label> <select id="mds-typ" name="typ" onchange="this.form.submit()">*} $a] \
+         [string match {*<button type="submit">Suchen</button>*} $a] \
+         [string match {*<ul aria-labelledby="mds-facet-dir"><li><a href="/?q=Freigabe&amp;in=a&amp;von=a">a (2 Treffer)</a></li>*} $a]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 1 1 1 1 1}
+
+test reload-1 "reload vergisst die Office-/CSV-Seiten und liest den Index neu" -constraints tucsv -setup {
+    set w [suchWurzel]
+    set f [file join $w a nachladen.csv]
+    set t0 [expr {[clock seconds] - 100}]
+    set fh [open $f wb]; puts -nonewline $fh "Name,Ort\nAlpha,Eins\n"; close $fh
+    file mtime $f $t0
+    set ctrl [freierPort]
+    set h [serverStart $w --no-log --style site --control $ctrl]
+    set p [serverPort $h]
+} -body {
+    set a [holen $p /a/nachladen.csv]
+    # gleicher Inhalt in der Laenge, gleiche Zeit: nur reload sieht es
+    set fh [open $f wb]; puts -nonewline $fh "Name,Ort\nBravo,Eins\n"; close $fh
+    file mtime $f $t0
+    set b [holen $p /a/nachladen.csv]
+    lassign [mdctl $ctrl reload] rc antwort
+    set c [holen $p /a/nachladen.csv]
+    set q [holenBis $p "/?q=bravo" {*nachladen*}]
+    list [string match *Alpha* $a] [string match *Alpha* $b] $rc $antwort \
+        [string match *Bravo* $c] [string match *nachladen* $q]
+} -cleanup {
+    serverStop $h
+    file delete -force $w
+} -result {1 1 0 reloading 1 1}
 
 tcltest::cleanupTests

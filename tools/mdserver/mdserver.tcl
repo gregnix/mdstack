@@ -1,12 +1,14 @@
 #!/usr/bin/env tclsh
 # mdserver.tcl -- Markdown web server (launcher)
 # ============================================================================
-# Starts mdserver. Requires mdserver-0.4.tm on the module path.
+# Starts mdserver. Requires mdserver-0.4.tm, mdserver/search-0.4.tm and
+# mdserver/view-0.4.tm on the module path (lib/).
 #
 # Usage:
-#   tclsh mdserver.tcl ?--port 8080? ?--bind 127.0.0.1? ?--root /path? ?--theme hell?
+#   tclsh mdserver.tcl ?--port 8080? ?--bind 127.0.0.1|*? ?--root /path? ?--theme hell?
 #
-# Requires: mdserver 0.4 (mdserver-0.4.tm)
+# Requires: mdserver 0.4 (mdserver-0.4.tm, mdserver/search-0.4.tm,
+#           mdserver/view-0.4.tm)
 # ============================================================================
 
 package require Tcl 8.6 9
@@ -39,10 +41,14 @@ proc parseArgs {argv} {
         switch $arg {
             --port    -
             --bind    -
+            --maxconn -
+            --viewcache -
+            --maxperaddr -
             --dotfiles -
             --maxline -
             --maxheader -
             --healthpath -
+            --statuspath -
             --root    -
             --theme   -
             --title   -
@@ -73,8 +79,13 @@ proc parseArgs {argv} {
             --help {
                 puts "Usage: tclsh mdserver.tcl \[options\]"
                 puts "  --port    PORT    HTTP port (default: 8080)"
-                puts "  --bind    ADDR    Listen address (default: all interfaces;"
-                puts "                    use 127.0.0.1 when a proxy does the auth)"
+                puts "  --bind    ADDR    Listen address (default: 127.0.0.1, this machine"
+                puts "                    only; '*' or 0.0.0.0 for the network)"
+                puts "  --maxconn N       Open connections in all (default: 200, 0 = no limit)"
+                puts "  --viewcache MB    Keep office and CSV pages until the file changes"
+                puts "                    (default: 32, 0 = off)"
+                puts "  --maxperaddr N    Open connections per client address (default: 32;"
+                puts "                    not counted for --trusted-proxy addresses)"
                 puts "  --dotfiles 0|1   Serve hidden files and directories such as"
                 puts "                    .git (default: 0 -- not served)"
                 puts "  --trusted-proxy ADDR ... Peer addresses whose X-Forwarded-For"
@@ -112,6 +123,7 @@ proc parseArgs {argv} {
                 puts "                    (default: 16384; 0 = ohne Grenze)"
                 puts "  --healthpath PATH Pfad des Health-Endpunkts"
                 puts "                    (default: /__mdserver/health)"
+                puts "  --statuspath PATH Status als Text (Vorgabe: aus); nur hinter Anmeldung"
                 puts "  --style   NAME    Page style: site (default)|plain|sidebar|sticky|collapsible"
                 puts "  --stylesdir DIR   CSS style directory (default: ../styles)"
                 puts "  --navbg   COLOR   Nav bar background color"

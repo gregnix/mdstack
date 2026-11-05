@@ -13,7 +13,7 @@ A complete Markdown processing stack for Tcl/Tk applications.
 
 | Module | Version | Description |
 |--------|---------|-------------|
-| `mdstack::parser` | 0.9.0 | Markdown → AST parser (CommonMark subset + TIP-700; `html_block`, math, span attributes, blocks in definitions, section references) |
+| `mdstack::parser` | 0.9.2 | Markdown → AST parser (CommonMark subset + TIP-700; `html_block`, math, span attributes, blocks in definitions, section references) |
 | `mdstack` | 0.1 | Orchestrator / stack manager |
 | `mdstack::model` | 0.1 | Document model |
 | `mdstack::validator` | 0.2 | AST validator (node walk; not `parser::validate`) |
@@ -33,7 +33,7 @@ A complete Markdown processing stack for Tcl/Tk applications.
 
 ### DocIR bridge
 
-mdstack is a consumer of the [docir repo](../docir/). Three DocIR
+mdstack is a consumer of the [docir repo](https://github.com/gregnix/docir). Three DocIR
 components are used directly:
 
 | External module | Source | Purpose |

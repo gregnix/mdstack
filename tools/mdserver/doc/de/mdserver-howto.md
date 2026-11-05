@@ -19,6 +19,9 @@ meinprojekt/
     mdserver/
       lib/
         mdserver-0.4.tm
+        mdserver/
+          search-0.4.tm <- die Suche
+          view-0.4.tm   <- Office und CSV als Seite
       styles/           <- TOC-CSS (sidebar/sticky-top/collapsible)
       mdserver.tcl
       mkcert.tcl
@@ -267,7 +270,10 @@ fuser -k 8080/tcp
 ```
 ERROR: mdserver 0.1 nicht gefunden
 ```
-→ `lib/mdserver-0.4.tm` muss neben `mdserver.tcl` in `lib/` liegen.
+→ `lib/mdserver-0.4.tm` muss neben `mdserver.tcl` in `lib/` liegen, und
+`lib/mdserver/search-0.4.tm` und `lib/mdserver/view-0.4.tm` daneben. Fehlt
+eine davon, sagt der Start `mdserver::search 0.4 not found` bzw.
+`mdserver::view 0.4 not found`.
 
 **Seite zeigt nur Quelltext:**
 → Dateiendung muss `.md` sein, nicht `.txt` oder `.markdown`.

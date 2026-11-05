@@ -1,8 +1,8 @@
 /* site.css -- layout for --style site
  *
  * One stylesheet for the whole page: header, sidebar (book chapters or the
- * folder), main column, "on this page". No JavaScript; the mobile menu is a
- * checkbox. Colours are variables: light by default, dark with the system
+ * folder), main column, "on this page". No JavaScript needed; the mobile
+ * menu is a checkbox (the key / for the search field is an extra). Colours are variables: light by default, dark with the system
  * setting or ?theme=dunkel.
  */
 
@@ -65,7 +65,17 @@ a:hover { text-decoration: underline; }
 .mds-menu-btn { display: none; cursor: pointer; font-size: 1.35rem; line-height: 1; }
 
 /* ---- search ------------------------------------------------------------- */
-.mds-search { margin-left: auto; }
+.mds-search { margin-left: auto; display: flex; align-items: center; gap: .4rem; }
+.mds-search-tips-link {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.5rem; height: 1.5rem; border-radius: 50%; font-size: .85rem;
+    color: var(--top-fg); border: 1px solid rgba(255,255,255,.35); opacity: .8;
+}
+.mds-search-tips-link:hover { opacity: 1; text-decoration: none; }
+.mds-sr {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
 .mds-search input {
     width: 14rem; padding: .35rem .7rem; border-radius: 6px; border: 1px solid transparent;
     background: rgba(255,255,255,.12); color: var(--top-fg); font: inherit; font-size: .9rem;
@@ -75,10 +85,28 @@ a:hover { text-decoration: underline; }
 .mds-search-big { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 .4rem; }
 .mds-search-filter { display: flex; flex-wrap: wrap; gap: 1rem; flex-basis: 100%; font-size: .88rem; color: var(--fg-soft); }
 .mds-search-filter select {
-    margin-left: .35rem; padding: .2rem .4rem; font: inherit; border: 1px solid var(--line);
+    margin-left: .35rem; margin-right: .35rem; padding: .2rem .4rem; font: inherit; border: 1px solid var(--line);
     border-radius: 4px; background: var(--bg); color: var(--fg); max-width: 22rem;
 }
-.mds-search-help { margin: 0 0 1.5rem; font-size: .8rem; color: var(--fg-soft); }
+.mds-search-tips { margin: 0 0 1.2rem; font-size: .85rem; }
+.mds-search-tips summary { cursor: pointer; color: var(--fg-soft); }
+.mds-search-tips table { border-collapse: collapse; margin: .5rem 0; }
+.mds-search-tips th, .mds-search-tips td {
+    border-bottom: 1px solid var(--line); padding: .3rem .6rem; text-align: left; vertical-align: top;
+}
+.mds-search-tips code { white-space: nowrap; }
+.mds-query { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: .3rem 0 .6rem; font-size: .88rem; }
+.mds-query-label { color: var(--fg-soft); }
+.mds-chips, .mds-content .mds-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .35rem; }
+.mds-chip { background: var(--accent-soft); border-radius: 999px; padding: .1rem .2rem .1rem .65rem; }
+.mds-chip a { padding: 0 .4rem; color: var(--fg-soft); }
+.mds-chip a:hover { color: var(--fg); text-decoration: none; }
+.mds-facets { display: flex; flex-wrap: wrap; gap: .3rem 1.5rem; margin: .2rem 0 .6rem; font-size: .85rem; color: var(--fg-soft); }
+.mds-facet { display: flex; flex-wrap: wrap; gap: .4rem; }
+.mds-facets ul, .mds-content .mds-facets ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .2rem .9rem; }
+.mds-facets strong { color: var(--fg); font-weight: 600; }
+.mds-none { font-size: .95rem; }
+.mds-search-pages { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin: 1rem 0; }
 
 /* ---- CSV as a table ------------------------------------------------------- */
 .mds-csv { overflow-x: auto; margin: 1rem 0; }

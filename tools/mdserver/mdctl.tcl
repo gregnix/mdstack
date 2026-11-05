@@ -2,7 +2,7 @@
 # mdctl.tcl -- mdserver ueber den Steuerport ansprechen
 # ============================================================================
 # Usage:
-#   tclsh mdctl.tcl ?--port 8099? ?--host 127.0.0.1? stop|ping
+#   tclsh mdctl.tcl ?--port 8099? ?--host 127.0.0.1? stop|ping|status|reload
 #
 # Gedacht als ExecStop= in einer systemd-Unit:
 #
@@ -36,13 +36,15 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
         --port    { set cfg(port) [lindex $argv [incr i]] }
         --timeout { set cfg(timeout) [lindex $argv [incr i]] }
         --help {
-            puts "Usage: tclsh mdctl.tcl \[--host ADDR\] --port PORT stop|ping"
+            puts "Usage: tclsh mdctl.tcl \[--host ADDR\] --port PORT stop|ping|status|reload"
             puts "  --host    ADDR  Steuerport-Adresse (default: 127.0.0.1)"
             puts "  --port    PORT  Steuerport von mdserver (--control)"
             puts "  --timeout MS    Wartezeit auf die Antwort (default: 10000)"
             puts ""
             puts "  stop            mdserver beenden"
             puts "  ping            erreichbar? -> pong"
+            puts "  status          Verbindungen, Anfragen, Suchindex, langsamste Anfragen"
+            puts "  reload          Zwischenspeicher leeren, Suchindex neu lesen (im Hintergrund)"
             exit 0
         }
         default { set befehl [lindex $argv $i] }
@@ -50,7 +52,7 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
 }
 
 if {$cfg(port) eq "" || $befehl eq ""} {
-    puts stderr "Usage: tclsh mdctl.tcl \[--host ADDR\] --port PORT stop|ping"
+    puts stderr "Usage: tclsh mdctl.tcl \[--host ADDR\] --port PORT stop|ping|status|reload"
     exit 1
 }
 
@@ -65,15 +67,15 @@ fconfigure $sock -translation crlf -buffering line -blocking 0
 puts $sock $befehl
 flush $sock
 
-set ::antwort ""
+# Die Antwort kann mehrere Zeilen haben (status); der Server schliesst
+# danach. Gelesen wird bis EOF.
+set ::antwort {}
 set ::fertig 0
 fileevent $sock readable {
-    if {[gets $::sock zeile] >= 0} {
-        set ::antwort [string trim $zeile]
-        set ::fertig 1
-    } elseif {[eof $::sock]} {
-        set ::fertig 1
+    while {[gets $::sock zeile] >= 0} {
+        lappend ::antwort [string trimright $zeile]
     }
+    if {[eof $::sock]} { set ::fertig 1 }
 }
 set ::sock $sock
 set wecker [after $cfg(timeout) {set ::fertig 1}]
@@ -81,9 +83,9 @@ vwait ::fertig
 after cancel $wecker
 catch {close $sock}
 
-if {$::antwort eq ""} {
+if {![llength $::antwort]} {
     puts stderr "mdctl: keine Antwort von $cfg(host):$cfg(port)"
     exit 1
 }
-puts $::antwort
+puts [join $::antwort \n]
 exit 0

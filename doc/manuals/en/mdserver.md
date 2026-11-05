@@ -43,12 +43,16 @@ tclsh mdserver.tcl [options]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--port` | `8080` | HTTP port |
-| `--bind` | (empty) | Listen address. Empty means **all interfaces**. Behind a proxy that does the authentication this must be `127.0.0.1` -- otherwise the port is reachable from outside and unauthenticated. |
+| `--bind` | `127.0.0.1` | Listen address. The default means **this machine only**. `*` (or `0.0.0.0`) means all interfaces; the start banner then warns. |
+| `--viewcache` | `32` | MB for finished office and CSV pages, kept until the file changes. `0` = off. |
+| `--maxconn` | `200` | Open connections in all; over that 503. `0` = no limit. |
+| `--maxperaddr` | `32` | Open connections per client address; over that 503. `--trusted-proxy` addresses are not counted. |
 | `--dotfiles` | `0` | Serve hidden files and directories (`.git`, `.env`, …). Off by default: a document root that is also a working copy would otherwise hand out `/.git/config`. |
 | `--trusted-proxy` | (empty) | Peer addresses whose `X-Forwarded-For` is believed in the log. Exact match, no netmasks. Empty = header ignored. |
 | `--maxline` | `8190` | Bytes per request/header line; over that 414 |
 | `--maxheader` | `16384` | Bytes of all headers; over that 431 |
 | `--healthpath` | `/__mdserver/health` | Health endpoint path |
+| `--statuspath` | (empty) | Status as text, as `mdctl.tcl status`; empty = off. Only behind authentication |
 | `--root` | `.` | Document root |
 | `--theme` | `hell` | Theme: `hell`, `dunkel`, `solarized` |
 | `--title` | `mdserver` | Site title |

@@ -25,7 +25,9 @@ Er liefert Markdown-Dateien on-the-fly als HTML aus.
 - Statische Dateien direkt ausgeliefert
 - Verzeichnis-Index mit automatischer Dateiliste
 
-**Speicherort:** `tools/mdserver/mdserver.tcl`, Modul `lib/mdserver-0.4.tm`
+**Speicherort:** `tools/mdserver/mdserver.tcl`, Module `lib/mdserver-0.4.tm`,
+`lib/mdserver/search-0.4.tm` (die Suche) und `lib/mdserver/view-0.4.tm`
+(Office und CSV als Seite)
 
 ---
 
@@ -66,7 +68,10 @@ tclsh mdserver.tcl [Optionen]
 | Option | Standard | Beschreibung |
 |--------|----------|-------------|
 | `--port` | `8080` | HTTP-Port |
-| `--bind` | (leer) | Adresse, auf der gehorcht wird. Leer heisst **alle Schnittstellen**. Hinter einem Proxy, der die Anmeldung macht, gehoert hier `127.0.0.1` hin — sonst ist der Port von aussen offen und unangemeldet. |
+| `--bind` | `127.0.0.1` | Adresse, auf der gehorcht wird. Die Vorgabe heisst: **nur dieser Rechner**. `*` (oder `0.0.0.0`) heisst alle Schnittstellen; die Startmeldung warnt dann. Hinter einem Proxy, der die Anmeldung macht, bleibt es bei `127.0.0.1`. |
+| `--viewcache` | `32` | MB fuer fertige Office- und CSV-Seiten; eine Seite bleibt liegen, bis sich Aenderungszeit oder Groesse der Datei aendern. `0` = aus. |
+| `--maxconn` | `200` | Offene Verbindungen insgesamt; darueber sofort **503** mit `Retry-After: 1`. `0` = ohne Grenze. |
+| `--maxperaddr` | `32` | Offene Verbindungen je Absenderadresse; darueber **503**. Adressen aus `--trusted-proxy` zaehlen nicht. `0` = ohne Grenze. |
 | `--dotfiles` | `0` | Versteckte Dateien und Ordner (`.git`, `.env`, …) ausliefern. Aus, weil eine Wurzel, die zugleich Arbeitskopie ist, sonst `/.git/config` herausgibt. |
 | `--pdf-search` | `auto` | PDFs in die Volltextsuche aufnehmen, ein Treffer je Seite. Braucht `tclutils::tupdftext` (tclutils 0.67.0) auf dem Modulpfad oder in `TCLUTILS_TM`. `auto`: wenn es ladbar ist; `1`: sonst eine Warnung; `0`: aus. |
 | `--pdf-cache` | `~/.cache/mdserver-pdf` | Ordner für den gelesenen PDF-Text, eine Datei je PDF, gültig solange mtime und Größe stimmen. Nie in der Wurzel. |
@@ -78,6 +83,7 @@ tclsh mdserver.tcl [Optionen]
 | `--maxline` | `8190` | Bytes je Anfrage-/Kopfzeile; darueber **414**. `0` = ohne Grenze. |
 | `--maxheader` | `16384` | Bytes aller Koepfe zusammen; darueber **431**. `0` = ohne Grenze. |
 | `--healthpath` | `/__mdserver/health` | Pfad des Health-Endpunkts |
+| `--statuspath` | (leer) | Pfad fuer den Status als Text (wie `mdctl.tcl status`); leer = aus. Nur hinter einer Anmeldung |
 | `--root` | `.` | Dokument-Wurzel |
 | `--theme` | `hell` | Theme: `hell`, `dunkel`, `solarized` |
 | `--style` | `site` | Seitenstil: `site`, `plain`, `sidebar`, `sticky`, `collapsible` |
@@ -267,8 +273,10 @@ Dokumente, die alle Woerter enthalten (ohne Gross/klein, `ae`/`oe`/`ue`/`ss`
 treffen die Umlaute), die besten zuerst (Treffer im Titel zaehlen mehr), mit
 Ordnerpfad und einem Ausschnitt mit markierten Woertern. Die Texte werden einmal
 gelesen und mit ihrer mtime behalten; eine Suche liest nur Geaendertes neu.
-Punkt-Ordner und Symlinks bleiben aussen vor, wie beim Ausliefern. Die anderen
-Stile beantworten `?q=` mit einer schlichten Liste.
+Punkt-Ordner und Symlinks bleiben aussen vor, wie beim Ausliefern. Nach dem
+Start entsteht der Index im Hintergrund; eine Suche in dieser Zeit sagt, wie
+viele Dateien noch fehlen (siehe *Antwortzeiten*). Die anderen Stile
+beantworten `?q=` mit einer schlichten Liste.
 
 **Suchsyntax.** Neben einfachen Woertern versteht `?q=`:
 
@@ -287,6 +295,35 @@ in der Anfrage steht, gilt vor dem Parameter. `..`, `.` und Punkt-Ordner in
 den Ordner der aktuellen Seite als `von=` mit; *Bereich* bietet dann diesen
 Ordner und alle darueber an, mit ihren Titeln. Gesucht wird trotzdem erst
 einmal ueberall, eingegrenzt erst durch die Auswahl.
+
+**Hilfe auf der Ergebnisseite** (seit 2026-11-05). Fuer Leser, die die
+Syntax nicht kennen; alles geht ohne JavaScript:
+
+| Teil | Was er zeigt |
+|---|---|
+| *Suchtipps* | aufklappbare Tabelle Eingabe, Wirkung, Beispiel. Die Beispiele sind Links aus dem eigenen Bestand: ein haeufiges Titelwort, ein vorhandener Ordner fuer `in:`, nur die Typen, die an sind. Auf der leeren Suche (`/?q=`) offen |
+| *Gesucht:* | die verstandene Anfrage in Bausteinen (Wort, Wortfolge, ohne, ODER-Paar, Bereich mit Ordnertitel, Typ); das × daneben sucht ohne diesen Baustein |
+| *Nichts gefunden* | "Ueberall suchen" mit Trefferzahl, wenn Bereich oder Typ gesetzt ist; die Trefferzahl ohne die Minuswoerter und mit den Wortfolgen als einzelnen Woertern; "Meinten Sie" mit bis zu drei aehnlichen Woertern aus dem Index (Editierabstand hoechstens 2, gefaltet wie die Suche, also `ae` = `ä`); ein Hinweis, wenn ein klein geschriebenes `or`/`oder` zwischen Woertern steht |
+| Zaehler | Treffer je Typ und die drei Ordner unter dem Bereich mit den meisten Treffern, als Links mit `typ=` bzw. `in=`; gezaehlt ueber alle Treffer, nicht nur die angezeigten |
+| Seiten | ab 51 Treffern "1–50 von 213" und *zurueck*/*weiter* ueber `seite=N`; Bereich, Typ und Zaehler bleiben |
+
+In der Kopfleiste steht im Suchfeld `Suchen: "Wortfolge" -ohne`,
+daneben fuehrt `?` auf `/?q=` (Tipps offen). Die Taste `/` setzt den Cursor
+ins Suchfeld (ein kleines Skript; nicht, wenn schon ein Eingabefeld den
+Fokus hat). Das Suchfeld schlaegt bis zu 200 Dokumenttitel vor, als
+`<datalist>` aus dem Suchindex (hoehere Ebenen zuerst): das geht ohne Skript
+und ohne `tujson`, ein Endpunkt fuer Vorschlaege braeuchte beides. Die Liste
+erscheint, sobald der Index nach dem Start steht; eine Seite baut ihn nie
+selbst. Mit `--pdf-worker 0` erst nach der ersten Suche, damit eine Seite nie
+auf PDFs wartet. Die Trefferzeile ist eine Statusmeldung
+(`role="status"`), *Bereich* und *Typ* schicken die Suche bei einer
+Aenderung ab, der Knopf bleibt. Die anderen Stile zeigen *Gesucht:*, die
+Hilfe bei *Nichts gefunden* und die Seiten.
+
+Die Woerter fuer "Meinten Sie" entstehen beim Einlesen einer Datei und
+liegen mit ihr im Index; gezaehlt werden sie einmal je Stand des Index
+(30 000 Dateien: 0,1 s). Punkt-Ordner bleiben auch in Tipps, Zaehlern,
+Vorschlaegen und Titeln draussen.
 
 **PDFs in der Suche.** Ist `tclutils::tupdftext` ladbar (`--pdf-search auto`,
 die Vorgabe), durchsucht `?q=` auch jede `.pdf` unter der Wurzel, Seite fuer
@@ -349,12 +386,15 @@ die anderen Stile die Tabellenseite.
 als JSON, mit `in` und `typ` wie oben:
 
 ```json
-{"query":"proxy_pass","pending":0,"hits":[{"url":"/a/eins.md",
- "title":"Netzwerk","path":"A","snippet":"... der proxy_pass Wert.","score":1}]}
+{"query":"proxy_pass","pending":0,"indexing":0,"total":1,"page":1,"pages":1,
+ "hits":[{"url":"/a/eins.md","title":"Netzwerk","path":"A",
+ "snippet":"... der proxy_pass Wert.","score":1}]}
 ```
 
 `snippet` ist reiner Text ohne `<mark>`; `pending` zaehlt die PDFs, die der
-Worker noch liest. Braucht `tclutils::tujson`; ohne es antwortet mdserver mit
+Worker noch liest, `indexing` die Dateien, die der Index nach dem Start noch
+nicht gelesen hat. `total` zaehlt alle Treffer, `hits` sind die 50 der Seite
+`page` (`&seite=N`, seit 2026-11-05; die uebrigen Felder wie vorher). Braucht `tclutils::tujson`; ohne es antwortet mdserver mit
 **501**.
 
 **Startseite eines Buchs.** Ein Buchordner (mit `book.tcl`) ohne `index.md`
@@ -419,6 +459,56 @@ eine Grenze ab.
 Das Lese-Timeout (15 s, `-timeout`) bleibt davon unberuehrt — es deckt den
 langsamen Klienten, die Grenzen den grossen.
 
+Dazu kommen Grenzen fuer offene Verbindungen:
+
+| | Vorgabe | darueber |
+|---|---|---|
+| `--maxconn` | 200 insgesamt | **503**, `Retry-After: 1` |
+| `--maxperaddr` | 32 je Absender | **503**, `Retry-After: 1` |
+
+mdserver bedient alle Verbindungen in einem Thread. Wer viele Verbindungen
+oeffnet und nichts schickt, haelt sonst bis zum Timeout je eine Coroutine
+offen. Ueber der Grenze antwortet der Server, ohne die Anfrage zu lesen, und
+schliesst; das Protokoll nennt Adresse und Grund. Hinter einem Proxy kommen
+alle Anfragen von dessen Adresse — darum zaehlen Adressen aus
+`--trusted-proxy` nicht je Absender, nur insgesamt.
+
+Die Grenzen schuetzen vor vielen Verbindungen, nicht vor einer teuren
+Anfrage: Solange eine Suche, "Alle Dokumente" oder eine grosse Office-Ansicht
+laeuft, warten alle anderen (siehe *Antwortzeiten*).
+
+---
+
+## Antwortzeiten
+
+mdserver laeuft in einem Thread. Viele kleine Anfragen gleichzeitig sind
+kein Problem; eine teure Anfrage haelt aber alle anderen auf, bis sie fertig
+ist. Gemessen auf einem Rechner mit zwei Kernen, Tcl 8.6, Markdown-Seiten
+zu je etwa 5 KB:
+
+| Lage | 3 000 Dateien | 30 000 Dateien |
+|---|---|---|
+| kleine Seite, ruhig | 5 ms | 5 ms |
+| 20 Klienten gleichzeitig, kleine Seite | 0,1 s fuer alle | 0,1 s fuer alle |
+| Suchindex nach dem Start (im Hintergrund) | 4–8 s | etwa 45 s |
+| kleine Seite, waehrend der Index entsteht | 10 ms | 10 ms |
+| Suche, Index fertig | 0,1 s | 1 s |
+| Suche ohne Treffer, mit "Meinten Sie" | 0,1 s | 1 s |
+| "Alle Dokumente" | 0,1–0,2 s | 0,8 s |
+| `.xlsx` mit 20 000 Zeilen als Seite, erster Aufruf | 4,5–7 s | |
+| dieselbe Seite danach (`--viewcache`) | 10 ms | |
+
+Unter Tcl 9.0 liegen die Werte in derselben Groessenordnung.
+
+Der Suchindex entsteht nach dem Start in Schritten zu hoechstens 50 ms;
+dazwischen bedient der Server andere Anfragen. Eine Suche in dieser Zeit
+antwortet mit dem, was schon gelesen ist, und sagt, wie viele Dateien noch
+fehlen. Bei bis zu 500 fehlenden Dateien liest sie den Rest selbst. Danach
+liest jede Suche nur geaenderte Dateien neu.
+
+Office- und CSV-Seiten bleiben nach dem ersten Aufruf liegen
+(`--viewcache`); teuer ist nur der erste Aufruf nach einer Aenderung.
+
 ---
 
 ## Control-Port (sauberes Beenden)
@@ -434,7 +524,42 @@ Kommandos mit dem beiliegenden `mdctl.tcl`:
 ```bash
 tclsh mdctl.tcl --port 8099 stop     # sauber beenden
 tclsh mdctl.tcl --port 8099 ping     # -> pong
+tclsh mdctl.tcl --port 8099 status   # Zustand, mehrere Zeilen
+tclsh mdctl.tcl --port 8099 reload   # Zwischenspeicher leeren, Index neu lesen
 ```
+
+`status` sagt, was der Server seit dem Start getan hat (Zaehler im Speicher,
+nach einem Neustart wieder null):
+
+```
+mdserver: 0.4, Tcl 8.6.14
+started: 2026-11-05 10:37:35 (up 2 h 14 min)
+root: /srv/md
+http: 127.0.0.1:8080
+connections: 2 open, peak 17, limits 200 / 32 per address, rejected 0
+requests: 4211 (2xx 4102, 3xx 31, 4xx 78, 5xx 0)
+search index: 3002 files, checked 12 s ago
+pdf queue: 0
+view cache: 3 pages, 0.9 of 32 MB, 40 hits, 3 built
+slowest:
+    4728 ms  11-05 10:37 GET /tabellen/gross.xlsx 200 view xlsx
+     612 ms  11-05 11:02 GET / 200 search
+```
+
+`slowest` sind die fuenf langsamsten Anfragen seit dem Start, mit Pfad (ohne
+Query) und der Notiz der Protokollzeile. Waehrend der Index nach dem Start
+entsteht, steht dort `building (1234 of 30002 files read)`.
+
+`reload` vergisst die Office- und CSV-Seiten (`--viewcache`) und die Titel
+der Listen und liest den Suchindex im Hintergrund neu; der alte antwortet,
+bis der neue steht. Gedacht fuer einen Wechsel unter der Wurzel, den
+Aenderungszeiten nicht zeigen, etwa ein Ordner, der mit alten mtimes
+zurueckgespielt wurde. Sonst ist es nicht noetig: Suche und Ablage sehen
+eine geaenderte Datei an mtime und Groesse.
+
+Dasselbe wie `status` liefert `--statuspath PFAD` ueber HTTP, als Text.
+Vorgabe aus: die Seite nennt Pfade und Zaehler, sie gehoert hinter eine
+Anmeldung.
 
 Das ist der empfohlene Weg zum Beenden eines dauerlaufenden Servers -- kein
 `fuser -k`, keine PID-Suche.
@@ -836,14 +961,21 @@ tools/mdserver/server.key
   `docs/hinaus.txt -> /etc/passwd` darum ausgeliefert. Seit 0.3.1 wird jeder
   Bestandteil aufgeloest und das Ergebnis erneut gegen die Wurzel geprueft:
   **403**. Ein Verweis, der innerhalb der Wurzel bleibt, wird normal geliefert.
+  Was nicht ausgeliefert wird, erscheint auch nirgends: kein Titel, kein Name,
+  keine Karte in Kopfleiste, Seitenleiste, Ordnerseite oder „Alle Dokumente“.
+  Ein Ordner-Verweis auf einen eigenen Vorfahren wird in diesen Listen
+  uebergangen, statt im Kreis zu laufen. Ist `--root` selbst ein Verweis, gilt
+  sein Ziel als Wurzel.
 - **Der Wurzelvergleich geht bis zum Trennzeichen**: `--root /srv/md` passt
   nicht auf `/srv/mdxyz`.
 - **Versteckte Dateien** sind aus (`--dotfiles`, siehe Kommandozeile)
 - **`X-Forwarded-For`** wird nur von Gegenstellen aus `--trusted-proxy`
   gelesen; Vorgabe leer heisst: gar nicht. Sonst faelscht jeder, der den Port
   erreicht, seine Adresse im Protokoll.
-- **`--bind`**: hinter einem Proxy mit Anmeldung gehoert `127.0.0.1` hin, sonst
-  ist der Port von aussen offen und unangemeldet
+- **`--bind`**: Vorgabe `127.0.0.1`, also nur dieser Rechner. Wer den Bestand
+  im Netz zeigen will, setzt `--bind '*'` oder eine Adresse; hinter einem
+  Proxy mit Anmeldung bleibt es bei `127.0.0.1`
+- **`--maxconn` / `--maxperaddr`** begrenzen offene Verbindungen (503)
 - **Control-Port** bindet nur an `127.0.0.1` (nicht von aussen erreichbar)
 - **Selbstsignierte Zertifikate** zeigen Browser-Warnung -- nur fuer Entwicklung
 - **Let's Encrypt** fuer oeffentliche Server empfohlen
@@ -859,6 +991,9 @@ tools/mdserver/
   mdserver.tcl          -- Startskript (CLI)
   lib/
     mdserver-0.4.tm   -- Server-Modul
+    mdserver/
+      search-0.4.tm   -- die Suche (Mixin der Server-Klasse)
+      view-0.4.tm     -- Office und CSV als Seite (Mixin der Server-Klasse)
     pdftext-worker.tcl -- liest eine PDF fuer die Suche (--pdf-worker)
   styles/               -- TOC-CSS-Stile
     sidebar.css
@@ -880,6 +1015,39 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+### unveroeffentlicht (2026-11-05)
+
+- **`--bind` Vorgabe `127.0.0.1`** (bisher alle Schnittstellen). `*` oder
+  leer heisst alle Schnittstellen; die Startmeldung warnt dann
+- **`--maxconn`** (200) und **`--maxperaddr`** (32): darueber sofort 503 mit
+  `Retry-After`; Adressen aus `--trusted-proxy` zaehlen nicht je Absender
+- **Status und Neuladen**: `mdctl.tcl status` (Verbindungen, Anfragen,
+  Suchindex, Ablage, die fuenf langsamsten Anfragen), `mdctl.tcl reload`;
+  `--statuspath` fuer dasselbe ueber HTTP, Vorgabe aus. `mdctl.tcl` liest
+  die Antwort bis EOF
+- **`--viewcache`** (32 MB): Office- und CSV-Seiten bleiben liegen, bis sich
+  die Datei aendert; eine grosse `.xlsx` brauchte vorher bei jedem Aufruf
+  Sekunden
+- **Suchindex im Hintergrund**: entsteht nach dem Start in Schritten; die
+  erste Seite wartet nicht mehr darauf (30 000 Dateien: 10 s), eine Suche
+  waehrenddessen nennt die fehlenden Dateien
+- **Schneller**: Suche bei 30 000 Dateien 1 s statt 3,5–4,5 s, "Meinten Sie"
+  1 s statt 13 s, "Alle Dokumente" 0,8 s statt 4,3 s
+- **Suche und Ansicht sind eigene Module**: `lib/mdserver/search-0.4.tm`
+  und `lib/mdserver/view-0.4.tm` (Office und CSV als Seite), muessen neben
+  `lib/mdserver-0.4.tm` liegen
+- **JSON**: `indexing`, die Zahl der noch nicht gelesenen Dateien
+- **Suche fuer Fremde**: Suchtipps mit Beispielen aus dem Bestand,
+  *Gesucht:* mit Bausteinen zum Entfernen, Hilfe bei *Nichts gefunden*
+  (ueberall, ohne Minuswoerter, Wortfolgen als Woerter, "Meinten Sie",
+  Hinweis zu `or`/`oder`), Zaehler je Typ und Ordner, Seiten zu 50
+  (`seite=`)
+- **Kopfleiste**: Platzhalter mit Beispiel, `?` zu den Tipps, Taste `/`,
+  Titelvorschlaege als `<datalist>`
+- **JSON**: `total`, `page`, `pages`
+- **Barrierefreiheit**: Trefferzeile als Status, Labels mit `for`, Auswahl
+  schickt die Suche ab
 
 ### unveroeffentlicht (2026-10-30)
 

@@ -249,5 +249,6 @@ Betrifft Tk-Widget-Optionsseiten.
 
 - `tools/nroff2md.tcl` — Konverter mit eingebetteten Modulen `nroffparser-0.2`
   und `ast2md-0.1`
-- `mdserver.tcl` — HTTP-Server, lädt `lib/mdserver-0.4.tm`
+- `mdserver.tcl` — HTTP-Server, lädt `lib/mdserver-0.4.tm`,
+  `lib/mdserver/search-0.4.tm` und `lib/mdserver/view-0.4.tm`
 - `man-viewer` — Tcl/Tk-Applikation zum Lesen von Manpages direkt als nroff

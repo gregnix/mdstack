@@ -20,7 +20,9 @@ It serves Markdown files as HTML on the fly.
 - Static files served directly
 - Directory index with automatic file listing
 
-**Location:** `tools/mdserver/mdserver.tcl`, module `lib/mdserver-0.4.tm`
+**Location:** `tools/mdserver/mdserver.tcl`, modules `lib/mdserver-0.4.tm`,
+`lib/mdserver/search-0.4.tm` (the search) and `lib/mdserver/view-0.4.tm`
+(office and CSV as a page)
 
 ---
 
@@ -61,7 +63,10 @@ tclsh mdserver.tcl [options]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--port` | `8080` | HTTP port |
-| `--bind` | (empty) | Listen address. Empty means **all interfaces**. Behind a proxy that does the authentication this must be `127.0.0.1` -- otherwise the port is reachable from outside and unauthenticated. |
+| `--bind` | `127.0.0.1` | Listen address. The default means **this machine only**. `*` (or `0.0.0.0`) means all interfaces; the start banner then warns. Behind a proxy that does the authentication, keep `127.0.0.1`. |
+| `--viewcache` | `32` | MB for finished office and CSV pages; a page is kept until the file's modification time or size changes. `0` = off. |
+| `--maxconn` | `200` | Open connections in all; over that an immediate **503** with `Retry-After: 1`. `0` = no limit. |
+| `--maxperaddr` | `32` | Open connections per client address; over that **503**. Addresses in `--trusted-proxy` are not counted. `0` = no limit. |
 | `--dotfiles` | `0` | Serve hidden files and directories (`.git`, `.env`, …). Off by default: a document root that is also a working copy would otherwise hand out `/.git/config`. |
 | `--pdf-search` | `auto` | PDFs in the full-text search, one hit per page. Needs `tclutils::tupdftext` (tclutils 0.67.0) on the module path or in `TCLUTILS_TM`. `auto`: when it loads; `1`: otherwise a warning; `0`: off. |
 | `--pdf-cache` | `~/.cache/mdserver-pdf` | Folder for the PDF text read, one file per PDF, valid while mtime and size match. Never inside the root. |
@@ -73,6 +78,7 @@ tclsh mdserver.tcl [options]
 | `--maxline` | `8190` | Bytes per request/header line; over that **414**. `0` = no limit. |
 | `--maxheader` | `16384` | Bytes of all headers; over that **431**. `0` = no limit. |
 | `--healthpath` | `/__mdserver/health` | Path of the health endpoint |
+| `--statuspath` | (empty) | Path for the status as text (as `mdctl.tcl status`); empty = off. Only behind authentication |
 | `--root` | `.` | Document root |
 | `--theme` | `hell` | Theme: `hell`, `dunkel`, `solarized` |
 | `--style` | `site` | page style: `site`, `plain`, `sidebar`, `sticky`, `collapsible` |
@@ -222,6 +228,35 @@ the current page along as `von=`; *Bereich* then offers this folder and all
 above it, with their titles. The search itself still covers everything until
 a scope is chosen.
 
+**Help on the result page** (since 2026-11-05). For readers who do not know
+the syntax; all of it works without JavaScript:
+
+| Part | What it shows |
+|---|---|
+| *Suchtipps* | a table to open: input, effect, example. The examples are links taken from the documents themselves: a frequent title word, an existing folder for `in:`, only the types that are on. Open on the empty search (`/?q=`) |
+| *Gesucht:* | the query as understood, in parts (word, phrase, without, OR pair, scope with the folder title, type); the × next to a part searches without it |
+| *Nichts gefunden* | "Überall suchen" with the hit count when a scope or type is set; the count without the minus words and with the phrases as single words; "Meinten Sie" with up to three similar words of the index (edit distance at most 2, folded like the search, so `ae` = `ä`); a note when a lower-case `or`/`oder` stands between words |
+| Counts | hits per type and the three folders below the scope with the most hits, as links with `typ=` or `in=`; counted over all hits, not only those shown |
+| Pages | from 51 hits "1–50 von 213" and *zurück*/*weiter* through `seite=N`; scope, type and counts stay |
+
+In the header the search field reads `Suchen: "Wortfolge" -ohne`; next
+to it `?` leads to `/?q=` (tips open). The key `/` puts the cursor into the
+search field (a small script; not when an input field has the focus). The
+field offers up to 200 document titles as a `<datalist>` from the search
+index (higher levels first): that needs neither a script nor `tujson`, an
+endpoint for suggestions would need both. The list appears once the index
+is built after the start; a page never builds it itself. With
+`--pdf-worker 0` only after the first search, so a page never waits for
+PDFs. The
+hit line is a status message (`role="status"`); *Bereich* and *Typ* send the
+search when changed, the button stays. The other styles show *Gesucht:*, the
+help for *Nichts gefunden* and the pages.
+
+The words for "Meinten Sie" are taken when a file is read and kept with it
+in the index; they are counted once per state of the index (30,000 files:
+0.1 s). Dot folders stay out of the tips, counts, suggestions and titles as
+well.
+
 **PDFs in the search.** When `tclutils::tupdftext` loads (`--pdf-search
 auto`, the default), `?q=` also searches every `.pdf` below the root, page by
 page. A hit reads `handbook, S. 17` and links to `handbook.pdf#page=17`;
@@ -279,12 +314,15 @@ The file is read as UTF-8 when the bytes are valid UTF-8, else as cp1252
 JSON, with `in` and `typ` as above:
 
 ```json
-{"query":"proxy_pass","pending":0,"hits":[{"url":"/a/eins.md",
- "title":"Netzwerk","path":"A","snippet":"... der proxy_pass Wert.","score":1}]}
+{"query":"proxy_pass","pending":0,"indexing":0,"total":1,"page":1,"pages":1,
+ "hits":[{"url":"/a/eins.md","title":"Netzwerk","path":"A",
+ "snippet":"... der proxy_pass Wert.","score":1}]}
 ```
 
 `snippet` is plain text without `<mark>`; `pending` counts the PDFs the
-worker is still reading. Needs `tclutils::tujson`; without it mdserver
+worker is still reading, `indexing` the files the index has not read yet
+after the start. `total` counts all hits, `hits` are the 50 of page
+`page` (`&seite=N`, since 2026-11-05; the other fields as before). Needs `tclutils::tujson`; without it mdserver
 answers **501**.
 
 **Book landing page.** A book folder (with `book.tcl`) without `index.md` gets
@@ -319,14 +357,36 @@ Both features pair with bookkit's web output (`book-webindex.tcl`), which writes
 
 ## Control port
 
-`--control PORT` opens a localhost-only control channel:
+`--control PORT` opens a localhost-only control channel. Commands with the
+enclosed `mdctl.tcl`:
 
 ```bash
-echo stop | nc localhost 8099    # clean shutdown
-echo ping | nc localhost 8099    # -> pong
+tclsh mdctl.tcl --port 8099 stop     # clean shutdown
+tclsh mdctl.tcl --port 8099 ping     # -> pong
+tclsh mdctl.tcl --port 8099 status   # state, several lines
+tclsh mdctl.tcl --port 8099 reload   # clear caches, read the index again
 ```
 
 Recommended way to stop a long-running server (no `fuser -k`, no PID lookup).
+Not `echo stop | nc`: OpenBSD netcat, the default `nc` on Debian and Ubuntu,
+does not close its sending side after EOF on stdin and runs into the timeout
+(`nc -N` does, other netcat variants do not know `-N`).
+
+`status` tells what the server has done since the start (counters in
+memory): version, start time and uptime, root, listen address, open and
+peak connections with the limits and the number rejected, requests per
+status class, the state of the search index, the PDF queue, the view cache,
+and the five slowest requests with path (without query) and the note of the
+log line.
+
+`reload` forgets the office and CSV pages (`--viewcache`) and the titles of
+the lists, and reads the search index again in the background; the old one
+answers until the new one is done. Meant for a change below the root that
+modification times do not show, such as a folder restored with old mtimes.
+
+`--statuspath PATH` returns the same as `status` over HTTP, as text. Off by
+default: the page names paths and counters and belongs behind
+authentication.
 
 ---
 
@@ -440,12 +500,20 @@ Server cannot find the CSS styles. Ensure `tools/mdserver/styles/` exists (or se
   the final component of a path, so up to 0.3 a link `docs/out.txt ->
   /etc/passwd` was served. Since 0.3.1 every component is resolved and the
   result checked against the root again: **403**. A link that stays inside the
-  root is served normally.
+  root is served normally. What is not served does not show either: no title,
+  name or card in the header, sidebar, folder page or "Alle Dokumente". A
+  folder link to one of its own ancestors is skipped in these lists instead of
+  running in a circle. If `--root` itself is a link, its target is the root.
 - **The root comparison goes up to the separator**: `--root /srv/md` does not
   match `/srv/mdxyz`.
 - Hidden files are off by default (`--dotfiles`)
-- `--bind 127.0.0.1` behind a proxy that authenticates -- otherwise the port is
-  reachable from outside and unauthenticated
+- `--bind` defaults to `127.0.0.1`, this machine only. To serve the network,
+  pass `--bind '*'` or an address; behind a proxy that authenticates, keep
+  `127.0.0.1`
+- `--maxconn` / `--maxperaddr` limit open connections (503). They guard
+  against many connections, not against one expensive request: while a
+  search over tens of thousands of files, "Alle Dokumente" or a large
+  spreadsheet view runs (several seconds), every other request waits
 - Behind a proxy the peer is always the proxy's address. `X-Forwarded-For` is
   read **only** from peers listed in `--trusted-proxy` (empty by default =
   never), and only its **first** entry -- anyone reaching the port can append
@@ -464,6 +532,8 @@ Server cannot find the CSS styles. Ensure `tools/mdserver/styles/` exists (or se
 tools/mdserver/
   mdserver.tcl        -- CLI launcher
   lib/mdserver-0.4.tm -- server module
+  lib/mdserver/search-0.4.tm -- the search (mixin of the server class)
+  lib/mdserver/view-0.4.tm -- office and CSV as a page (mixin of the server class)
   lib/pdftext-worker.tcl -- reads one PDF for the search (--pdf-worker)
   styles/             -- TOC CSS styles (sidebar/sticky-top/collapsible)
   mkcert.tcl          -- certificate helper
@@ -476,6 +546,30 @@ tools/mdserver/
 ---
 
 ## Changelog
+
+**Unreleased (2026-11-05)** -- `--bind` defaults to `127.0.0.1` (was all
+interfaces); `*` or empty means all interfaces, with a warning in the banner.
+`--maxconn` (200) and `--maxperaddr` (32): over that an immediate 503 with
+`Retry-After`; `--trusted-proxy` addresses are not counted per address.
+`mdctl.tcl status` and `reload`, `--statuspath` (off by default);
+`mdctl.tcl` reads the answer to EOF. `--viewcache` (32 MB): office and CSV
+pages are kept until the file changes
+(a large `.xlsx` took seconds on every request). The search index is built
+after the start in steps of at most 50 ms; the first page no longer waits for
+it, and a search meanwhile says how many files are still missing (JSON:
+`indexing`). With 30 000 files: search 1 s instead of 3.5-4.5 s, "Meinten
+Sie" 1 s instead of 13 s, "Alle Dokumente" 0.8 s instead of 4.3 s. The search
+and the office/CSV view are modules of their own,
+`lib/mdserver/search-0.4.tm` and `lib/mdserver/view-0.4.tm`, next to
+`lib/mdserver-0.4.tm`.
+
+**Unreleased (2026-11-05)** -- search help: tips with examples from the
+documents, the query as understood with a link without each part, help when
+nothing is found (everywhere, without minus words, phrases as words,
+"Meinten Sie", a note on lower-case `or`), counts per type and folder, pages
+of 50 (`seite=`). Header: placeholder with an example, `?` to the tips, key
+`/`, titles as `<datalist>`. JSON: `total`, `page`, `pages`. Status line,
+labels with `for`, the choices send the form.
 
 **Unreleased (2026-10-30)** -- office files as a page (`--office-view`):
 paragraphs or a table per sheet; folders holding only office or CSV files

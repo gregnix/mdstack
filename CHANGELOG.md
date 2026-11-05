@@ -1,5 +1,79 @@
 # mdstack — Changelog
 
+## 2026-11-05 — mdserver: view module
+
+- Office and CSV as a page in their own module, `lib/mdserver/view-0.4.tm`
+  (mixin `mdserver::View`), next to `search-0.4.tm`; the server module is
+  down to 109 KB (was 174 KB).
+
+## 2026-11-05 — mdserver: status and reload
+
+- Control port: `status` (connections, requests per class, search index,
+  view cache, the five slowest requests) and `reload` (clear the view and
+  title caches, read the search index again in the background).
+- `--statuspath` gives the status over HTTP as text; off by default.
+- `mdctl.tcl`: `status`, `reload`; reads the answer to EOF.
+- English doc: control port with `mdctl.tcl` instead of `echo | nc`.
+- Test `head-1` waits for the search index (the title list in the header
+  made GET and HEAD differ in length before and after).
+- Tests: `status-1` to `status-3`, `reload-1` (168 in all).
+
+## 2026-11-05 — mdserver: search speed, search module
+
+- Search index built after the start in steps of at most 50 ms; the first
+  page no longer waits for it (30 000 files: 10 s), a search meanwhile
+  answers with what is read and says how many files are missing (JSON
+  `indexing`).
+- 30 000 files: search 1 s (was 3.5–4.5 s), no hits with "Meinten Sie" 1 s
+  (was 13 s), "Alle Dokumente" 0.8 s (was 4.3 s).
+- The search is its own module, `lib/mdserver/search-0.4.tm` (mixin of
+  `mdserver::Server`); it must lie next to `lib/mdserver-0.4.tm`.
+- Tests: `index-vorab-1`, `index-vorab-2` (164 in all).
+
+## 2026-11-05 — mdserver: listen address, connection limits, page cache
+
+- `--bind` now defaults to `127.0.0.1` (this machine only); `*` or empty
+  means all interfaces, and the start banner then warns.
+- `--maxconn` (200) and `--maxperaddr` (32): over the limit an immediate
+  503 with `Retry-After: 1`; addresses in `--trusted-proxy` are not counted
+  per address.
+- `--viewcache` (32 MB): office and CSV pages are kept until the file's
+  modification time or size changes; a 20 000-row `.xlsx` took 4.5 s on
+  every request, now about 10 ms after the first.
+- Tests: `bind-1b`, `conn-1` to `conn-3`, `parallel-1`, `viewcache-1`;
+  `bind-1` and `start-1` adjusted (162 in all).
+
+## 2026-11-05 — mdserver: symlinks in the lists
+
+- A symlink out of the root showed the title of the `index.md` behind it
+  in the header and sidebar, and its name and description on folder pages
+  and in "Alle Dokumente"; now nothing of it shows.
+- A folder link to its own parent made "Alle Dokumente" and the sidebar
+  check run in a circle; such links are skipped in the lists.
+- `--root` itself a symlink: every page came back 403; the root is now
+  resolved at the start.
+- Tests: `symlink-nav-1` to `symlink-nav-4` (156 in all).
+
+## 2026-11-05 — mdserver: search help
+
+- Result page (`site`): tips with examples from the documents (open on
+  `/?q=`); the query as understood, each part with a link without it;
+  when nothing is found: everywhere, without the minus words, phrases as
+  words, "Meinten Sie" (index words, edit distance <= 2), a note on
+  lower-case `or`/`oder`; counts per type and folder; pages of 50
+  (`&seite=N`).
+- Header: placeholder with an example, `?` to the tips, key `/`, up to 200
+  titles as `<datalist>`.
+- Other styles: the query parts, the help and the pages.
+- JSON: `total`, `page`, `pages`.
+- Hit line `role="status"`, labels with `for`, the choices send the form.
+- Path and snippet only for the hits shown (were made for every hit).
+- Tests: `search-help-1` to `search-a11y-1`.
+
+## 2026-11-05 — README
+
+- `mdstack::parser` is 0.9.2 in the module table.
+
 ## 2026-10-30 — mdserver: office files as a page
 
 - `--office-view auto|0|1`: `.docx`, `.odt`, `.odp` as paragraphs, `.xlsx`,

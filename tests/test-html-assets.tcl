@@ -5,8 +5,13 @@
 if {![info exists ::_setup_done]} {
     lappend ::auto_path [file normalize [file join [file dirname [info script]] .. lib]]
     # docir::util ist eine .tm-Datei -- braucht tcl::tm::path zusaetzlich
-    # zum auto_path. Sibling-Repo: ../../docir/lib/tm
-    foreach p [list \
+    # zum auto_path. Zuerst $DOCIR_HOME (wie tests/_paths.tcl), dann
+    # Sibling-Repo ../../docir/lib/tm, dann ~/lib/tcltk/docir.
+    set _cands {}
+    if {[info exists ::env(DOCIR_HOME)]} {
+        lappend _cands [file join $::env(DOCIR_HOME) lib tm]
+    }
+    foreach p [list {*}$_cands \
         [file normalize [file join [file dirname [info script]] .. .. docir lib tm]] \
         [file normalize [file join $::env(HOME) lib tcltk docir lib tm]]] {
         if {[file isdirectory $p]} {
