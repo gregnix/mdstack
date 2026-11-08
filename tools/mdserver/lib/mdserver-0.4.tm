@@ -586,7 +586,21 @@ oo::class create mdserver::Server {
 
     destructor {
         my stop
+        my _afterCancel
         $_renderer destroy
+    }
+
+    # Cancel this object's pending after scripts (search index steps, ...).
+    # They are [namespace code] scripts in the object's namespace; after
+    # destroy they would fail as a background error:
+    #   namespace "::oo::Obj52" not found
+    method _afterCancel {} {
+        set ns [namespace current]
+        foreach id [after info] {
+            set script [lindex [after info $id] 0]
+            if {[catch {lrange $script 0 2} head]} continue
+            if {$head eq [list ::namespace inscope $ns]} { after cancel $id }
+        }
     }
 
     # Config accessor

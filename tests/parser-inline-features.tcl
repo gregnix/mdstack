@@ -175,6 +175,14 @@ assert "table-mixed: multiple inlines" {[llength $cell] >= 3}
 assert "table-mixed: has strong" {[dict get [lindex $cell 0] type] eq "strong"}
 assert "table-mixed: has code" {[dict get [lindex $cell 2] type] eq "inline_code"}
 
+# Anchors keep letters of any script (umlauts), other runs become "-"
+assert "anchor: umlaut kept" {[mdstack::parser::anchorize "Ausw\u00e4hlen"] eq "ausw\u00e4hlen"}
+assert "anchor: umlaut and sign" {[mdstack::parser::anchorize "Men\u00fc & mehr"] eq "men\u00fc-mehr"}
+assert "anchor: ascii unchanged" {[mdstack::parser::anchorize "Die Ausgabe lesen"] eq "die-ausgabe-lesen"}
+assert "anchor: only signs" {[mdstack::parser::anchorize "& ?"] eq "section"}
+set ast [mdstack::parser::parse "## Gr\u00f6\u00dfe \u00e4ndern"]
+assert "anchor: heading with umlauts" {[dict get [lindex [dict get $ast blocks] 0] anchor] eq "gr\u00f6\u00dfe-\u00e4ndern"}
+
 # ============================================================
 # Result
 # ============================================================

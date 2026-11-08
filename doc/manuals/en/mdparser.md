@@ -244,7 +244,11 @@ Returns the capability token list (`blocks:html_block`, `blocks:math_block`,
 
 ### `mdstack::parser::anchorize title`
 
-Heading text → anchor id.
+Heading text → anchor id: lower case, every run of characters that are
+not letters or digits becomes `-`, leading and trailing `-` removed; an
+empty result is `section`. Letters of any script count, so umlauts stay:
+`Auswählen` → `auswählen`, `Menü & mehr` → `menü-mehr` (as on GitHub).
+Until 2026-11-07 only `a-z0-9` counted (`ausw-hlen`, `men-mehr`).
 
 ---
 

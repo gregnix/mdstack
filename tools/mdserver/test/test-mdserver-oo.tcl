@@ -624,6 +624,24 @@ test bind-1 "--bind * horcht auf allen Schnittstellen" -constraints hatLan -setu
     $srv destroy
 } -result {1 1}
 
+test destroy-1 "destroy gleich nach start: kein Hintergrundfehler aus dem Suchindex" -setup {
+    set ::__bg {}
+    set altBg [interp bgerror {}]
+    interp bgerror {} [list apply {{msg opts} { lappend ::__bg $msg }}]
+} -body {
+    set p [freierPort]
+    set srv [mdserver::Server new -root $testDir -port $p -log 0]
+    $srv start
+    $srv destroy
+    # der Suchindex startet nach 300 ms
+    after 600 {set ::__warte 1}
+    vwait ::__warte
+    set ::__bg
+} -cleanup {
+    interp bgerror {} $altBg
+    unset -nocomplain ::__bg ::__warte
+} -result {}
+
 test bind-1b "ohne --bind bleibt der Port auf diesem Rechner" -setup {
     set p [freierPort]
     set srv [mdserver::Server new -root $testDir -port $p -log 0]
@@ -894,6 +912,25 @@ proc kopfwert {antwort name} {
 # wenn jemand --help aufruft -- die 80 anderen Tests blieben gruen, weil keiner
 # das Startskript als Programm ausfuehrt. Gefunden hat ihn das Nachmessen von
 # Hand, nicht die Suite. Jetzt die Suite.
+# Eine Option ohne Wert am Ende war still leer: "--bind" allein band an alle
+# Schnittstellen. Eine vertippte Option wurde still uebergangen.
+proc cliLauf {args} {
+    set skript [file normalize [file join [file dirname [info script]] .. mdserver.tcl]]
+    set rc [catch {exec [info nameofexecutable] $skript {*}$args} ausgabe]
+    list $rc [lindex [split $ausgabe \n] 0]
+}
+test cli-1 "Option ohne Wert am Ende bricht ab" -body {
+    cliLauf --root . --bind
+} -result {1 {ERROR: --bind braucht einen Wert (siehe --help)}}
+
+test cli-2 "naechste Option ist kein Wert" -body {
+    cliLauf --bind --port 8099
+} -result {1 {ERROR: --bind braucht einen Wert, nicht die Option "--port" (siehe --help)}}
+
+test cli-3 "unbekannte Option bricht ab" -body {
+    cliLauf --root . --bnid 127.0.0.1
+} -result {1 {ERROR: unbekannte Option "--bnid" (siehe --help)}}
+
 test hilfe-1 "--help laeuft durch und nennt jede Option" -body {
     set skript [file normalize [file join [file dirname [info script]] .. mdserver.tcl]]
     set rc [catch {exec [info nameofexecutable] $skript --help} ausgabe]

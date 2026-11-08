@@ -49,6 +49,9 @@
 # API:
 #   mdstack::viewer::gotoAnchor $path $anchor  → scrolls to heading anchor (1/0)
 #   mdstack::viewer::anchors $path             → list of all anchor names
+#   mdstack::viewer::headings $path            → {level anchor text} per heading
+#   mdstack::viewer::toc $path $tree           → fills a ttk::treeview with the
+#                                                headings, click jumps there
 #   mdstack::viewer::setFontSize $path $size   → reconfigure all tag fonts
 #
 package require Tcl 8.6-
@@ -57,7 +60,7 @@ package provide mdstack::viewer 0.4
 
 namespace eval mdstack::viewer {
     namespace export create widget clear render renderModel configure cget \
-        gotoAnchor anchors setFontSize
+        gotoAnchor anchors headings toc setFontSize
     variable state
     array set state {}
 }
@@ -89,7 +92,9 @@ proc mdstack::viewer::create {path args} {
     set state($path,onclick) ""
     set state($path,fontsize) 10
     set state($path,tablemode) "text"
-    set state($path,tableFrameMax) 12
+    set state($path,tableFrameMax) 100
+    set state($path,listDepth) 0
+    set state($path,headings) {}
     set state($path,tableCounter) 0
 
     # Create named fonts (per instance, for independent font size)
@@ -171,6 +176,13 @@ proc mdstack::viewer::clear {path} {
     }
     set state($path,images) {}
     set state($path,quoteDepth) 0
+    set state($path,listDepth) 0
+    set state($path,headings) {}
+    # list indents are measured with the font of this render; drop them so
+    # a changed font size gets new ones
+    foreach tg [lsearch -all -inline -glob [$t tag names] listind_*] {
+        $t tag delete $tg
+    }
 }
 
 proc mdstack::viewer::render {path ast} {
@@ -209,9 +221,12 @@ proc mdstack::viewer::renderBlock {path block} {
             set tag "h$level"
             # Anchor mark for navigation
             if {[dict exists $block anchor]} {
+                variable state
                 set anchor [dict get $block anchor]
                 $t mark set "anchor_$anchor" "end -1 chars"
                 $t mark gravity "anchor_$anchor" left
+                lappend state($path,headings) [list $level $anchor \
+                    [mdstack::viewer::inlinesToText [dict get $block content]]]
             }
             # Inline-Formatierung in Headings (bold, italic, code etc.)
             set start [$t index "end -1 chars"]
@@ -226,10 +241,17 @@ proc mdstack::viewer::renderBlock {path block} {
             $t tag add para $paraStart "end -1 chars"
         }
         list {
+            variable state
             set ordered [expr {[dict get $block style] eq "ordered"}]
             set idx 1
             set listStart [$t index "end -1 chars"]
+            # Nesting depth: each level is indented further, and a wrapped
+            # item continues under its text, not under the bullet.
+            set outerDepth $state($path,listDepth)
+            set depth [expr {$outerDepth + 1}]
+            set state($path,listDepth) $depth
             foreach item [dict get $block items] {
+                set lineStart [$t index "end -1 chars"]
                 # Task List Support
                 if {[dict exists $item checked]} {
                     set checked [dict get $item checked]
@@ -239,13 +261,15 @@ proc mdstack::viewer::renderBlock {path block} {
                     set prefix "${idx}. "
                     set checked -1
                 } else {
-                    set prefix "• "
+                    # bullet per nesting level: • ◦ ▪ ▸, then again
+                    set prefix "[lindex {\u2022 \u25e6 \u25aa \u25b8} [expr {($depth - 1) % 4}]] "
                     set checked -1
                 }
                 $t insert end $prefix listprefix
                 set itemStart [$t index "end -1 chars"]
                 # Render item blocks (first paragraph inline, rest as blocks)
                 set first 1
+                set subType ""
                 foreach subBlock [dict get $item blocks] {
                     set subType [dict get $subBlock type]
                     if {$first && $subType eq "paragraph"} {
@@ -261,9 +285,16 @@ proc mdstack::viewer::renderBlock {path block} {
                 if {$checked == 1} {
                     $t tag add taskdone $itemStart "end -1 chars"
                 }
-                $t insert end "\n"
+                # a nested list as last block already ends the line
+                if {$subType ne "list"} { $t insert end "\n" }
+                set itag [mdstack::viewer::listIndentTag $path $depth $prefix]
+                $t tag add $itag $lineStart "end -1 chars"
+                # Lowest priority: a nested list (tagged before, lowered
+                # before) keeps its own, deeper indent.
+                $t tag lower $itag
                 incr idx
             }
+            set state($path,listDepth) $outerDepth
             $t tag add listblock $listStart "end -1 chars"
         }
         code_block {
@@ -469,6 +500,20 @@ proc mdstack::viewer::renderBlock {path block} {
             # ignore unknown blocks
         }
     }
+}
+
+# listIndentTag path depth prefix -> tag with the margins for a list item:
+# the bullet at 4 + 22 px per level, wrapped lines under the text after the
+# prefix ("• ", "12. ", "☐ "). One tag per depth and prefix width.
+proc mdstack::viewer::listIndentTag {path depth prefix} {
+    set t [mdstack::viewer::widget $path]
+    set w [font measure [$t cget -font] $prefix]
+    set tag "listind_${depth}_$w"
+    if {$tag ni [$t tag names]} {
+        set l1 [expr {4 + ($depth - 1) * 22}]
+        $t tag configure $tag -lmargin1 $l1 -lmargin2 [expr {$l1 + $w}]
+    }
+    return $tag
 }
 
 proc mdstack::viewer::renderInlines {path inlines {parentFormatTag ""}} {
@@ -762,6 +807,41 @@ proc mdstack::viewer::anchors {path} {
 # Fontsize-Steuerung
 # ============================================================
 
+# headings path -> {level anchor text} for each heading of the last render,
+# in document order
+proc mdstack::viewer::headings {path} {
+    variable state
+    return $state($path,headings)
+}
+
+# toc path tree -> fills the ttk::treeview tree with the headings of the
+# last render, nested by level (item id = anchor), and binds a selection to
+# gotoAnchor. Returns the number of entries. Call again after a new render.
+proc mdstack::viewer::toc {path tree} {
+    $tree delete [$tree children {}]
+    array set parent {0 {}}
+    set n 0
+    foreach h [mdstack::viewer::headings $path] {
+        lassign $h level anchor text
+        if {[$tree exists $anchor]} continue
+        set up {}
+        for {set l [expr {$level - 1}]} {$l >= 0} {incr l -1} {
+            if {[info exists parent($l)]} { set up $parent($l) ; break }
+        }
+        $tree insert $up end -id $anchor -text $text -open 1
+        set parent($level) $anchor
+        foreach k [array names parent] {
+            if {$k > $level} { unset parent($k) }
+        }
+        incr n
+    }
+    bind $tree <<TreeviewSelect>> [list apply {{path tree} {
+        set sel [$tree selection]
+        if {$sel ne ""} { mdstack::viewer::gotoAnchor $path $sel }
+    }} $path $tree]
+    return $n
+}
+
 proc mdstack::viewer::setFontSize {path size} {
     # Sets base font size. Named fonts propagate automatically
     # to all tags and widgets that reference them.
@@ -1009,7 +1089,7 @@ proc mdstack::viewer::renderTable {path block} {
         }
     }
 
-    # Min 3, Max 40 Zeichen pro Spalte
+    # Min 3, max 40 characters per column; longer cells wrap (renderTableRow)
     set maxColWidth 40
     for {set c 0} {$c < $cols} {incr c} {
         set w [lindex $widths $c]
@@ -1021,18 +1101,8 @@ proc mdstack::viewer::renderTable {path block} {
     # Header rendern
     if {$hasHeader} {
         set headerRow [lindex $rowNodes 0]
-        $t insert end "│" tableheader
-        for {set c 0} {$c < $cols} {incr c} {
-            set w [lindex $widths $c]
-            set align [lindex $alignments $c]
-            $t insert end " " tableheader
-            set cellInlines [dict get [lindex [dict get $headerRow content] $c] content]
-            mdstack::viewer::renderTableCell $path \
-                $cellInlines \
-                [lindex $headerRowText $c] $w $align tableheader
-            $t insert end " │" tableheader
-        }
-        $t insert end "\n"
+        mdstack::viewer::renderTableRow $path $headerRow $headerRowText \
+            $widths $alignments tableheader
 
         # Separator
         $t insert end "├" hr
@@ -1047,34 +1117,89 @@ proc mdstack::viewer::renderTable {path block} {
     # Body-Rows rendern
     set ri 0
     foreach row $bodyRowNodes {
-        set rowText [lindex $bodyRowsText $ri]
-        $t insert end "│" tablecell
+        mdstack::viewer::renderTableRow $path $row [lindex $bodyRowsText $ri] \
+            $widths $alignments tablecell
+        incr ri
+    }
+}
+
+# wrapText text width -> lines of at most width characters, broken at
+# spaces; a word longer than width is split.
+proc mdstack::viewer::wrapText {text width} {
+    set lines {}
+    set cur ""
+    foreach word [split [string trim $text] " "] {
+        if {$word eq ""} continue
+        while {[string length $word] > $width} {
+            if {$cur ne ""} { lappend lines $cur ; set cur "" }
+            lappend lines [string range $word 0 $width-1]
+            set word [string range $word $width end]
+        }
+        if {$cur eq ""} {
+            set cur $word
+        } elseif {[string length $cur] + 1 + [string length $word] <= $width} {
+            append cur " " $word
+        } else {
+            lappend lines $cur
+            set cur $word
+        }
+    }
+    if {$cur ne "" || ![llength $lines]} { lappend lines $cur }
+    return $lines
+}
+
+# One table row in text mode. A cell that fits its column keeps its inline
+# formatting; a longer one is wrapped over several lines as plain text, so
+# nothing is cut off. rowText: plain text per cell.
+proc mdstack::viewer::renderTableRow {path row rowText widths alignments tag} {
+    set t [mdstack::viewer::widget $path]
+    set cells [dict get $row content]
+    set cols [llength $widths]
+    set wrapped {}
+    set nLines 1
+    for {set c 0} {$c < $cols} {incr c} {
+        set raw [string trim [lindex $rowText $c]]
+        set w [lindex $widths $c]
+        if {[string length $raw] > $w} {
+            set ls [mdstack::viewer::wrapText $raw $w]
+            if {[llength $ls] > $nLines} { set nLines [llength $ls] }
+            lappend wrapped $ls
+        } else {
+            lappend wrapped ""
+        }
+    }
+    for {set k 0} {$k < $nLines} {incr k} {
+        $t insert end "│" $tag
         for {set c 0} {$c < $cols} {incr c} {
             set w [lindex $widths $c]
             set align [lindex $alignments $c]
-            $t insert end " " tablecell
-            set cellInlines [dict get [lindex [dict get $row content] $c] content]
-            set rawCell [string trim [lindex $rowText $c]]
-
-            # Image-Cell direkt rendern (1 Inline vom Typ image)
-            if {[llength $cellInlines] == 1 \
-                    && [dict get [lindex $cellInlines 0] type] eq "image"} {
-                set img0 [lindex $cellInlines 0]
-                set url [dict get $img0 url]
-                set alt [expr {[dict exists $img0 alt] ? [dict get $img0 alt] : ""}]
-                if {[mdstack::viewer::loadImage $path $url img 40]} {
-                    $t image create end -image $img
-                } else {
-                    $t insert end [mdstack::viewer::alignText "\[$alt\]" $w $align] tablecell
-                }
+            set ls [lindex $wrapped $c]
+            $t insert end " " $tag
+            if {[llength $ls]} {
+                $t insert end [mdstack::viewer::alignText [lindex $ls $k] $w $align] $tag
+            } elseif {$k > 0} {
+                $t insert end [string repeat " " $w] $tag
             } else {
-                mdstack::viewer::renderTableCell $path \
-                    $cellInlines $rawCell $w $align tablecell
+                set cellInlines [dict get [lindex $cells $c] content]
+                set raw [string trim [lindex $rowText $c]]
+                # Image cell (1 inline of type image)
+                if {$tag eq "tablecell" && [llength $cellInlines] == 1 \
+                        && [dict get [lindex $cellInlines 0] type] eq "image"} {
+                    set img0 [lindex $cellInlines 0]
+                    set url [dict get $img0 url]
+                    set alt [expr {[dict exists $img0 alt] ? [dict get $img0 alt] : ""}]
+                    if {[mdstack::viewer::loadImage $path $url img 40]} {
+                        $t image create end -image $img
+                    } else {
+                        $t insert end [mdstack::viewer::alignText "\[$alt\]" $w $align] $tag
+                    }
+                } else {
+                    mdstack::viewer::renderTableCell $path $cellInlines $raw $w $align $tag
+                }
             }
-            $t insert end " │" tablecell
+            $t insert end " │" $tag
         }
         $t insert end "\n"
-        incr ri
     }
 }
 
@@ -1090,7 +1215,13 @@ proc mdstack::viewer::renderTable {path block} {
 proc mdstack::viewer::_wheelToText {t w} {
     # Prefer the shared tkutils helper when available (DRY); fall back to an
     # inline implementation so mdstack stays usable without tkutils.
-    if {![catch {package require tkutils::tkuwheel}]} {
+    # Asked once: a failing package require searches the whole auto_path,
+    # and this runs for every table cell (100 rows: 6 s instead of 0.5 s).
+    variable wheelHelper
+    if {![info exists wheelHelper]} {
+        set wheelHelper [expr {![catch {package require tkutils::tkuwheel}]}]
+    }
+    if {$wheelHelper} {
         ::tkutils::tkuwheel::redirect $t $w
         return
     }
@@ -1195,6 +1326,10 @@ proc mdstack::viewer::renderTableFrame {path block} {
                     [list $tf.c${r}_$c configure -font ${fp}_body]
                 bind $tf.c${r}_$c <Leave> \
                     [list $tf.c${r}_$c configure -font ${fp}_body]
+            } elseif {[mdstack::viewer::hasLink $cellInlines]} {
+                # Text and links mixed: one label per piece, links clickable
+                mdstack::viewer::frameCellMixed $path $tf.c${r}_$c \
+                    $cellInlines $bg $anchor
             } else {
                 # Normale Zelle
                 label $tf.c${r}_$c -text $text -font ${fp}_body \
@@ -1215,6 +1350,61 @@ proc mdstack::viewer::renderTableFrame {path block} {
     # keep wheel scrolling working while the pointer is over the embedded table
     mdstack::viewer::_wheelToText $t $tf
     $t insert end "\n"
+}
+
+# Does a cell have a link among its inlines? (top level; a link inside
+# emphasis stays plain text, as before)
+proc mdstack::viewer::hasLink {inlines} {
+    foreach n $inlines {
+        if {[dict get $n type] eq "link"} { return 1 }
+    }
+    return 0
+}
+
+# A frame-mode cell with text and links: a frame of labels side by side,
+# plain runs as one label each, every link its own clickable label.
+proc mdstack::viewer::frameCellMixed {path w inlines bg anchor} {
+    set fp [mdstack::viewer::fontPrefix $path]
+    frame $w -bg $bg -padx 8 -pady 3
+    set i 0
+    set run ""
+    set pieces {}
+    foreach n $inlines {
+        if {[dict get $n type] eq "link"} {
+            if {$run ne ""} { lappend pieces [list text $run] ; set run "" }
+            lappend pieces [list link \
+                [mdstack::viewer::inlinesToText [dict get $n label]] \
+                [dict get $n url]]
+        } else {
+            append run [mdstack::viewer::inlinesToText [list $n]]
+        }
+    }
+    if {$run ne ""} { lappend pieces [list text $run] }
+    foreach pc $pieces {
+        set l $w.p[incr i]
+        if {[lindex $pc 0] eq "text"} {
+            label $l -text [lindex $pc 1] -font ${fp}_body -bg $bg \
+                -padx 0 -pady 0 -borderwidth 0
+        } else {
+            set resolved [mdstack::viewer::resolveUrl $path [lindex $pc 2]]
+            label $l -text [lindex $pc 1] -font ${fp}_body -bg $bg \
+                -fg #0066cc -cursor hand2 -padx 0 -pady 0 -borderwidth 0
+            if {[mdstack::viewer::isPdf $resolved]} {
+                bind $l <Button-1> [list mdstack::viewer::dispatchPdf $path $resolved]
+            } else {
+                bind $l <Button-1> [list mdstack::viewer::dispatchLink $path $resolved]
+            }
+        }
+        pack $l -side left
+    }
+    if {$anchor eq "e"} {
+        # right aligned: the same pieces, packed from the right
+        foreach c [lreverse [winfo children $w]] {
+            pack forget $c
+            pack $c -side right
+        }
+    }
+    return $w
 }
 
 proc mdstack::viewer::alignToAnchorFrame {align} {

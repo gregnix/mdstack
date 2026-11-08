@@ -20,11 +20,11 @@ The module:
 | Paragraphs | Normal text with typographic spacing |
 | Unordered lists | Bullet symbols `• ◦ ▪ ▸` per nesting level |
 | Ordered lists | `1.` `2.` numbering |
-| Nested lists | Visual indentation, arbitrary depth |
+| Nested lists | Indented 22 px per level, arbitrary depth; wrapped items continue under their text |
 | Task lists | ☑ / ☐ symbols |
 | Definition lists | Term in **bold**, definitions with `—` prefix |
 | Code blocks | Monospace font + background color |
-| Tables | Box-drawing (`│ ├ ┼`) with column alignment |
+| Tables | Text mode: box-drawing (`│ ├ ┼`) with column alignment, columns up to 40 characters, longer cells wrap. Frame mode (`-tablemode frame`): one label per cell, proportional font; text and links in one cell stay clickable |
 | Blockquotes | `│` prefix per nesting level + italic text |
 | Fenced divs | Inner blocks rendered recursively |
 | Images | Real image or `[alt]` fallback |
@@ -61,6 +61,8 @@ pack $v -fill both -expand 1
 | `-onlink` | `""` | Callback on link click (receives URL) |
 | `-onclick` | `""` | Callback on any click (receives x y index tags lineText) |
 | `-fontsize` | `10` | Base font size in points |
+| `-tablemode` | `text` | `text` or `frame` (see Tables) |
+| `-tableframemax` | `100` | In frame mode, tables with more rows are drawn in text mode (one widget per cell gets slow) |
 
 ---
 
@@ -112,6 +114,27 @@ mdstack::viewer::gotoAnchor $v "installation"
 ### `mdstack::viewer::anchors path`
 
 Returns a list of all anchor names in the current document.
+
+---
+
+### `mdstack::viewer::headings path`
+
+Returns `{level anchor text}` for each heading of the last render, in
+document order.
+
+---
+
+### `mdstack::viewer::toc path tree`
+
+Fills a `ttk::treeview` with the headings of the last render, nested by
+level (item id = anchor). Selecting an item scrolls the viewer there.
+Returns the number of entries; call again after a new render.
+
+```tcl
+ttk::treeview .toc -show tree
+mdstack::viewer::render $v $ast
+mdstack::viewer::toc $v .toc
+```
 
 ---
 

@@ -3032,9 +3032,12 @@ proc mdstack::parser::parseInlines {s} {
 # Utilities
 # ============================================================
 
+# Heading text -> anchor: lower case, every run of characters that are not
+# letters or digits becomes "-". Letters of any script count, so umlauts
+# stay ("Ausw\u00e4hlen" -> "ausw\u00e4hlen", as on GitHub).
 proc mdstack::parser::anchorize {s} {
     set a [string tolower $s]
-    regsub -all {[^a-z0-9]+} $a "-" a
+    regsub -all {[^[:alnum:]]+} $a "-" a
     set a [string trim $a "-"]
     if {$a eq ""} { return "section" }
     return $a

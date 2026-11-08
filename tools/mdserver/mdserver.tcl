@@ -33,12 +33,32 @@ if {[catch {package require mdserver 0.4} err]} {
 # CLI -- parse arguments
 # ============================================================
 
+# cliError msg -- message on stderr, exit code 1 (before the server starts)
+proc cliError {msg} {
+    puts stderr "ERROR: $msg"
+    exit 1
+}
+
+# optValue argv iVar opt -> the value after option opt; advances i.
+# A missing value, or a value that is the next option, is an error: a bare
+# "--bind" at the end used to mean an empty address, i.e. all interfaces.
+proc optValue {argv iVar opt} {
+    upvar 1 $iVar i
+    incr i
+    if {$i >= [llength $argv]} { cliError "$opt braucht einen Wert (siehe --help)" }
+    set v [lindex $argv $i]
+    if {[string match --* $v]} {
+        cliError "$opt braucht einen Wert, nicht die Option \"$v\" (siehe --help)"
+    }
+    return $v
+}
+
 proc parseArgs {argv} {
     set args {}
     set i 0
     while {$i < [llength $argv]} {
         set arg [lindex $argv $i]
-        switch $arg {
+        switch -- $arg {
             --port    -
             --bind    -
             --maxconn -
@@ -61,20 +81,20 @@ proc parseArgs {argv} {
             --navbg   -
             --navfg   -
             --navmax  -
-            --tlsport { lappend args $arg [lindex $argv [incr i]] }
+            --tlsport { lappend args $arg [optValue $argv i $arg] }
             --no-log  { lappend args --log 0 }
-            --pdf-search { lappend args --pdfsearch [lindex $argv [incr i]] }
-            --pdf-cache  { lappend args --pdfcache [lindex $argv [incr i]] }
-            --pdf-worker { lappend args --pdfworker [lindex $argv [incr i]] }
-            --office-search { lappend args --officesearch [lindex $argv [incr i]] }
-            --csv-view   { lappend args --csvview [lindex $argv [incr i]] }
-            --office-view { lappend args --officeview [lindex $argv [incr i]] }
+            --pdf-search { lappend args --pdfsearch [optValue $argv i $arg] }
+            --pdf-cache  { lappend args --pdfcache [optValue $argv i $arg] }
+            --pdf-worker { lappend args --pdfworker [optValue $argv i $arg] }
+            --office-search { lappend args --officesearch [optValue $argv i $arg] }
+            --csv-view   { lappend args --csvview [optValue $argv i $arg] }
+            --office-view { lappend args --officeview [optValue $argv i $arg] }
             --trusted-proxy {
                 # Der Konstruktor macht aus "--x" den Schluessel "x"; sein
                 # Schluessel heisst trustedproxy, in einem Wort wie alle
                 # anderen. Mehrere Adressen als eine Liste:
                 #   --trusted-proxy "127.0.0.1 10.0.0.5"
-                lappend args --trustedproxy [lindex $argv [incr i]]
+                lappend args --trustedproxy [optValue $argv i $arg]
             }
             --help {
                 puts "Usage: tclsh mdserver.tcl \[options\]"
@@ -134,6 +154,9 @@ proc parseArgs {argv} {
                 puts "Troubleshooting:"
                 puts "  Port belegt: fuser -k 8080/tcp"
                 exit 0
+            }
+            default {
+                cliError "unbekannte Option \"$arg\" (siehe --help)"
             }
         }
         incr i

@@ -1,5 +1,39 @@
 # mdstack — Changelog
 
+## 2026-11-07 — mdserver: destroy, command line
+
+- `destroy` cancels the server's pending `after` scripts (search index
+  steps). Before, a server destroyed within 300 ms of `start` left a
+  background error `namespace "::oo::ObjNN" not found` (seen in the tests).
+- `mdserver.tcl`: an option without a value stops with an error; before, a
+  bare `--bind` at the end meant an empty address, i.e. all interfaces.
+  The next option is not taken as a value (`--bind --port 8099`).
+- `mdserver.tcl`: an unknown option stops with an error; before, it was
+  ignored (`--bnid`).
+- Tests: `destroy-1`, `cli-1` to `cli-3`.
+
+## 2026-11-07 — viewer: lists, tables, table of contents; parser: anchors
+
+- **Anchors keep letters of any script:** `anchorize` turns `Auswählen`
+  into `auswählen` (was `ausw-hlen`), `Menü` into `menü` (was `men`). Links
+  to such headings with the old anchor must be changed.
+- Viewer, lists: indented per level (22 px), bullet per level `• ◦ ▪ ▸`;
+  a wrapped item continues under its text; no empty line after a nested
+  list at the end of an item.
+- Viewer, text tables: a cell longer than its column (max. 40) wraps over
+  several lines instead of being cut off with `…`.
+- Viewer, frame tables: text and links in one cell, the links stay
+  clickable; the wheel helper (`tkutils::tkuwheel`) is looked up once
+  instead of once per cell (without tkutils, 100 rows took 6 s, now
+  0.4 s); `-tableframemax` default 100 (was 12).
+- Viewer: `headings` and `toc` (fills a `ttk::treeview`, click jumps to
+  the heading).
+- `tests/viewer.tcl` puts the repository's `lib` in front of `auto_path`,
+  so an installed mdstack of the same version no longer shadows it;
+  `viewer-0.1` checks that.
+- Tests: `viewer-0.1`, `viewer-6.1` to `viewer-10.3`, five anchor checks in
+  `parser-inline-features.tcl`.
+
 ## 2026-11-05 — mdserver: view module
 
 - Office and CSV as a page in their own module, `lib/mdserver/view-0.4.tm`
